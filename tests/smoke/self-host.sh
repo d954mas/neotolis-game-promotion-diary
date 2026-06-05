@@ -502,4 +502,62 @@ source "$(dirname "$0")/lib/reddit-polling-flow.sh"
 reddit_polling_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
 log "=== Reddit adapter smoke extension PASSED ==="
 
+# ============================================================
+# Instagram not-configured parity (Phase 08 — SOC-05 / SOC-03)
+# ============================================================
+# The baseline smoke run boots the production image with NO
+# INSTAGRAM_PROVIDER / SCRAPECREATORS_API_KEY in common_env_args, so the
+# Instagram adapter is registered+functional but reports
+# isOperatorConfigured=false. This is the load-bearing self-host trust
+# signal: a self-host operator who hasn't wired a provider gets a CLEANLY
+# DISABLED Instagram — identical to SaaS — NOT a 500 and NOT an enabled
+# import path. Mirrors the Reddit Half-A empty-env parity check.
+#
+# No live ScrapeCreators API is hit (mirrors the YouTube-mock / no-live-API
+# discipline): createSource degrades BEFORE any provider call, so the 422
+# never touches the network.
+log "=== Instagram not-configured parity (SOC-05) ==="
+
+# IG.1: POST /api/sources with an instagram_account handle and the provider
+# env unset → 422 kind_not_configured (the createSource degrade gate), never
+# a 500, never a created row. The chip is disabled in the UI; the API is the
+# server-side guard the smoke gate pins.
+IG_CREATE_BODY=$(curl -sS -o /tmp/ig-create.txt -w '%{http_code}' \
+  -X POST "http://localhost:$APP_PORT/api/sources" \
+  -H "cookie: $SESSION_COOKIE_A" \
+  -H "content-type: application/json" \
+  -d '{"kind":"instagram_account","handleUrl":"https://www.instagram.com/natgeo/","isOwnedByMe":false,"autoImport":true}' \
+  || echo "curl-failed")
+IG_CREATE_RESPONSE=$(cat /tmp/ig-create.txt 2>/dev/null || echo "")
+if [[ "$IG_CREATE_BODY" != "422" ]]; then
+  log "----- POST /api/sources (instagram_account) response -----"
+  echo "$IG_CREATE_RESPONSE"
+  log "----- recent app logs -----"
+  docker logs smoke-app 2>&1 | tail -40 || true
+  log "----------------------------------------------------------"
+  fail "(IG.1) instagram_account create with empty provider env returned $IG_CREATE_BODY, expected 422 (clean not-configured degrade, never 500)"
+fi
+if ! echo "$IG_CREATE_RESPONSE" | grep -q 'kind_not_configured'; then
+  log "----- POST /api/sources (instagram_account) response -----"
+  echo "$IG_CREATE_RESPONSE"
+  fail "(IG.1) instagram_account 422 body did not carry 'kind_not_configured'. Got: $IG_CREATE_RESPONSE"
+fi
+log "(IG.1) PASS — instagram_account create degrades to 422 kind_not_configured (no 500, no provider call)"
+
+# IG.2: /sources/new HTML renders Instagram visible-but-disabled with the
+# "not configured by operator" status — the user-facing affordance that
+# tells a self-host operator Instagram is off + how to enable it (SOC-05).
+# /sources/new is the full-page add-source form, so the disabled IG chip +
+# its status render inline at SSR (the /sources modal is closed by default,
+# so its chip markup isn't in that page's initial HTML).
+IG_SOURCES_HTML=$(curl -sL -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/sources/new" 2>/dev/null || true)
+if ! echo "$IG_SOURCES_HTML" | grep -qi 'not configured by operator'; then
+  log "----- /sources/new HTML (first 1500 chars) -----"
+  echo "${IG_SOURCES_HTML:0:1500}"
+  log "------------------------------------------------"
+  fail "(IG.2) /sources/new HTML should render the Instagram 'not configured by operator' disabled status with empty provider env"
+fi
+log "(IG.2) PASS — /sources/new renders Instagram disabled ('not configured by operator')"
+log "=== Instagram not-configured parity PASSED ==="
+
 log "ALL SMOKE ASSERTIONS PASSED"
