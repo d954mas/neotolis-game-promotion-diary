@@ -78,7 +78,17 @@ groups:
 
       - uid: scrape-target-down
         title: "Scrape Target Down (up == 0)"
-        condition: A
+        # Two-stage (mirrors escaped-error-logs): A = the raw `up` gauge,
+        # B = explicit threshold "up < 1". The OLD form used `up == 0` as a
+        # bare condition with noDataState: Alerting — when the app was healthy
+        # (up=1) the `== 0` filter returned EMPTY, Grafana read that as NoData,
+        # and noDataState: Alerting FIRED a critical alert on a HEALTHY app
+        # (false-positive that fired continuously for ~22h). Explicit threshold
+        # removes the implicit reduce-of-a-bare-comparison ambiguity:
+        #   up=1                → 1, not < 1 → Normal (silent)
+        #   up=0 (scrape fails, target present) → 0 < 1 → fires after for:2m
+        #   no `up` sample at all (Prometheus blind) → NoData → OK
+        condition: B
         data:
           - refId: A
             relativeTimeRange:
@@ -86,13 +96,29 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: up{job="neotolis-app"} == 0
-              instant: false
+              expr: up{job="neotolis-app"}
+              instant: true
               intervalMs: 15000
               refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              refId: B
         for: 2m
-        noDataState: Alerting
-        execErrState: Alerting
+        noDataState: OK
+        execErrState: OK
         annotations:
           summary: "Prometheus cannot scrape the app — container may be down or /metrics unreachable"
         labels:
