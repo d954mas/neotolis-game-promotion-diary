@@ -64,7 +64,10 @@ const MEDIA_ITEM = z.object({
   ig_play_count: z.number().nullable().optional(),
   caption: CAPTION,
   image_versions2: IMAGE_VERSIONS2,
-  video_versions: z.array(z.object({ url: z.string() })).nullable().optional(),
+  video_versions: z
+    .array(z.object({ url: z.string() }))
+    .nullable()
+    .optional(),
 });
 
 type MediaItem = z.infer<typeof MEDIA_ITEM>;

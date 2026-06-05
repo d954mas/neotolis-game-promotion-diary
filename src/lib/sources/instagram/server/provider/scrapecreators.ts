@@ -10,16 +10,15 @@
 //
 // Imports are deliberately narrow: env + http.ts + normalize.ts. It must NOT
 // import from src/lib/server/services or src/lib/server/http/routes — review +
-// the SOC-02 grep (x-api-key appears in exactly one file) enforce the boundary.
+// the SOC-02 boundary enforce it. The actual `x-api-key` request header is set
+// inside http.ts instagramFetch (header concerns belong in the HTTP wrapper,
+// mirroring youtube/server/http.ts); this provider only chooses endpoints +
+// cursors and never re-issues raw fetch.
 
 import { env } from "$lib/server/config/env.js";
 import { instagramFetch } from "../http.js";
 import { normalizePostsResponse, normalizeReelsResponse } from "../normalize.js";
-import type {
-  ProviderPage,
-  SocialPlatform,
-  SocialProvider,
-} from "$lib/sources/social-provider.js";
+import type { ProviderPage, SocialPlatform, SocialProvider } from "$lib/sources/social-provider.js";
 
 // LIVE-CONFIRMED endpoint shapes (08-SPIKE.md):
 //   posts: /v2/instagram/user/posts?handle=&next_max_id=  (cursor top-level)
@@ -63,9 +62,7 @@ export const scrapeCreatorsProvider: SocialProvider = {
     opts: { kindFilter?: "posts" | "reels" },
   ): Promise<ProviderPage> {
     const wantReels = opts.kindFilter === "reels";
-    const url = new URL(
-      `${env.SCRAPECREATORS_BASE_URL}${wantReels ? REELS_PATH : POSTS_PATH}`,
-    );
+    const url = new URL(`${env.SCRAPECREATORS_BASE_URL}${wantReels ? REELS_PATH : POSTS_PATH}`);
     url.searchParams.set("handle", handle);
     if (cursor !== null) {
       // Posts paginate on next_max_id; reels on max_id — the divergence is in

@@ -24,7 +24,12 @@ export interface NormalizedPost {
    * this content type is `null`, never `0`. `shares` is ALWAYS null for
    * Instagram (no share field in either endpoint, 08-SPIKE.md).
    */
-  metrics: { views: number | null; likes: number | null; comments: number | null; shares: number | null };
+  metrics: {
+    views: number | null;
+    likes: number | null;
+    comments: number | null;
+    shares: number | null;
+  };
   /** D-09 title = first line; full caption → notes/metadata. `null` when the post is caption-less. */
   caption: string | null;
   /** D-08 hotlink; the CDN URL expires, so consumers re-resolve on demand. */
