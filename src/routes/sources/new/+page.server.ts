@@ -3,6 +3,7 @@ import { fail, redirect } from "@sveltejs/kit";
 import { allAdapters, getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { createSource } from "$lib/server/services/data-sources.js";
 import { AppError } from "$lib/server/services/errors.js";
+import { env } from "$lib/server/config/env.js";
 
 /**
  * /sources/new loader — full-page form for adding a data source.
@@ -32,10 +33,19 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const redditOperatorConfigured = hasAdapter("reddit_account")
     ? getAdapter("reddit_account").observability.auth.isOperatorConfigured
     : false;
+  // SOC-05: instagram_account is functional but gated on the operator's
+  // provider env. Disabled-but-visible chip + env hint when unconfigured
+  // (same shape Reddit uses for empty REDDIT_USER_AGENT).
+  const instagramConfigured = hasAdapter("instagram_account")
+    ? getAdapter("instagram_account").observability.auth.isOperatorConfigured
+    : false;
   return {
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
     redditOperatorConfigured,
+    instagramConfigured,
+    // BACK-01: post-cap ceiling for the BackfillPicker honesty note.
+    socialBackfillMaxPosts: env.SOCIAL_BACKFILL_MAX_POSTS,
     kindMatrix: [
       {
         value: "youtube_channel" as const,
@@ -53,6 +63,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         labelKey: "common_kind_reddit" as const,
         statusKey: redditOperatorConfigured ? null : "source_kind_status_reddit_account",
         disabled: !redditOperatorConfigured,
+      },
+      {
+        value: "instagram_account" as const,
+        labelKey: "source_kind_label_instagram_account" as const,
+        statusKey: instagramConfigured ? null : ("source_kind_status_instagram_account" as const),
+        disabled: !instagramConfigured,
       },
       {
         value: "twitter_account" as const,

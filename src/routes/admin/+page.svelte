@@ -17,6 +17,7 @@
   import QuotaAuditList from "$lib/components/QuotaAuditList.svelte";
   import RedditOpsPanel from "$lib/components/RedditOpsPanel.svelte";
   import YoutubeOpsPanel from "$lib/components/YoutubeOpsPanel.svelte";
+  import ProviderSpendPanel from "$lib/components/ProviderSpendPanel.svelte";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -52,6 +53,13 @@
     <summary><h2>{m.admin_reddit_section_title()}</h2></summary>
     <div class="admin-quota__section-body">
       <RedditOpsPanel data={data.reddit} />
+    </div>
+  </details>
+
+  <details class="admin-quota__section" open>
+    <summary><h2>{m.admin_quota_section_providers_title()}</h2></summary>
+    <div class="admin-quota__section-body">
+      <ProviderSpendPanel block={data.instagram} />
     </div>
   </details>
 

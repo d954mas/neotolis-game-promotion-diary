@@ -35,6 +35,7 @@
   type SourceKind =
     | "youtube_channel"
     | "reddit"
+    | "instagram_account"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
@@ -44,13 +45,15 @@
     | "source_kind_label_twitter_account"
     | "source_kind_label_telegram_channel"
     | "source_kind_label_discord_server"
+    | "source_kind_label_instagram_account"
     | "common_kind_reddit";
 
   type KindStatusKey =
     | "source_kind_status_reddit_account"
     | "source_kind_status_twitter_account"
     | "source_kind_status_telegram_channel"
-    | "source_kind_status_discord_server";
+    | "source_kind_status_discord_server"
+    | "source_kind_status_instagram_account";
 
   type KindEntry = {
     value: SourceKind;
@@ -62,6 +65,7 @@
   let { data }: { data: PageData } = $props();
   const kindMatrix = $derived(data.kindMatrix as KindEntry[]);
   const redditOperatorConfigured = $derived(data.redditOperatorConfigured ?? false);
+  const instagramConfigured = $derived(data.instagramConfigured ?? false);
 
   // Form defaults are seeded from the loader on the initial render. The
   // form is one-shot, so reading `data.default*` once at init is
@@ -128,6 +132,15 @@
     return handleUrl.toLowerCase().includes("reddit");
   });
 
+  // SOC-05: env-var hint when Instagram is not configured and the user is
+  // looking at it (disabled chip selected OR an IG URL typed). Mirror
+  // showRedditHint. Disabled-chip + this hint is the COMPLETE key UI (D-03).
+  const showInstagramHint = $derived.by(() => {
+    if (instagramConfigured) return false;
+    if (selectedKind === "instagram_account") return true;
+    return handleUrl.toLowerCase().includes("instagram");
+  });
+
   function labelFor(key: KindLabelKey): string {
     switch (key) {
       case "source_kind_label_youtube_channel":
@@ -138,6 +151,8 @@
         return m.source_kind_label_telegram_channel();
       case "source_kind_label_discord_server":
         return m.source_kind_label_discord_server();
+      case "source_kind_label_instagram_account":
+        return m.source_kind_label_instagram_account();
       case "common_kind_reddit":
         return m.common_kind_reddit();
     }
@@ -163,6 +178,8 @@
         return m.source_kind_status_telegram_channel();
       case "source_kind_status_discord_server":
         return m.source_kind_status_discord_server();
+      case "source_kind_status_instagram_account":
+        return m.source_kind_status_instagram_account();
     }
   }
 
@@ -223,6 +240,12 @@
         const kindLabel = body.metadata?.kind ?? selectedKind;
         const status = body.metadata?.status ?? "";
         formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, status });
+        return;
+      }
+      // SOC-05: instagram_account gated on operator provider env → 422
+      // kind_not_configured (the chip is disabled; this is the bypass path).
+      if (res.status === 422 && body.error === "kind_not_configured") {
+        formError = m.sources_new_instagram_disabled_hint();
         return;
       }
       if (
@@ -342,6 +365,10 @@
       {/if}
     {/if}
 
+    {#if showInstagramHint}
+      <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
+    {/if}
+
     <label class="toggle">
       <input type="checkbox" bind:checked={isOwnedByMe} />
       <span>{m.sources_owned_by_me()} (this is my own channel/account)</span>
@@ -367,7 +394,12 @@
 
     {#if showPicker}
       <hr class="picker-separator" />
-      <BackfillPicker bind:value={backfillWindow} bind:customDate={backfillCustomDate} />
+      <BackfillPicker
+        bind:value={backfillWindow}
+        bind:customDate={backfillCustomDate}
+        kind={selectedKind}
+        postCap={data.socialBackfillMaxPosts}
+      />
     {/if}
 
     {#if formError}

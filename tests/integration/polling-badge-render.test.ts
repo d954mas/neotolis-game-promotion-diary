@@ -201,6 +201,26 @@ describe("PollingBadge — live state", () => {
     expect(out.body).toMatch(/refresh-now/);
   });
 
+  it("Pollable kind (kind=instagram_post): renders polling-badge (BUDGET-01)", () => {
+    // Phase 08 Plan 07: instagram_post joined POLLABLE_KINDS so the live-state
+    // badge (incl. the operator-budget-paused variant) shows on IG cards.
+    const ev = mkEvent({ kind: "instagram_post" });
+    const out = render(PollingBadge, { props: { event: ev } });
+    expect(out.body).toMatch(/class="polling-badge[^_]/);
+  });
+
+  it("Operator-budget pause (metadata.operator_paused): neutral paused variant, NOT --danger (BUDGET-01)", () => {
+    // The source's prepaid social budget is spent → the walker paused
+    // polling. The badge reads metadata.operator_paused and renders the
+    // neutral stopped state (frozen styling tier), NOT the error tier.
+    const ev = mkEvent({ kind: "instagram_post", metadata: { operator_paused: true } });
+    const out = render(PollingBadge, { props: { event: ev } });
+    expect(out.body).toMatch(/polling-badge--operator-paused/);
+    expect(out.body).toMatch(/Paused · operator budget reached/);
+    // Reuses the neutral frozen tier — NOT the danger/unavailable tier.
+    expect(out.body).not.toMatch(/polling-badge--unavailable/);
+  });
+
   it("a11y: rendered badge carries role='status' + aria-live='polite'", () => {
     const out = render(PollingBadge, { props: { event: mkEvent() } });
     expect(out.body).toMatch(/role="status"/);

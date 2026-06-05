@@ -99,8 +99,9 @@
 
   let { event }: { event: EventForBadge } = $props();
 
-  // PollingBadge is YouTube-only today; future source kinds (e.g. Reddit) extend this list.
-  const POLLABLE_KINDS = ["youtube_video", "reddit_post"];
+  // Source kinds that surface the live-state badge. YouTube + Reddit +
+  // Instagram (BUDGET-01: IG posts can enter the operator-budget-paused state).
+  const POLLABLE_KINDS = ["youtube_video", "reddit_post", "instagram_post"];
 
   // Defensive Date coercion — props may arrive as ISO strings.
   const publishedAt = $derived(
@@ -126,6 +127,18 @@
     return Number.isFinite(ts) ? new Date(ts) : null;
   });
 
+  // BUDGET-01: the operator's prepaid social budget is spent / throttled, so
+  // the worker paused polling for this source. A neutral STOPPED state (not an
+  // error) — the user-facing signal that "imports are paused because the
+  // operator's budget was reached", surfaced via metadata.operator_paused set
+  // by the backfill walker when pausedByBudget. Distinct from the per-post
+  // tier (the post's freshness is moot while the whole source is paused).
+  const operatorPaused = $derived.by((): boolean => {
+    const meta = event.metadata;
+    if (meta === null || typeof meta !== "object") return false;
+    return (meta as { operator_paused?: unknown }).operator_paused === true;
+  });
+
   // `now` re-evaluated on each render. The badge is mounted inside FeedCard
   // which re-renders on loader invalidation (RefreshNowButton calls
   // invalidateAll() after a successful refresh) — so the value is fresh
@@ -143,6 +156,7 @@
     | "frozen"
     | "unavailable"
     | "refreshing"
+    | "operator-paused"
     | "manual";
 
   // 5s tolerance closes a paste-flow race: services/events.ts writes
@@ -164,6 +178,10 @@
   const variant: Variant = $derived.by((): Variant => {
     if (tier === "pending") return "pending";
     if (refreshQueued) return "refreshing";
+    // Operator-budget pause outranks tier/unavailable: the source isn't being
+    // polled at all, so freshness vocabulary would mislead. Not refreshQueued
+    // (a user-initiated refresh still queues; the badge then flips back).
+    if (operatorPaused) return "operator-paused";
     if (tier === "unavailable") return "unavailable";
     if (lastPolledAt === null && tier === "active") return "manual";
     if (tier === "active") return "active";
@@ -197,6 +215,7 @@
   const copy = $derived.by(() => {
     if (variant === "pending") return m.polling_badge_pending();
     if (variant === "refreshing") return "Refresh queued";
+    if (variant === "operator-paused") return m.polling_badge_operator_paused();
     if (variant === "manual") return m.polling_badge_manual();
     if (lastPolledAt === null) {
       // Active without prior poll — manual-paste fallback for swallowed
@@ -291,12 +310,16 @@
   }
 
   /* Frozen · refresh to update — neutral surface, deeper muted text
-     (signals "polling has stopped on its own — refresh-now to rescue"). */
-  .polling-badge--frozen {
+     (signals "polling has stopped on its own — refresh-now to rescue").
+     Operator-paused (BUDGET-01) reuses the SAME neutral stopped-state tier
+     (NOT --danger — a budget pause is a benign operator state, not an error). */
+  .polling-badge--frozen,
+  .polling-badge--operator-paused {
     background: var(--surface-2);
     color: var(--text-3);
   }
-  .polling-badge--frozen .polling-badge__icon {
+  .polling-badge--frozen .polling-badge__icon,
+  .polling-badge--operator-paused .polling-badge__icon {
     color: var(--text-3);
   }
 

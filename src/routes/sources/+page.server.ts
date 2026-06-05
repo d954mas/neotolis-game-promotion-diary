@@ -1,6 +1,7 @@
 import type { PageServerLoad } from "./$types";
 import { loadSourcesPage, type SourcesPageData } from "$lib/server/services/sources-page-read.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
+import { env } from "$lib/server/config/env.js";
 
 // AddSourceModal needs the same kindMatrix + redditOperatorConfigured the
 // fallback /sources/new route loads. Inlined here (small, single caller)
@@ -10,20 +11,23 @@ type KindLabelKey =
   | "source_kind_label_twitter_account"
   | "source_kind_label_telegram_channel"
   | "source_kind_label_discord_server"
+  | "source_kind_label_instagram_account"
   | "common_kind_reddit";
 
 type KindStatusKey =
   | "source_kind_status_reddit_account"
   | "source_kind_status_twitter_account"
   | "source_kind_status_telegram_channel"
-  | "source_kind_status_discord_server";
+  | "source_kind_status_discord_server"
+  | "source_kind_status_instagram_account";
 
 type AddSourceUiKind =
   | "youtube_channel"
   | "reddit"
   | "twitter_account"
   | "telegram_channel"
-  | "discord_server";
+  | "discord_server"
+  | "instagram_account";
 
 export type KindMatrixEntry = {
   value: AddSourceUiKind;
@@ -37,6 +41,8 @@ export interface SourcesPageLoadData extends SourcesPageData {
   defaultIsOwnedByMe: boolean;
   defaultAutoImport: boolean;
   redditOperatorConfigured: boolean;
+  instagramConfigured: boolean;
+  socialBackfillMaxPosts: number;
   kindMatrix: KindMatrixEntry[];
 }
 
@@ -52,6 +58,19 @@ export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPage
   const redditOperatorConfigured = hasAdapter("reddit_account")
     ? getAdapter("reddit_account").observability.auth.isOperatorConfigured
     : false;
+  // SOC-05: instagram_account is a FUNCTIONAL kind whose adapter is always
+  // registered, but createSource gates it on the operator's provider env
+  // (INSTAGRAM_PROVIDER + the provider API key). When unconfigured the chip
+  // renders visible-but-disabled with the env-var hint — same shape Reddit
+  // uses for an empty REDDIT_USER_AGENT. Read from the adapter's
+  // isOperatorConfigured (the single source of truth, computed at read time).
+  const instagramConfigured = hasAdapter("instagram_account")
+    ? getAdapter("instagram_account").observability.auth.isOperatorConfigured
+    : false;
+  // BACK-01: surface the post-cap ceiling so the BackfillPicker honesty note
+  // ("Up to N most-recent posts within this window") reads the true value the
+  // walker enforces, not a hard-coded literal.
+  const socialBackfillMaxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
   const kindMatrix: KindMatrixEntry[] = [
     {
       value: "youtube_channel",
@@ -64,6 +83,12 @@ export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPage
       labelKey: "common_kind_reddit",
       statusKey: redditOperatorConfigured ? null : "source_kind_status_reddit_account",
       disabled: !redditOperatorConfigured,
+    },
+    {
+      value: "instagram_account",
+      labelKey: "source_kind_label_instagram_account",
+      statusKey: instagramConfigured ? null : "source_kind_status_instagram_account",
+      disabled: !instagramConfigured,
     },
     {
       value: "twitter_account",
@@ -97,6 +122,8 @@ export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPage
       defaultIsOwnedByMe: true,
       defaultAutoImport: true,
       redditOperatorConfigured,
+      instagramConfigured,
+      socialBackfillMaxPosts,
       kindMatrix,
     };
   }
@@ -107,6 +134,8 @@ export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPage
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
     redditOperatorConfigured,
+    instagramConfigured,
+    socialBackfillMaxPosts,
     kindMatrix,
   };
 };

@@ -25,6 +25,8 @@
     value = $bindable<Preset>("30d"),
     customDate = $bindable<string | null>(null),
     maxDate,
+    kind,
+    postCap,
   }: {
     value?: Preset;
     /** Optional custom date (YYYY-MM-DD). When non-null, overrides the
@@ -35,7 +37,28 @@
      *  passes the source's current backfillTargetSince so the user
      *  can only move the window earlier (server enforces too). */
     maxDate?: string;
+    /** The source kind the picker is registering. Drives the
+     *  social-source honesty notes (BACK-01): the snapshot-not-history
+     *  note + the post-cap note render only for `instagram_account`
+     *  (social sources import a current snapshot, not per-post history).
+     *  Omitted → no social notes (YouTube/Reddit). */
+    kind?: string;
+    /** The SOCIAL_BACKFILL_MAX_POSTS ceiling, surfaced in the post-cap
+     *  honesty note on wide presets. Only used when kind is a social
+     *  source. */
+    postCap?: number;
   } = $props();
+
+  // BACK-01: social sources import a CURRENT snapshot, not per-post history
+  // (D-14), and cap the number of imported posts per window (D-10). Gate both
+  // honesty notes on instagram_account; the post-cap note only on wide presets.
+  const isSocialSource = $derived(kind === "instagram_account");
+  const showPostCapNote = $derived(
+    isSocialSource &&
+      postCap !== undefined &&
+      !customDate &&
+      (value === "90d" || value === "1y" || value === "everything"),
+  );
 
   const presets: { id: Preset; label: () => string }[] = [
     { id: "1d", label: m.backfill_picker_preset_1d_label },
@@ -108,6 +131,14 @@
       {helperText}
     {/if}
   </small>
+  {#if showPostCapNote}
+    <small class="helper helper-social"
+      >{m.backfill_picker_helper_post_cap({ cap: postCap ?? 48 })}</small
+    >
+  {/if}
+  {#if isSocialSource}
+    <small class="helper helper-social">{m.backfill_picker_helper_snapshot_note()}</small>
+  {/if}
 </div>
 
 <style>

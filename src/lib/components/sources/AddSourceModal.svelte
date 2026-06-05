@@ -35,6 +35,7 @@
   type SourceKind =
     | "youtube_channel"
     | "reddit"
+    | "instagram_account"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
@@ -44,13 +45,15 @@
     | "source_kind_label_twitter_account"
     | "source_kind_label_telegram_channel"
     | "source_kind_label_discord_server"
+    | "source_kind_label_instagram_account"
     | "common_kind_reddit";
 
   type KindStatusKey =
     | "source_kind_status_reddit_account"
     | "source_kind_status_twitter_account"
     | "source_kind_status_telegram_channel"
-    | "source_kind_status_discord_server";
+    | "source_kind_status_discord_server"
+    | "source_kind_status_instagram_account";
 
   type KindEntry = {
     value: SourceKind;
@@ -63,6 +66,8 @@
     open,
     kindMatrix,
     redditOperatorConfigured = false,
+    instagramConfigured = false,
+    socialBackfillMaxPosts = 48,
     defaultIsOwnedByMe = true,
     defaultAutoImport = true,
     onClose,
@@ -71,6 +76,8 @@
     open: boolean;
     kindMatrix: KindEntry[];
     redditOperatorConfigured?: boolean;
+    instagramConfigured?: boolean;
+    socialBackfillMaxPosts?: number;
     defaultIsOwnedByMe?: boolean;
     defaultAutoImport?: boolean;
     onClose: () => void;
@@ -109,6 +116,16 @@
     return handleUrl.toLowerCase().includes("reddit");
   });
 
+  // SOC-05: surface the env-var hint when Instagram is not configured and
+  // the user is looking at it (selected the disabled chip OR typed an IG
+  // URL). Mirror showRedditHint exactly. The disabled-chip + this hint is
+  // the COMPLETE key-related UI — no operator-key form (CONTEXT D-03).
+  const showInstagramHint = $derived.by(() => {
+    if (instagramConfigured) return false;
+    if (selectedKind === "instagram_account") return true;
+    return handleUrl.toLowerCase().includes("instagram");
+  });
+
   function labelFor(key: KindLabelKey): string {
     switch (key) {
       case "source_kind_label_youtube_channel":
@@ -119,6 +136,8 @@
         return m.source_kind_label_telegram_channel();
       case "source_kind_label_discord_server":
         return m.source_kind_label_discord_server();
+      case "source_kind_label_instagram_account":
+        return m.source_kind_label_instagram_account();
       case "common_kind_reddit":
         return m.common_kind_reddit();
     }
@@ -140,6 +159,8 @@
         return m.source_kind_status_telegram_channel();
       case "source_kind_status_discord_server":
         return m.source_kind_status_discord_server();
+      case "source_kind_status_instagram_account":
+        return m.source_kind_status_instagram_account();
     }
   }
 
@@ -215,6 +236,14 @@
         const kindLabel = body.metadata?.kind ?? selectedKind;
         const status = body.metadata?.status ?? "";
         formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, status });
+        return;
+      }
+      // SOC-05: createSource gates instagram_account on the operator's
+      // provider env and degrades to 422 kind_not_configured when unset.
+      // The chip is already disabled in the UI, so this only fires on a
+      // direct/bypass submit — surface the same env-var hint inline.
+      if (res.status === 422 && body.error === "kind_not_configured") {
+        formError = m.sources_new_instagram_disabled_hint();
         return;
       }
       if (
@@ -345,6 +374,10 @@
         {/if}
       {/if}
 
+      {#if showInstagramHint}
+        <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
+      {/if}
+
       <label class="toggle">
         <input type="checkbox" bind:checked={isOwnedByMe} />
         <span>{m.sources_owned_by_me()} (this is my own channel/account)</span>
@@ -370,7 +403,12 @@
 
       {#if showPicker}
         <hr class="picker-separator" />
-        <BackfillPicker bind:value={backfillWindow} bind:customDate={backfillCustomDate} />
+        <BackfillPicker
+          bind:value={backfillWindow}
+          bind:customDate={backfillCustomDate}
+          kind={selectedKind}
+          postCap={socialBackfillMaxPosts}
+        />
       {/if}
 
       {#if formError}
