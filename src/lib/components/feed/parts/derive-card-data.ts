@@ -84,6 +84,22 @@ export interface CardEventLite {
      *  Reddit. Cards use this for the "Deleted on Reddit" banner. */
     deletionDetectedAt?: string | null;
   };
+  /** Instagram public-data decoration attached by
+   *  sources/instagram/server/feed-enrichment.ts (mirrors redditEnrichment).
+   *  Each stat is INDEPENDENTLY nullable — metrics-by-presence (D-05): a
+   *  photo/carousel has no views (Instagram exposes play_count only on
+   *  reels/video), NEVER coerced to 0. thumbnailUrl is the fresh CDN hotlink
+   *  (D-08), mediaType drives the per-form KindIcon placeholder. */
+  instagramEnrichment?: {
+    stats: {
+      viewCount: number | null;
+      likeCount: number | null;
+      commentCount: number | null;
+      polledAt: Date | string;
+    } | null;
+    thumbnailUrl: string | null;
+    mediaType: string | null;
+  };
 }
 
 export interface CardSourceLite {
@@ -121,6 +137,14 @@ export function redditAuthorByline(metadata: unknown): string | null {
     return `/u/${md.author}`;
   }
   return null;
+}
+
+/** Read the Instagram account handle/display name from FK-joined
+ *  data_sources, NEVER from event metadata (no-denorm rule — the IG handle
+ *  is owned by data_sources and can be renamed). Falls back to displayName
+ *  (user's own label) then the raw handleUrl. Mirrors youtubeChannelLabel. */
+export function instagramHandleLabel(source: CardSourceLite | null): string {
+  return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
 }
 
 /** Read the Twitter @handle from event metadata. The handle is part of
@@ -184,14 +208,20 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
   if (event.kind === "twitter_post" || event.kind === "telegram_post") {
     return readMediaUrlFromMetadata(event.metadata);
   }
+  if (event.kind === "instagram_post") {
+    // The fresh CDN hotlink lives on instagramEnrichment (set by
+    // sources/instagram/server/feed-enrichment.ts), NOT in event.metadata.
+    return event.instagramEnrichment?.thumbnailUrl ?? null;
+  }
   return null;
 }
 
-/** YouTube videos reserve a 16:9 thumb slot even when missing
- *  (KindIcon fallback fills it). Other kinds only render the thumb
- *  when an image is actually derivable. */
+/** YouTube videos + Instagram posts reserve a fixed thumb slot even when
+ *  the image is missing (KindIcon fallback fills it). YouTube uses 16:9,
+ *  Instagram 4:5 (the IG card overrides the aspect-ratio token). Other
+ *  kinds only render the thumb when an image is actually derivable. */
 export function isMediaShape(kind: CardEventKind): boolean {
-  return kind === "youtube_video";
+  return kind === "youtube_video" || kind === "instagram_post";
 }
 
 /** Month-Day formatter — "May 21" style. Locale-aware (Intl). */

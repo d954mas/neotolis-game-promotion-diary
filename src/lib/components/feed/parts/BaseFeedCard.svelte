@@ -54,6 +54,7 @@
     currentUserName,
     statsSlot,
     extraSlot,
+    onThumbnailError,
   }: {
     event: CardEventLite;
     /** Already-resolved source-of-truth label for the .src element.
@@ -86,6 +87,12 @@
      *  but kept so future per-platform additions don't need another
      *  prop drop. */
     extraSlot?: import("svelte").Snippet;
+    /** Optional thumbnail-load-error handler. Used by hotlinked-thumbnail
+     *  cards (Instagram, D-08) whose CDN URL expires — on <img> error the
+     *  wrapper flips its thumbnail to null so the .card-thumb.empty
+     *  KindIcon placeholder shows instead of a broken image. YouTube
+     *  thumbnails (img.youtube.com) don't expire, so they pass nothing. */
+    onThumbnailError?: () => void;
   } = $props();
 
   const kindLabel = $derived.by(() => {
@@ -100,6 +107,8 @@
         return m.event_kind_label_telegram_post();
       case "discord_drop":
         return m.event_kind_label_discord_drop();
+      case "instagram_post":
+        return m.event_kind_label_instagram_post();
       case "conference":
         return m.event_kind_label_conference();
       case "talk":
@@ -382,6 +391,7 @@
             referrerpolicy="no-referrer"
             crossorigin="anonymous"
             loading="lazy"
+            onerror={onThumbnailError ? () => onThumbnailError() : undefined}
           />
         {:else}
           <KindIcon kind={event.kind} size={36} />
