@@ -55,7 +55,13 @@ import { ESLintUtils } from "@typescript-eslint/utils";
 // service-lane scan / cross-tenant operator view`. Pre-fix the table
 // was blanket-allowlisted so a future bug reading user-lane rows
 // without userId would slip past.
-const TENANT_TABLES = new Set([
+// Exported (named) so the D-08 export-completeness drift guard
+// (tests/unit/export-completeness.test.ts) reads the SAME set this rule
+// enforces — one source of truth for "what is a tenant table". A new
+// tenant table added here without a matching AccountExportEnvelope key (or
+// an explicit exclusion) fails that test. The default export below is the
+// ESLint rule; a named export alongside it does not affect rule loading.
+export const TENANT_TABLES = new Set([
   "games",
   "gameSteamListings",
   "dataSources",
@@ -67,7 +73,7 @@ const TENANT_TABLES = new Set([
   "wishlistSnapshots", // commercially-sensitive per-user wishlist data (D-06) — tenant-scoped, NOT public like youtubeVideoSnapshots
 ]);
 
-const ALLOWLIST_TABLES = new Set([
+export const ALLOWLIST_TABLES = new Set([
   "subredditRules", // non-tenant by design (shared seed data)
   "user", // Better Auth core
   "session", // Better Auth core

@@ -119,6 +119,12 @@ export default [
       "src/lib/server/services/**/*.ts",
       "src/lib/server/services/**/*.tsx",
       "src/lib/server/http/**/*.ts",
+      // crypto/ is under the guard so any future DIRECT tenant-table query
+      // added here is caught. The current all-tenant KEK-rotation read/update
+      // (crypto/rotate-kek-batch.ts) goes through the ENCRYPTED_TABLES
+      // registry — a non-literal `table` ref the rule cannot match — so it is
+      // all-tenant by design and carries no eslint-disable (none would fire).
+      "src/lib/server/crypto/**/*.ts",
       // Per-source server folders execute the same tenant-scope discipline
       // as services/. Without this glob, code under sources/<kind>/server/
       // would lose its lint-time guard (and existing eslint-disable-next-line

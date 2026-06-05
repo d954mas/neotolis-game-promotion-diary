@@ -20,3 +20,9 @@ docker-compose*.yml text eol=lf
 # Markdown: leave to the operator's preference (most editors handle
 # both fine). No `eol` directive here — Git's default text handling
 # applies (auto convert on Windows checkout if `core.autocrlf=true`).
+
+# THIRD_PARTY_LICENSES.md is machine-generated (scripts/gen-third-party-licenses.ts
+# writes LF). The 06-06 regen gate runs `pnpm licenses:generate && git diff
+# --exit-code THIRD_PARTY_LICENSES.md`; pin it LF-only so a Windows checkout
+# (core.autocrlf=true) doesn't store CRLF and make the regen-and-diff flap.
+THIRD_PARTY_LICENSES.md text eol=lf

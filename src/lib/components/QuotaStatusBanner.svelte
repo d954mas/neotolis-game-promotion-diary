@@ -16,6 +16,10 @@
   // feed но preserve lifetime audit count.
 
   import { m } from "$lib/paraglide/messages.js";
+  // Pure threshold helpers extracted to quota-zone.ts (D-05) so the test
+  // asserts the SAME code this banner paints — no drift. Aliased to the
+  // original local names so the template markup below is unchanged.
+  import { quotaPct as pct, quotaZone as zone } from "$lib/quota-zone.js";
 
   interface QuotaPlatform {
     /** SourceKind — used as i18n / display key. */
@@ -61,17 +65,6 @@
     const m = totalMin % 60;
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
-  }
-
-  function pct(used: number, cap: number): number {
-    if (cap <= 0) return 0;
-    return Math.min(100, Math.round((used / cap) * 100));
-  }
-
-  function zone(p: number): "ok" | "warning" | "error" {
-    if (p >= 100) return "error";
-    if (p >= 80) return "warning";
-    return "ok";
   }
 
   function formatPlatformLabel(kind: string): string {

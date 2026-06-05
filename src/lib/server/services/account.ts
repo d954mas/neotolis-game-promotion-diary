@@ -31,7 +31,7 @@
 // 403; here that means a missing user row throws NotFoundError, never
 // ForbiddenError.)
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { user, session } from "../db/schema/auth.js";
 import { games } from "../db/schema/games.js";
@@ -40,6 +40,9 @@ import { dataSources } from "../db/schema/data-sources.js";
 import { events } from "../db/schema/events.js";
 import { apiKeysSteam } from "../db/schema/api-keys-steam.js";
 import { auditLog } from "../db/schema/audit-log.js";
+import { wishlistSnapshots } from "../db/schema/wishlist-snapshots.js";
+import { youtubeVideoSnapshots } from "$lib/sources/youtube/server/schema/video-snapshots.js";
+import { redditPostSnapshots } from "$lib/sources/reddit/server/schema/index.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { NotFoundError, AppError } from "./errors.js";
@@ -52,6 +55,9 @@ import {
   mapEventsToDtos,
   toApiKeySteamDto,
   toAuditEntryDto,
+  toWishlistSnapshotDto,
+  toYoutubeVideoSnapshotDto,
+  toRedditPostSnapshotDto,
   type UserDto,
   type GameDto,
   type GameSteamListingDto,
@@ -59,6 +65,9 @@ import {
   type EventDto,
   type ApiKeySteamDto,
   type AuditEntryDto,
+  type WishlistSnapshotDto,
+  type YoutubeVideoSnapshotDto,
+  type RedditPostSnapshotDto,
 } from "../dto.js";
 
 export interface AccountExportEnvelope {
@@ -70,6 +79,16 @@ export interface AccountExportEnvelope {
   events: EventDto[];
   api_keys_steam: ApiKeySteamDto[];
   audit_log: AuditEntryDto[];
+  // Phase 6 (PRIV-03): the export predated Phase 3.1/3.2/4 and silently
+  // dropped the user's wishlist history + per-post metric history. These
+  // three sections close the "take all your data" gap.
+  //   - wishlist_snapshots: TENANT-owned (carries user_id) — filtered by userId.
+  //   - youtube_video_snapshots / reddit_post_snapshots: PUBLIC-DATA tables
+  //     (ALLOWLIST, no user_id). The tenant boundary is the external_id set
+  //     derived from THIS user's own events, NOT a userId filter on the table.
+  wishlist_snapshots: WishlistSnapshotDto[];
+  youtube_video_snapshots: YoutubeVideoSnapshotDto[];
+  reddit_post_snapshots: RedditPostSnapshotDto[];
 }
 
 export async function softDeleteAccount(userId: string, ipAddress: string): Promise<void> {
@@ -190,6 +209,41 @@ export async function exportAccountJson(
   const keysRows = await db.select().from(apiKeysSteam).where(eq(apiKeysSteam.userId, userId));
   const auditRows = await db.select().from(auditLog).where(eq(auditLog.userId, userId));
 
+  // wishlist_snapshots — TENANT-owned (commercially-sensitive per-user data).
+  // MUST filter eq(userId, userId) (tenant scope P0).
+  const wishlistRows = await db
+    .select()
+    .from(wishlistSnapshots)
+    .where(eq(wishlistSnapshots.userId, userId));
+
+  // Per-event metric history from the PUBLIC-DATA snapshot tables. The tenant
+  // boundary is the external_id set derived from THIS user's events (already
+  // in memory, already userId-scoped above) — NOT a userId filter on the
+  // snapshot tables (they have no userId column; they're in ESLint
+  // ALLOWLIST_TABLES). Mirrors loadVideoDataForEvents (dto.ts:571).
+  const ytVideoIds = eventsRows
+    .filter((e) => e.kind === "youtube_video" && e.externalId)
+    .map((e) => e.externalId as string);
+  const redditPostIds = eventsRows
+    .filter((e) => e.kind === "reddit_post" && e.externalId)
+    .map((e) => e.externalId as string);
+
+  // Empty-IN guard: skip the round-trip when the user has no events of that
+  // kind (drizzle inArray with [] is a no-match, but the guard avoids the
+  // unnecessary query).
+  const ytSnapshotRows = ytVideoIds.length
+    ? await db
+        .select()
+        .from(youtubeVideoSnapshots)
+        .where(inArray(youtubeVideoSnapshots.videoId, ytVideoIds))
+    : [];
+  const redditSnapshotRows = redditPostIds.length
+    ? await db
+        .select()
+        .from(redditPostSnapshots)
+        .where(inArray(redditPostSnapshots.postId, redditPostIds))
+    : [];
+
   // releaseDate / releaseTba on GameDto are now derived via JOIN with
   // game_steam_listings (denormalization-audit-2.md V-2). The export
   // includes derived values for consistency with the wire DTO — a
@@ -215,6 +269,9 @@ export async function exportAccountJson(
     events: await mapEventsToDtos(userId, eventsRows),
     api_keys_steam: keysRows.map(toApiKeySteamDto),
     audit_log: auditRows.map(toAuditEntryDto),
+    wishlist_snapshots: wishlistRows.map(toWishlistSnapshotDto),
+    youtube_video_snapshots: ytSnapshotRows.map(toYoutubeVideoSnapshotDto),
+    reddit_post_snapshots: redditSnapshotRows.map(toRedditPostSnapshotDto),
   };
 
   await writeAudit({ userId, action: "account.exported", ipAddress });

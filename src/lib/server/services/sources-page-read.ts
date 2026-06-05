@@ -21,32 +21,18 @@ import {
 } from "$lib/sources/reddit/server/schema/index.js";
 import { events } from "../db/schema/events.js";
 import { auditLog } from "../db/schema/audit-log.js";
-import { allAdapters } from "$lib/sources/registry.js";
-import { redditAdapter, getRecentLoad } from "$lib/sources/reddit/server/index.js";
-import { checkRedditUserCap } from "$lib/sources/reddit/server/quota.js";
 import { getSourceById, listSources } from "./data-sources.js";
 import { toDataSourceDto, type DataSourceDto } from "../dto.js";
-import { getUserQuotaUsedToday, getUserQuotaLifetime, nextPacificMidnight } from "./quota.js";
+import { loadUserQuota, loadQuotaPlatforms } from "./quota-read.js";
+import type { QuotaPlatformView, RedditQuotaView } from "./quota-read.js";
 import { NotFoundError } from "./errors.js";
 
+// Per-user quota types now live in quota-read.ts (D-03, single source of
+// truth). Re-exported here so existing importers of these names from
+// sources-page-read.ts keep working.
+export type { QuotaPlatformView, RedditQuotaView } from "./quota-read.js";
+
 const REFRESH_CONTENT_COOLDOWN_MS = 5 * 60_000;
-
-export interface QuotaPlatformView {
-  kind: string;
-  today: { requests: number; events: number };
-  lifetime: { requests: number; events: number };
-  cap: { requestsPerDay?: number; eventsPerDay?: number };
-  resetsInMs: number;
-}
-
-export type RedditQuotaView =
-  | {
-      isOperatorConfigured: true;
-      sourceActions: { used: number; cap: number; windowMinutes: number };
-      postRefreshes: { used: number; cap: number; windowMinutes: number };
-      serviceLoad: { used: number; capacity: number };
-    }
-  | { isOperatorConfigured: false };
 
 export interface SourcesPageData {
   active: DataSourceDto[];
@@ -83,8 +69,7 @@ export async function loadSourcesPage(userId: string): Promise<SourcesPageData> 
 
   const cooldownBySource = await loadRefreshContentCooldown(userId, sourceIds);
   const pullingBySource = await loadPullingChannels(dtos, channelIds);
-  const quotaPlatforms = await loadQuotaPlatforms(userId);
-  const redditQuota = await loadRedditQuota(userId);
+  const { quotaPlatforms, redditQuota } = await loadUserQuota(userId);
 
   return {
     active: dtos.filter((s) => s.deletedAt === null),
@@ -348,61 +333,4 @@ async function loadPullingChannels(
     if (s.channelId && pullingChannelKeys.has(s.channelId)) pulling[s.id] = true;
   }
   return pulling;
-}
-
-/**
- * Per-adapter quota usage (today + lifetime) for the QuotaStatusBanner.
- * Iterates allAdapters so a new source kind adds a row automatically —
- * no edits needed here.
- */
-async function loadQuotaPlatforms(userId: string): Promise<QuotaPlatformView[]> {
-  const resetAt = nextPacificMidnight();
-  const resetsInMs = Math.max(0, resetAt.getTime() - Date.now());
-  return Promise.all(
-    allAdapters.map(async (a) => {
-      const today = await getUserQuotaUsedToday(userId, a.kind);
-      const lifetime = await getUserQuotaLifetime(userId, a.kind);
-      return {
-        kind: a.kind,
-        today,
-        lifetime,
-        cap: {
-          requestsPerDay: a.observability.userQuotaCap?.requestsPerDay,
-          eventsPerDay: a.observability.userQuotaCap?.eventsPerDay,
-        },
-        resetsInMs,
-      };
-    }),
-  );
-}
-
-/**
- * Reddit-specific block. The Reddit tab in QuotaStatusBanner renders a
- * 3-line view (source-actions / post-refreshes / service-load) instead
- * of the YouTube two-axis bars; when the operator hasn't configured
- * REDDIT_USER_AGENT we surface the "not configured" empty state.
- */
-async function loadRedditQuota(userId: string): Promise<RedditQuotaView> {
-  if (!redditAdapter.observability.auth.isOperatorConfigured) {
-    return { isOperatorConfigured: false };
-  }
-  const [sourceActionsResult, postRefreshesResult, serviceLoad] = await Promise.all([
-    checkRedditUserCap(db, userId, "source-actions"),
-    checkRedditUserCap(db, userId, "post-refreshes"),
-    getRecentLoad(60),
-  ]);
-  return {
-    isOperatorConfigured: true,
-    sourceActions: {
-      used: sourceActionsResult.used,
-      cap: sourceActionsResult.cap,
-      windowMinutes: sourceActionsResult.window_minutes,
-    },
-    postRefreshes: {
-      used: postRefreshesResult.used,
-      cap: postRefreshesResult.cap,
-      windowMinutes: postRefreshesResult.window_minutes,
-    },
-    serviceLoad,
-  };
 }

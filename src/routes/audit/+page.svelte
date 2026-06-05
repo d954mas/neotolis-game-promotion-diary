@@ -27,6 +27,7 @@
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import CursorPager from "$lib/components/CursorPager.svelte";
+  import QuotaStatusBanner from "$lib/components/QuotaStatusBanner.svelte";
   // /audit uses the shared sticky PageHeader so its title row stays pinned
   // under AppHeader on scroll — matches /feed, /games, /sources for
   // cross-page consistency.
@@ -158,6 +159,18 @@
 </script>
 
 <section class="audit">
+  <!-- Per-platform API quota banner — the SAME full QuotaStatusBanner
+       /sources renders, fed by the SAME shared loadUserQuota read (D-02 +
+       D-03). Mounted at the very top of /audit, above the page header,
+       in the identical quota-disclosure wrapper /sources uses so the two
+       surfaces render 1:1. -->
+  {#if data.quotaPlatforms.length > 0 || data.redditQuota}
+    <details class="quota-disclosure">
+      <summary>API usage today</summary>
+      <QuotaStatusBanner platforms={data.quotaPlatforms} redditQuota={data.redditQuota} />
+    </details>
+  {/if}
+
   <PageHeader title="Audit log" sticky />
 
   <DateRangeControl {activeFilters} onApply={applyDateRangeAudit} />
@@ -211,5 +224,57 @@
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
+  }
+
+  /* quota-disclosure — copied verbatim from /sources +page.svelte so the
+   * API-usage banner renders 1:1 on both surfaces (D-02/D-03). */
+  .quota-disclosure {
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    overflow: hidden;
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .quota-disclosure[open] {
+    border-color: var(--border);
+  }
+  .quota-disclosure > summary {
+    padding: var(--s-2) var(--s-4);
+    cursor: pointer;
+    color: var(--text-3);
+    font-size: var(--t-12);
+    font-family: var(--f-mono);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    font-weight: var(--w-sb);
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .quota-disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  .quota-disclosure > summary::before {
+    content: ">";
+    display: inline-flex;
+    color: var(--accent);
+    font-family: var(--f-sans);
+    font-size: 14px;
+    line-height: 1;
+    transition: transform var(--m-fast) var(--m-ease);
+    transform: rotate(0deg);
+  }
+  .quota-disclosure[open] > summary::before {
+    transform: rotate(90deg);
+  }
+  .quota-disclosure > summary:hover {
+    color: var(--text);
+  }
+  .quota-disclosure[open] > :not(summary) {
+    padding: var(--s-3) var(--s-4) var(--s-4);
+    border-top: 1px solid var(--border-hairline);
   }
 </style>

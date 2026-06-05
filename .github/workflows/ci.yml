@@ -25,6 +25,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      # D-19b: AGPL/GPL-family deny-gate on PRODUCTION deps (compound-OR aware).
+      # Fails the PR if any prod dependency is copyleft; a dual-licensed dep
+      # with a permissive arm passes (scripts/check-licenses.ts +
+      # src/lib/server/config/license-deny.ts, unit-tested in
+      # tests/unit/check-licenses.test.ts). Lands here because lint-typecheck
+      # already ran `pnpm install --frozen-lockfile` — no extra runner cold-start.
+      - run: pnpm tsx scripts/check-licenses.ts
+      # D-19b: regenerate THIRD_PARTY_LICENSES.md and fail on any drift
+      # (regen-and-diff idiom — same family as the SaaS-leak grep). A new prod
+      # dep that changes the file but isn't committed fails the PR. The file is
+      # eol=lf-pinned (.gitattributes) so the diff is byte-stable cross-platform.
+      - run: pnpm licenses:generate
+      - run: git diff --exit-code THIRD_PARTY_LICENSES.md
 
   unit-integration:
     runs-on: ubuntu-latest
