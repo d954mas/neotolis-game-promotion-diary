@@ -49,6 +49,7 @@ import {
   type YoutubeQueueDepthRow,
   type YoutubeDailyByType,
 } from "$lib/sources/youtube/server/observability.js";
+import { getInstagramProviderBlock } from "$lib/sources/instagram/server/observability.js";
 
 // Re-export types so the /admin Svelte components (which can only
 // type-import from this server-service module, not from reddit/server
@@ -84,6 +85,12 @@ const SERVICE_LEVEL_AUDIT_ACTIONS: readonly AuditAction[] = [
   "purge.completed",
   "auto_import.deferred",
   "poll.failed",
+  // Phase 8 — social-provider cost guardrails (operator-side). The daily-cap
+  // 80/95 throttle crossing + the prepaid-balance-hit-zero hard stop surface in
+  // the operator's "what crossed our budget today" tail alongside the YouTube
+  // quota.service_throttled verb (OBS-02).
+  "social.provider_throttled",
+  "social.budget_exhausted",
 ] as const;
 
 /** How many tail audit rows to surface on /admin/quota. */
@@ -109,12 +116,43 @@ export interface AdminYoutubeBlock {
   daily: YoutubeDailyByType;
 }
 
+/**
+ * Instagram (ScrapeCreators) provider block surfaced on /admin/quota alongside
+ * the YouTube + Reddit blocks (OBS-02, D-23). When the operator hasn't
+ * configured a provider (INSTAGRAM_PROVIDER / SCRAPECREATORS_API_KEY empty), the
+ * block collapses to `{ isConfigured: false }` — the page renders the
+ * "Instagram import not configured by operator" placeholder instead of empty
+ * spend tables (mirrors the AdminRedditBlock REDDIT_USER_AGENT-empty collapse,
+ * SOC-05).
+ *
+ * Configured shape:
+ *   - requestsToday  : credits spent today (1 credit/request, D-18).
+ *   - creditsUsed    : same value, named for the spend-vs-cap view.
+ *   - dailyCap       : the operator's daily-cap ceiling (credits).
+ *   - remainingBalance = the prepaid funded balance (the absolute D-16 hard
+ *                        ceiling — "cannot spend what isn't there").
+ *   - prepaidBalance : the same funded balance, surfaced explicitly.
+ *   - throttleState  : the adapter's worst-of 80/95 + exhausted-balance signal.
+ */
+export type AdminInstagramBlock =
+  | {
+      isConfigured: true;
+      requestsToday: number;
+      creditsUsed: number;
+      dailyCap: number;
+      remainingBalance: number;
+      prepaidBalance: number;
+      throttleState: "ok" | "eighty" | "ninetyfive";
+    }
+  | { isConfigured: false };
+
 export async function loadAdminQuotaPage(): Promise<{
   today: string;
   keys: QuotaKeyRow[];
   audit: ServiceAuditEntry[];
   reddit: AdminRedditBlock;
   youtube: AdminYoutubeBlock;
+  instagram: AdminInstagramBlock;
 }> {
   const today = todayPacific();
   const now = new Date();
@@ -179,12 +217,30 @@ export async function loadAdminQuotaPage(): Promise<{
   ]);
   const youtube: AdminYoutubeBlock = { queueDepth: ytQueueDepth, daily: ytDaily };
 
+  // Instagram provider block (OBS-02). getInstagramProviderBlock reads
+  // isInstagramConfigured() at call time; when unconfigured the block collapses
+  // to { isConfigured: false } so the page renders the placeholder instead of a
+  // zeroed spend table that looks like an outage (mirror the reddit collapse).
+  const ig = await getInstagramProviderBlock(now);
+  const instagram: AdminInstagramBlock = ig.isConfigured
+    ? {
+        isConfigured: true,
+        requestsToday: ig.requestsToday,
+        creditsUsed: ig.creditsUsed,
+        dailyCap: ig.dailyCap,
+        remainingBalance: ig.remainingBalance,
+        prepaidBalance: ig.prepaidBalance,
+        throttleState: ig.throttleState,
+      }
+    : { isConfigured: false };
+
   return {
     today,
     keys: keyRows,
     audit: auditRows.map(toServiceAuditEntry),
     reddit,
     youtube,
+    instagram,
   };
 }
 

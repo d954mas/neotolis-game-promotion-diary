@@ -134,7 +134,9 @@ beforeEach(() => {
 describe("social per-user request cap (QUOTA-03)", () => {
   it("per-user cap (LIMIT_SOCIAL_REQUESTS_PER_DAY) returns 429 requests_quota_exhausted via enforceAdapterUserQuota", async () => {
     const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
-    const user = await seedUserDirectly({ email: `cap-429-${Math.random().toString(36).slice(2)}@t.io` });
+    const user = await seedUserDirectly({
+      email: `cap-429-${Math.random().toString(36).slice(2)}@t.io`,
+    });
 
     // Just under cap → the (cap)th request is still allowed.
     await seedSocialRequests(user.id, cap - 1);
@@ -166,7 +168,9 @@ describe("social per-user request cap (QUOTA-03)", () => {
 
   it("the cap is scoped by platform — a different platform's spend does NOT count against the IG cap", async () => {
     const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
-    const user = await seedUserDirectly({ email: `cap-plat-${Math.random().toString(36).slice(2)}@t.io` });
+    const user = await seedUserDirectly({
+      email: `cap-plat-${Math.random().toString(36).slice(2)}@t.io`,
+    });
 
     // Park `cap` requests under a DIFFERENT platform tag (youtube_channel).
     for (let i = 0; i < cap; i++) {
@@ -195,7 +199,9 @@ describe("social per-user request cap (QUOTA-03)", () => {
   });
 
   it("backfill continuation pages run on the cron pool, NOT the per-user cap (Pitfall 5)", async () => {
-    const user = await seedUserDirectly({ email: `cap-cron-${Math.random().toString(36).slice(2)}@t.io` });
+    const user = await seedUserDirectly({
+      email: `cap-cron-${Math.random().toString(36).slice(2)}@t.io`,
+    });
     await seedSource(user.id, true);
 
     // Park the user AT cap so any per-user-counted request would be visible.
@@ -234,7 +240,9 @@ describe("social per-user request cap (QUOTA-03)", () => {
   });
 
   it("a user-triggered walk DOES charge the cap once (the contrast to the cron case)", async () => {
-    const user = await seedUserDirectly({ email: `cap-user1-${Math.random().toString(36).slice(2)}@t.io` });
+    const user = await seedUserDirectly({
+      email: `cap-user1-${Math.random().toString(36).slice(2)}@t.io`,
+    });
     await seedSource(user.id, true);
 
     const before = await getUserQuotaUsedToday(user.id, PLATFORM);
@@ -262,12 +270,11 @@ describe("social per-user request cap (QUOTA-03)", () => {
     expect(after.requests).toBeGreaterThan(0);
 
     // Exactly ONE per-user audit row for this user (pays once, not per page).
-    const auditRows = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, user.id));
+    const auditRows = await db.select().from(auditLog).where(eq(auditLog.userId, user.id));
     const refreshRows = auditRows.filter(
-      (r) => r.action === "source.refresh_content_requested" && (r.metadata as { flow?: string }).flow !== undefined,
+      (r) =>
+        r.action === "source.refresh_content_requested" &&
+        (r.metadata as { flow?: string }).flow !== undefined,
     );
     expect(refreshRows).toHaveLength(1);
   });

@@ -1,10 +1,35 @@
-import { describe, it, expect } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { describe, it, expect, vi } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { writeAudit } from "../../src/lib/server/audit.js";
 import { NotFoundError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
+
+// IG provider seam mock — used ONLY by the "instagram cross-tenant" describe
+// block at the bottom of this file (createSource(instagram_account) needs a
+// configured provider + a resolvable handle). The mock is hoisted above all
+// imports but is inert for the non-IG cross-tenant matrix above: those kinds
+// (youtube/reddit/steam/events) never touch the IG provider registry.
+vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    isInstagramConfigured: () => true,
+    getSocialProvider: (platform: string) => {
+      if (platform !== "instagram") return null;
+      return {
+        name: "scrapecreators",
+        async fetchPosts() {
+          return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1 };
+        },
+        async resolveAccount(_platform: string, handle: string) {
+          return { accountId: `acct-${handle}`, displayName: handle };
+        },
+      };
+    },
+  };
+});
 
 /**
  * Cross-tenant 404 not 403.
@@ -1008,5 +1033,134 @@ describe("bulk events cross-tenant (D-13)", () => {
     const deltaEmpty = await computeWishlistDelta(userB.id, emptyListing.id, "2026-05-01");
     expect(deltaEmpty.delta24h).toBeNull();
     expect(deltaEmpty.delta7d).toBeNull();
+  });
+});
+
+// Phase 8 Instagram cross-tenant. instagram_account is a tenant-owned source and
+// instagram_post is a tenant-owned event — both MUST return 404 (never 403, never
+// 200-with-another-tenant's-data) on cross-tenant access, body free of
+// "forbidden"/"permission" (CLAUDE.md Privacy invariant 2). The IG-specific
+// public-data tables (instagram_posts / instagram_post_snapshots /
+// social_provider_spend / social_provider_balance) carry NO user_id by design —
+// the tenant guarantee comes from the per-user events SELECT, not from those
+// caches — so this block proves the tenant boundary lives on the SOURCE + EVENT
+// rows, exactly where the youtube/reddit precedent puts it.
+describe("instagram cross-tenant (source + event 404 not 403)", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("user B cannot read/patch/delete/refresh user A's instagram_account source — 404, never 403", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createSource } = await import("../../src/lib/server/services/data-sources.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `p08-ig-tnA-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p08-ig-tnB-${uniq()}@test.local` });
+
+    // A owns an instagram_account source. autoImport:false so createSource skips
+    // the onSourceCreated backfill enqueue (no pg-boss needed); the provider seam
+    // is mocked at the top of this file so canonicalizeOnCreate resolves the
+    // handle → a fake account_id without any HTTP.
+    const sourceA = await createSource(
+      userA.id,
+      {
+        kind: "instagram_account",
+        handleUrl: "https://www.instagram.com/aownsig/",
+        isOwnedByMe: true,
+        autoImport: false,
+        metadata: { handle: "aownsig" },
+      },
+      "127.0.0.1",
+    );
+    expect(sourceA.kind).toBe("instagram_account");
+
+    const cookie = `neotolis.session_token=${userB.signedSessionCookieValue}`;
+    const probes = [
+      { method: "GET", path: `/api/sources/${sourceA.id}` },
+      { method: "PATCH", path: `/api/sources/${sourceA.id}`, body: { autoImport: true } },
+      { method: "DELETE", path: `/api/sources/${sourceA.id}` },
+      { method: "POST", path: `/api/sources/${sourceA.id}/restore` },
+      { method: "POST", path: `/api/sources/${sourceA.id}/refresh-content` },
+    ];
+    for (const p of probes) {
+      const init: RequestInit = {
+        method: p.method,
+        headers: { cookie, "content-type": "application/json" },
+      };
+      if ("body" in p && p.body) (init as { body?: string }).body = JSON.stringify(p.body);
+      const res = await app.request(p.path, init);
+      expect.soft(res.status, `${p.method} ${p.path} should be 404 cross-tenant`).toBe(404);
+      expect.soft(res.status, `${p.method} ${p.path} must NOT be 500`).not.toBe(500);
+      const txt = await res.text();
+      expect
+        .soft(txt, `${p.method} ${p.path} body must not contain forbidden/permission`)
+        .not.toMatch(/forbidden|permission/i);
+    }
+  });
+
+  it("user B cannot read user A's instagram_post event or its metric series — 404, never 403", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { getEventMetricSeries } =
+      await import("../../src/lib/server/services/event-metric-series.js");
+    const { events } = await import("../../src/lib/server/db/schema/events.js");
+    const { uuidv7 } = await import("../../src/lib/server/ids.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `p08-ig-evA-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p08-ig-evB-${uniq()}@test.local` });
+
+    // A owns an instagram_post event.
+    const evId = uuidv7();
+    await db.insert(events).values({
+      id: evId,
+      userId: userA.id,
+      kind: "instagram_post",
+      authorIsMe: true,
+      occurredAt: new Date(),
+      title: "A's IG post",
+      url: "https://www.instagram.com/p/ABC123/",
+      externalId: "ABC123",
+      metadata: { media_type: "image" },
+    });
+
+    // Cross-tenant HTTP probes: B reads A's IG event + its metric series → 404.
+    const cookie = `neotolis.session_token=${userB.signedSessionCookieValue}`;
+    for (const path of [`/api/events/${evId}`, `/api/events/${evId}/metric-series`]) {
+      const res = await app.request(path, { headers: { cookie } });
+      expect.soft(res.status, `GET ${path} should be 404 cross-tenant`).toBe(404);
+      const txt = await res.text();
+      expect
+        .soft(txt, `GET ${path} body must not contain forbidden/permission`)
+        .not.toMatch(/forbidden|permission/i);
+    }
+
+    // Service-layer: getEventMetricSeries gates on getEventById FIRST → a foreign
+    // event id is a NotFoundError before any instagram_posts/snapshots read.
+    await expect(getEventMetricSeries(userB.id, evId)).rejects.toBeInstanceOf(NotFoundError);
+
+    // Sanity: the owner DOES resolve the event (proves the 404s above are
+    // ownership, not a missing row).
+    const { getEventById } = await import("../../src/lib/server/services/events.js");
+    const owned = await getEventById(userA.id, evId);
+    expect(owned.kind).toBe("instagram_post");
+  });
+
+  it("the IG public-data cache tables carry NO user_id column (tenant guarantee lives on events, not the cache)", async () => {
+    // instagram_posts / instagram_post_snapshots / social_provider_spend /
+    // social_provider_balance are public-data (no per-user scope) by design —
+    // the same shape youtube_videos / reddit_*_cache use. Assert the schema has
+    // no user_id column so a future refactor that accidentally adds tenant data
+    // to a public cache trips here (and would need the events SELECT to remain
+    // the boundary).
+    const publicDataTables = [
+      "instagram_posts",
+      "instagram_post_snapshots",
+      "social_provider_spend",
+      "social_provider_balance",
+    ];
+    for (const table of publicDataTables) {
+      const res = await db.execute(
+        sql`SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = ${table} AND column_name = 'user_id'`,
+      );
+      expect(res.rows, `${table} must have NO user_id column (public-data)`).toHaveLength(0);
+    }
   });
 });
