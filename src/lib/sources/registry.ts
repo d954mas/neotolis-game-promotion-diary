@@ -13,16 +13,18 @@
 import type { SourceAdapter, SourceKind } from "./adapter.js";
 import { youtubeAdapter } from "./youtube/server/index.js";
 import { redditAdapter } from "./reddit/server/index.js";
+import { instagramAdapter } from "./instagram/server/index.js";
 
 // Registration ORDER is load-bearing for the first-match-wins parseAnyUrl
 // iterator. YouTube first → wins on youtube.com / youtu.be host claims;
-// Reddit after → wins on reddit.com / redd.it host claims. There's no
-// overlap with YouTube hosts today, so order between these two adapters
-// is symbolic but stable.
+// Reddit after → wins on reddit.com / redd.it host claims; Instagram after →
+// wins on instagram.com host claims. There's no host overlap between any of
+// the three adapters today, so order between them is symbolic but stable.
 const registry = new Map<SourceKind, SourceAdapter>([
   ["youtube_channel", youtubeAdapter],
   ["reddit_account", redditAdapter],
   ["reddit_subreddit", redditAdapter],
+  ["instagram_account", instagramAdapter],
 ]);
 
 export function getAdapter(kind: SourceKind): SourceAdapter {
