@@ -98,10 +98,10 @@
   // redundant fetch when the route already knows the series is empty).
   //
   // CHARTABLE_KINDS = the kinds an adapter implements fetchEventMetricSeries
-  // for (youtube_video, reddit_post). Mounting EventHistoryChart for these
-  // kinds — even with 0 snapshots — makes the D-07 low-data caption reachable
-  // (the empty/sparse case the chart already handles).
-  const CHARTABLE_KINDS = new Set(["youtube_video", "reddit_post"]);
+  // for (youtube_video, reddit_post, instagram_post). Mounting EventHistoryChart
+  // for these kinds — even with 0 snapshots — makes the D-07 low-data caption
+  // reachable (the empty/sparse case the chart already handles).
+  const CHARTABLE_KINDS = new Set(["youtube_video", "reddit_post", "instagram_post"]);
   const isChartable = $derived(CHARTABLE_KINDS.has(event.kind));
 
   // Client-fetched series for the modal path. null = not yet fetched / not
@@ -618,8 +618,8 @@
     <!-- VIZ-01 per-event snapshot-history chart (D-14, adapter-driven).
          One mount here covers BOTH the modal and the /events/[id] route
          (this is the shared dual-render body). Gated on `isChartable`, NOT
-         on series length, so a chartable event (youtube_video / reddit_post)
-         with 0 snapshots still mounts EventHistoryChart and shows the D-07
+         on series length, so a chartable event (youtube_video / reddit_post /
+         instagram_post) with 0 snapshots still mounts EventHistoryChart and shows the D-07
          low-data caption. `chartSeries` is the SSR prop (when threaded, e.g.
          /events/[id]) or the modal-path client fetch (Plan 04-24). -->
     {#if isChartable}

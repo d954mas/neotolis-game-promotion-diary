@@ -54,6 +54,8 @@
         return m.event_kind_label_telegram_post();
       case "discord_drop":
         return m.event_kind_label_discord_drop();
+      case "instagram_post":
+        return m.event_kind_label_instagram_post();
       case "conference":
         return m.event_kind_label_conference();
       case "talk":
@@ -161,7 +163,7 @@
 
   <span class="detail-head-spacer"></span>
 
-  {#if !inTrash && (event.kind === "youtube_video" || event.kind === "reddit_post")}
+  {#if !inTrash && (event.kind === "youtube_video" || event.kind === "reddit_post" || event.kind === "instagram_post")}
     <PollingBadge
       event={{
         id: event.id,

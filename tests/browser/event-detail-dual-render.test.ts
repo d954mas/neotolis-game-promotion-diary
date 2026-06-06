@@ -386,3 +386,61 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
     unmount(modal.component);
   });
 });
+
+describe("EventDetail renders instagram_post like the other pollable kinds (Phase 08 UAT gap)", () => {
+  // Regression for the UAT gap: Phase 08 added instagram_post to the
+  // server/data layer + the feed card, but the event-detail DISPLAY surface
+  // (EventDetailHeader's kind-label switch + PollingBadge render gate, and
+  // EventDetailContent's CHARTABLE_KINDS) still hardcoded a
+  // youtube_video || reddit_post allowlist — so an imported IG event rendered
+  // as "Other", with no live-state badge and no metric chart. These tests
+  // mount the REAL detail surface with an instagram_post event; each WOULD
+  // FAIL against the pre-fix allowlists.
+
+  const igEvent = {
+    ...baseEvent,
+    id: "ev_ig_detail",
+    kind: "instagram_post" as const,
+    title: "IG reel test event",
+    externalId: "Cabc123XYZ",
+    // BUDGET-01: the IG enrichment overlays metadata.operator_paused when the
+    // account's prepaid social budget is spent and the walker paused polling.
+    metadata: { operator_paused: true },
+    // publishedAt drives the PollingBadge tier; operator_paused outranks it but
+    // a concrete value keeps the badge out of the 'pending' branch.
+    publishedAt: new Date("2026-05-14T08:00:00Z"),
+    lastPolledAt: new Date("2026-05-14T09:00:00Z"),
+    lastPollStatus: "ok",
+    // IG photos/carousels carry no YouTube-shaped `stats` triple.
+    stats: null,
+    channelTitle: "My IG Account",
+  };
+
+  it("B: kind label resolves to 'Instagram', NOT 'Other'", () => {
+    const bare = mountBare({ event: igEvent });
+    const label = bare.root.querySelector(".detail-kind-label")?.textContent?.trim();
+    expect(label).toBe("Instagram");
+    unmount(bare.component);
+  });
+
+  it("A: PollingBadge renders on the IG detail surface, with the operator-paused variant + copy (BUDGET-01)", () => {
+    const bare = mountBare({ event: igEvent });
+    // The badge is gated in EventDetailHeader; pre-fix the IG kind was excluded
+    // so this element never mounted.
+    const badge = bare.root.querySelector(".polling-badge");
+    expect(badge).not.toBeNull();
+    expect(badge?.className).toMatch(/polling-badge--operator-paused/);
+    expect(badge?.textContent).toContain("Paused · operator budget reached");
+    unmount(bare.component);
+  });
+
+  it("C: the metric chart container renders for an IG event with snapshot series", () => {
+    // metricSeries threaded (the /events/[id] SSR path) — the chart mounts only
+    // when instagram_post is in CHARTABLE_KINDS.
+    const bare = mountBare({ event: igEvent, metricSeries: historySeries });
+    const chart = bare.root.querySelector('[data-testid="event-history-chart"]');
+    expect(chart).not.toBeNull();
+    expect(chart?.getAttribute("data-low-data")).toBe("false");
+    unmount(bare.component);
+  });
+});
