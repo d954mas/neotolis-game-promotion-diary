@@ -330,7 +330,7 @@ async function enqueueRefreshNow(input: {
   const { eq } = await import("drizzle-orm");
   const dbCtx = input.tx ?? db;
   const [row] = await dbCtx
-    .select({ accountId: instagramPosts.postId, account: instagramPosts.accountId })
+    .select({ account: instagramPosts.accountId })
     .from(instagramPosts)
     .where(eq(instagramPosts.postId, input.externalId))
     .limit(1);

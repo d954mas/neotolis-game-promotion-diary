@@ -570,6 +570,14 @@ export async function enrichFromUrl(
         );
         return recognitionOnly;
       }
+      // EXPECTED failures (AdapterError network/operator-issue, any other typed
+      // AppError) soft-degrade — manual entry must never dead-end. But an
+      // UNEXPECTED throw (a programmer bug in the adapter: bad import, undefined
+      // access, etc.) is NOT in the degrade contract — re-throw it so it
+      // surfaces as a 500 + escaped-error log rather than hiding behind a benign
+      // WARN. Mirrors the reddit branch, which lets all throws propagate.
+      const { AdapterError } = await import("$lib/sources/errors.js");
+      if (!(err instanceof AppError) && !(err instanceof AdapterError)) throw err;
       logger.warn(
         { userId, url: parsed.canonicalUrl, err: String((err as Error)?.message ?? err) },
         "instagram preview threw; degrading to recognition-only manual entry",
