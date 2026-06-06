@@ -55,6 +55,7 @@
     currentUserName,
     statsSlot,
     extraSlot,
+    thumbnailOverlaySlot,
     onThumbnailError,
   }: {
     event: CardEventLite;
@@ -88,6 +89,11 @@
      *  but kept so future per-platform additions don't need another
      *  prop drop. */
     extraSlot?: import("svelte").Snippet;
+    /** Optional corner overlay rendered INSIDE .card-thumb, over the <img>.
+     *  Used by Instagram to mark a reel / carousel / video with a small
+     *  glyph (a bare photo gets none). Rendered only when a thumbnail image
+     *  is shown so it sits on the picture, not on the empty placeholder. */
+    thumbnailOverlaySlot?: import("svelte").Snippet;
     /** Optional thumbnail-load-error handler. Used by hotlinked-thumbnail
      *  cards (Instagram, D-08) whose CDN URL expires — on <img> error the
      *  wrapper flips its thumbnail to null so the .card-thumb.empty
@@ -373,6 +379,7 @@
         {:else}
           <KindIcon kind={event.kind} size={36} />
         {/if}
+        {#if thumbnailUrl && thumbnailOverlaySlot}{@render thumbnailOverlaySlot()}{/if}
         {#if inboxRow}
           <span class="thumb-badge thumb-badge--inbox">{m.inbox_badge()}</span>
         {/if}

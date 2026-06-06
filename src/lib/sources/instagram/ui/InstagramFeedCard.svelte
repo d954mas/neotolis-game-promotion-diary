@@ -34,6 +34,7 @@
 
   import { metricColor } from "$lib/util/metric-colors.js";
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
+  import { mediaTypeOverlay } from "./media-type-overlay.js";
   import {
     deriveThumbnailUrl,
     formatStat,
@@ -86,6 +87,11 @@
   );
 
   const stats = $derived(event.instagramEnrichment?.stats ?? null);
+
+  // Media-type corner glyph (reel / carousel / video). A bare photo maps to
+  // null → no overlay. Rendered over the thumbnail image only (BaseFeedCard
+  // gates the slot on a present <img>), so the empty placeholder stays clean.
+  const overlay = $derived.by(() => mediaTypeOverlay(event.instagramEnrichment?.mediaType));
 </script>
 
 <BaseFeedCard
@@ -104,8 +110,25 @@
   {onDeleteForever}
   {currentUserName}
   statsSlot={statsSnippet}
+  thumbnailOverlaySlot={overlay ? overlaySnippet : undefined}
   onThumbnailError={() => (thumbErrored = true)}
 />
+
+{#snippet overlaySnippet()}
+  {#if overlay}
+    <span class="media-type-overlay" aria-label={overlay.label} title={overlay.label}>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true">{@html overlay.inner}</svg
+      >
+    </span>
+  {/if}
+{/snippet}
 
 {#snippet statsSnippet()}
   {#if stats && (stats.viewCount !== null || stats.likeCount !== null || stats.commentCount !== null)}
@@ -185,5 +208,32 @@
    * primary visual focal point. */
   :global([data-kind="instagram_post"] .card-thumb) {
     aspect-ratio: 4 / 5;
+  }
+
+  /* Media-type corner glyph (reel / carousel / video). Top-right of the 4:5
+   * thumbnail, over the image. The overlay markup is rendered inside
+   * BaseFeedCard's .card-thumb via the thumbnailOverlaySlot snippet, so the
+   * selector is :global to reach it. A small dark scrim disc keeps the white
+   * glyph legible on bright photos. pointer-events:none so it never steals the
+   * card's open-detail click. */
+  :global([data-kind="instagram_post"] .media-type-overlay) {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--r-sm);
+    background: var(--overlay-dark);
+    color: #fff;
+    pointer-events: none;
+    z-index: 1;
+  }
+  :global([data-kind="instagram_post"] .media-type-overlay svg) {
+    width: 15px;
+    height: 15px;
+    display: block;
   }
 </style>

@@ -125,6 +125,50 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
     unmount(component);
   });
 
+  it("media-type overlay: reel / carousel / video each render the correct corner glyph; photo renders none", () => {
+    const cases: Array<{ mediaType: string; label: string | null }> = [
+      { mediaType: "reel", label: "Reel" },
+      { mediaType: "carousel", label: "Carousel" },
+      { mediaType: "video", label: "Video" },
+      // A bare photo (image) needs no marker — no overlay rendered.
+      { mediaType: "image", label: null },
+    ];
+
+    for (const { mediaType, label } of cases) {
+      const { card, component } = mountCard(
+        makeEvent({
+          stats: { viewCount: null, likeCount: 1, commentCount: 1, polledAt: new Date() },
+          thumbnailUrl: "https://scontent.cdninstagram.com/v/thumb.jpg",
+          mediaType,
+        }),
+      );
+      const overlay = card.querySelector(".card-thumb .media-type-overlay") as HTMLElement | null;
+      if (label === null) {
+        expect(overlay, `${mediaType} should render NO overlay`).toBeNull();
+      } else {
+        expect(overlay, `${mediaType} should render an overlay`).not.toBeNull();
+        expect(overlay!.getAttribute("aria-label")).toBe(label);
+        // The glyph itself is an inline SVG inside the overlay.
+        expect(overlay!.querySelector("svg")).not.toBeNull();
+      }
+      unmount(component);
+    }
+  });
+
+  it("media-type overlay sits over the IMAGE, not the empty placeholder (no thumbnail → no overlay)", () => {
+    // No thumbnail URL → BaseFeedCard shows the .card-thumb.empty placeholder
+    // and the overlay slot is gated off (it marks a picture, not a placeholder).
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { viewCount: 1, likeCount: 1, commentCount: 1, polledAt: new Date() },
+        thumbnailUrl: null,
+        mediaType: "reel",
+      }),
+    );
+    expect(card.querySelector(".media-type-overlay")).toBeNull();
+    unmount(component);
+  });
+
   it("thumbnail onerror swaps to the .card-thumb.empty placeholder (D-08, no broken image)", async () => {
     const { card, component } = mountCard(
       makeEvent({
