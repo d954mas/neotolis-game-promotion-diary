@@ -36,12 +36,14 @@ const PROFILE_PATH = "/v1/instagram/profile";
 const CREDIT_BALANCE_PATH = "/v1/account/credit-balance";
 
 // resolveAccount profile response — kept narrow + tolerant; only the user-id +
-// display-name fields are load-bearing. ScrapeCreators nests the profile under
-// `data` (or `user`); we read either. An empty/missing body → null (the caller
-// reads that as missing/private — Pitfall 4 belt-and-suspenders alongside the
-// HTTP-404 mapping in http.ts).
+// display-name fields are load-bearing. LIVE-CONFIRMED shape (real key, `nasa`,
+// 2026-06-06): the user object is nested at `data.user`, NOT at `data` — e.g.
+// `{ data: { user: { id, username, full_name, ... } } }`. We read `data.user`
+// first and keep a top-level `user` as a defensive fallback. An empty/missing
+// body or absent user → null (the caller reads that as missing/private —
+// Pitfall 4 belt-and-suspenders alongside the HTTP-404 mapping in http.ts).
 interface ProfileBody {
-  data?: ProfileUser | null;
+  data?: { user?: ProfileUser | null } | null;
   user?: ProfileUser | null;
 }
 interface ProfileUser {
@@ -100,7 +102,7 @@ export const scrapeCreatorsProvider: SocialProvider = {
       logTag: "ig.profile",
     });
     const body = (await resp.json()) as ProfileBody;
-    const user = body.data ?? body.user ?? null;
+    const user = body.data?.user ?? body.user ?? null;
     if (user === null) return null;
 
     const accountId = user.id ?? user.pk ?? user.user_id ?? null;
