@@ -46,7 +46,13 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
           opts: { origin?: string },
         ): Promise<NormalizedSinglePost | null> {
           single.calls.push({ url, origin: opts.origin });
-          if (typeof single.next === "function") single.next();
+          if (typeof single.next === "function") {
+            // The fn-case simulates a provider error: it throws. The explicit
+            // throw after makes the block always-exit so TS narrows `single.next`
+            // to NormalizedSinglePost | null on the return below.
+            single.next();
+            throw new Error("single.next() was expected to throw");
+          }
           return single.next;
         },
         async fetchPosts() {
