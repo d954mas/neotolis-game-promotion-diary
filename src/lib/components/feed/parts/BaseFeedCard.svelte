@@ -380,12 +380,6 @@
           <KindIcon kind={event.kind} size={36} />
         {/if}
         {#if thumbnailUrl && thumbnailOverlaySlot}{@render thumbnailOverlaySlot()}{/if}
-        {#if inboxRow}
-          <span class="thumb-badge thumb-badge--inbox">{m.inbox_badge()}</span>
-        {/if}
-        {#if event.authorIsMe}
-          <span class="thumb-badge thumb-badge--mine">{m.feed_card_author_is_me_badge()}</span>
-        {/if}
       </div>
     {/if}
 
@@ -721,26 +715,6 @@
     color: var(--card-accent, var(--text-4));
     opacity: 0.45;
   }
-  .thumb-badge {
-    position: absolute;
-    top: 6px;
-    padding: 2px var(--s-2);
-    background: var(--overlay-dark);
-    color: #fff;
-    font-size: var(--t-12);
-    line-height: 1;
-    border-radius: var(--r-pill);
-    pointer-events: none;
-    white-space: nowrap;
-  }
-  .thumb-badge--inbox {
-    left: 6px;
-  }
-  .thumb-badge--mine {
-    right: 6px;
-    background: color-mix(in oklab, var(--accent) 78%, black);
-  }
-
   .card-notes {
     margin: 0;
     color: var(--text-2);

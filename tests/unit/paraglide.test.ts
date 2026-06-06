@@ -400,7 +400,6 @@ describe("paraglide i18n", () => {
       "feed_bulk_action_bar_games",
       "feed_bulk_action_bar_restore",
       "feed_card_actions_aria",
-      "feed_card_author_is_me_badge",
       "feed_card_deselect_aria",
       "feed_card_menu_delete",
       "feed_card_menu_edit_games",
