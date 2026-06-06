@@ -28,6 +28,7 @@
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
+  import { inferSourceKindFromUrl } from "$lib/components/sources/infer-source-kind.js";
 
   // Mirror the synthetic UI kind picker from /sources/new — "reddit" is
   // resolved server-side to reddit_account / reddit_subreddit by URL
@@ -131,6 +132,42 @@
     if (instagramConfigured) return false;
     if (selectedKind === "instagram_account") return true;
     return handleUrl.toLowerCase().includes("instagram");
+  });
+
+  // "Paste a link → we figure out the kind." Same client-side heuristic +
+  // auto-select behaviour as /sources/new (the shared helper keeps the
+  // host table single-sourced). The server's parseSourceUrl iterator stays
+  // the source of truth on submit.
+  const inferredKind = $derived(inferSourceKindFromUrl(handleUrl));
+  const inferredEntry = $derived(
+    inferredKind ? (kindMatrix.find((k) => k.value === inferredKind) ?? null) : null,
+  );
+
+  // Auto-select the matched chip when ENABLED; never select a disabled
+  // chip (those surface a hint instead). untrack(selectedKind) avoids a
+  // self-dependency thrash loop.
+  $effect(() => {
+    const entry = inferredEntry;
+    if (entry && !entry.disabled && untrack(() => selectedKind) !== entry.value) {
+      selectedKind = entry.value;
+    }
+  });
+
+  // Generic coming-soon / out-of-scope hint for a matched-but-disabled
+  // kind that doesn't already own dedicated copy (Reddit / Instagram do).
+  const showComingSoonHint = $derived.by(() => {
+    const entry = inferredEntry;
+    if (!entry || !entry.disabled) return false;
+    if (entry.value === "reddit" || entry.value === "instagram_account") return false;
+    return true;
+  });
+  const comingSoonHintText = $derived.by(() => {
+    const entry = inferredEntry;
+    if (!entry) return "";
+    return m.sources_kind_disabled_tooltip({
+      kind: labelFor(entry.labelKey),
+      status: statusFor(entry.statusKey) ?? "",
+    });
   });
 
   function labelFor(key: KindLabelKey): string {
@@ -389,6 +426,10 @@
 
       {#if showInstagramHint}
         <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
+      {/if}
+
+      {#if showComingSoonHint}
+        <p class="hint">{comingSoonHintText}</p>
       {/if}
 
       <label class="toggle">

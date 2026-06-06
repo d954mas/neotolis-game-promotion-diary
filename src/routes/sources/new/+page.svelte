@@ -24,6 +24,7 @@
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
+  import { inferSourceKindFromUrl } from "$lib/components/sources/infer-source-kind.js";
   import type { PageData } from "./$types";
 
   // `"reddit"` is a synthetic, UI-only kind. The /sources/new chip picker
@@ -146,6 +147,50 @@
     if (instagramConfigured) return false;
     if (selectedKind === "instagram_account") return true;
     return handleUrl.toLowerCase().includes("instagram");
+  });
+
+  // "Paste a link → we figure out the kind." Client-side hostname
+  // heuristic (the real parsers are server-only). Returns the synthetic
+  // UI kind the chip picker uses ("reddit", not reddit_account); null for
+  // unknown/garbage. The server's parseSourceUrl iterator remains the
+  // source of truth on submit — this is a UX convenience only.
+  const inferredKind = $derived(inferSourceKindFromUrl(handleUrl));
+  const inferredEntry = $derived(
+    inferredKind ? (kindMatrix.find((k) => k.value === inferredKind) ?? null) : null,
+  );
+
+  // Auto-select the matched chip when it's ENABLED (has a configured
+  // adapter). We never auto-select a disabled chip — those surface a hint
+  // instead (showRedditHint / showInstagramHint / showComingSoonHint). The
+  // effect fires on handleUrl change (via inferredEntry); a later paste can
+  // re-point the selection, which is the intended "don't fight the user,
+  // just follow the link" behaviour. untrack(selectedKind) keeps the effect
+  // from depending on its own write (no thrash loop).
+  $effect(() => {
+    const entry = inferredEntry;
+    if (entry && !entry.disabled && untrack(() => selectedKind) !== entry.value) {
+      selectedKind = entry.value;
+    }
+  });
+
+  // Generic "coming soon / out of scope" hint for a matched-but-disabled
+  // kind that doesn't already have a dedicated inline hint (Reddit and
+  // Instagram own their copy above). Surfaces the not-built status so a
+  // user who pastes a Twitter / Telegram / Discord URL understands why no
+  // chip lit up, instead of silently doing nothing.
+  const showComingSoonHint = $derived.by(() => {
+    const entry = inferredEntry;
+    if (!entry || !entry.disabled) return false;
+    if (entry.value === "reddit" || entry.value === "instagram_account") return false;
+    return true;
+  });
+  const comingSoonHintText = $derived.by(() => {
+    const entry = inferredEntry;
+    if (!entry) return "";
+    return m.sources_kind_disabled_tooltip({
+      kind: labelFor(entry.labelKey),
+      status: statusFor(entry.statusKey) ?? "",
+    });
   });
 
   function labelFor(key: KindLabelKey): string {
@@ -380,6 +425,10 @@
 
     {#if showInstagramHint}
       <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
+    {/if}
+
+    {#if showComingSoonHint}
+      <p class="hint">{comingSoonHintText}</p>
     {/if}
 
     <label class="toggle">
