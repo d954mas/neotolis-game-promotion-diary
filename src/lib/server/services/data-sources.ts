@@ -527,6 +527,12 @@ export async function createSource(
   // wins; this only fills the gap when the caller left it blank so the row
   // shows the real account name instead of the bare id.
   let resolvedDisplayName = input.displayName ?? null;
+  // Metadata the adapter resolves at create time (e.g. Instagram's
+  // URL-intrinsic handle, which the account-scoped walker needs as the provider
+  // query key). Shallow-merged OVER the caller-supplied metadata so adapter-
+  // resolved keys win for keys the adapter owns, while caller keys survive.
+  // Mirrors how normalizeSourceOnCreate's metadata is merged above.
+  let resolvedMetadata: Record<string, unknown> = input.metadata ?? {};
   if (adapter.canonicalizeOnCreate !== undefined) {
     const result = await adapter.canonicalizeOnCreate(
       { kind: input.kind, handleUrl: input.handleUrl, channelId: input.channelId ?? null },
@@ -536,6 +542,9 @@ export async function createSource(
     resolvedChannelId = result.resolvedExternalId;
     if (resolvedDisplayName === null && result.displayName != null && result.displayName !== "") {
       resolvedDisplayName = result.displayName;
+    }
+    if (result.metadata !== undefined) {
+      resolvedMetadata = { ...resolvedMetadata, ...result.metadata };
     }
   }
 
@@ -568,7 +577,7 @@ export async function createSource(
           displayName: resolvedDisplayName,
           isOwnedByMe: input.isOwnedByMe ?? true,
           autoImport: input.autoImport ?? true,
-          metadata: input.metadata ?? {},
+          metadata: resolvedMetadata,
           // Persist user-selected backfill window as absolute date so
           // catch-up logic (computeSinceForRefresh) has a target boundary
           // to walk back toward. Pre-fix the createSource code threaded

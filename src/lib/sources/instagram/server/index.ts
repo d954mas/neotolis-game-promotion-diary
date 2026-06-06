@@ -122,12 +122,7 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
   );
   // Daily-cap reset — midnight Pacific (the social-provider daily-cap boundary;
   // the prepaid balance is never touched).
-  await boss.schedule(
-    QUEUES.INSTAGRAM_QUOTA_RESET,
-    "0 0 * * *",
-    {},
-    { tz: "America/Los_Angeles" },
-  );
+  await boss.schedule(QUEUES.INSTAGRAM_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
 }
 
 /**
@@ -200,6 +195,17 @@ async function canonicalizeOnCreate(
     // an explicit displayName. Mirrors how a renamable display name is read
     // from source-of-truth (AGENTS.md no-denorm); this is the create-time seed.
     displayName: resolved.displayName,
+    // Persist the URL-intrinsic handle (and resolved account_id) onto the
+    // source row's metadata at create time. The account-scoped backfill walker
+    // keys off channelId=account_id (intrinsic, survives handle rename) but
+    // MUST have the handle to call fetchPosts(?handle=…) — it reads it via
+    // resolveHandle → metadata.handle. Without this, a source created through
+    // createSource (vs a test seeding metadata directly) leaves metadata.handle
+    // unset and the walker skips with "no handle … skipping" → empty feed.
+    // The handle is the provider query key (URL-intrinsic, not a renameable
+    // display value), so it is the safe-denorm carve-out — mirrors Reddit's
+    // metadata.username/subreddit injection.
+    metadata: { handle: parsed.handle, accountId: resolved.accountId },
   };
 }
 

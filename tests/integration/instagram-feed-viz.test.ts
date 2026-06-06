@@ -130,6 +130,68 @@ describe("instagram feed inbox + metric series (VIZ-05)", () => {
     expect((source.metadata as { handle?: string }).handle).toBe("natgeo");
   });
 
+  it("createSource → backfill linkage: a source created WITHOUT a caller-supplied metadata.handle still backfills (canonicalizeOnCreate must persist the handle)", async () => {
+    // REGRESSION (the Phase 8 backfill-no-op bug): the walker reads the provider
+    // query handle off metadata.handle (resolveHandle in backfill-account.ts).
+    // The prior createSource path persisted channelId=account_id + display_name
+    // but NOT metadata.handle, so a source created through the REAL create path
+    // (a pasted handle, no caller-injected metadata) left metadata.handle unset
+    // → the walker logged "no handle on any subscriber metadata; skipping" →
+    // zero events, empty feed. The other tests in this file masked the gap by
+    // either passing metadata:{handle} to createSource or seeding the row
+    // directly via seedSource. This test deliberately passes NO metadata so only
+    // canonicalizeOnCreate can supply the handle. Pre-fix it imports 0 events
+    // (the walker skips); post-fix it imports the post.
+    const user = await seedUserDirectly({
+      email: `viz-linkage-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    const source = await createSource(
+      user.id,
+      {
+        kind: "instagram_account",
+        handleUrl: "https://www.instagram.com/linkacct/",
+        isOwnedByMe: true,
+        autoImport: false, // skip onSourceCreated enqueue; we drive the walker directly
+        // NO metadata — the create path is the ONLY thing that can persist
+        // the handle the walker needs. This is the load-bearing omission.
+      },
+      "127.0.0.1",
+    );
+    // The mocked resolveAccount returns acct-<handle>; createSource stores it on
+    // channelId (the walker's channelKey).
+    expect(source.channelId).toBe("acct-linkacct");
+    // The fix: the resolved handle is persisted on the row's metadata under the
+    // exact key the walker reads (resolveHandle → metadata.handle).
+    expect((source.metadata as { handle?: string }).handle).toBe("linkacct");
+
+    provider.pages.posts = [
+      { posts: [post("link1", 1)], nextCursor: null, endOfFeed: true, creditsUsed: 1 },
+    ];
+    provider.pages.reels = [emptyPage()];
+
+    // Run the REAL walker against the channelKey createSource resolved. flow
+    // "initial" + triggerUserId = the owner → the fan-out inserts even though
+    // the source opted out of auto_import (trigger user overrides own opt-out).
+    await handleBackfillAccount({
+      data: {
+        kind: "instagram_account",
+        channelKey: source.channelId!,
+        triggerUserId: user.id,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    // Walker did NOT skip — it read metadata.handle, called the mocked
+    // provider, and imported the post into the user's inbox.
+    const imported = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, user.id), eq(events.kind, "instagram_post")));
+    expect(imported.map((e) => e.externalId)).toEqual(["link1"]);
+    expect(imported[0]!.sourceId).toBe(source.id);
+  });
+
   it("a backfill tick imports an instagram_post event into the /feed inbox (source_id set, zero attached games)", async () => {
     const user = await seedUserDirectly({
       email: `viz-inbox-${Math.random().toString(36).slice(2)}@t.io`,

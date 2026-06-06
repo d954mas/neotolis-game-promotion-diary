@@ -293,6 +293,15 @@ export interface CanonicalizeResult {
    *  createSource uses it ONLY when the caller did not supply an explicit
    *  displayName (a user-typed name always wins). Omit / null → no change. */
   displayName?: string | null;
+  /** URL-intrinsic identifiers the walker needs as provider query keys, merged
+   *  onto data_sources.metadata at create time. Mirrors
+   *  NormalizeSourceResult.metadata (Reddit's metadata.username/subreddit
+   *  injection) — the Instagram walker reads metadata.handle here to call the
+   *  provider (the account_id alone is not a query param). These are
+   *  URL-intrinsic provider keys, NOT renameable display values, so persisting
+   *  them is the only safe denormalization (AGENTS.md no-denorm carve-out).
+   *  createSource shallow-merges this over the caller-supplied metadata. */
+  metadata?: Record<string, unknown>;
 }
 
 /** Input shape consumed by canonicalizeOnCreate. Mirrors the relevant slice
