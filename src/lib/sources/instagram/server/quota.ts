@@ -124,7 +124,18 @@ export async function reserveSocialCredits(args: {
   const datePacific = todayPacific(args.now ?? new Date());
   const { platform, provider, origin } = args;
   const poolLimit = origin === "cron" ? cronPoolDaily() : userPoolDaily();
+  const eighty = throttleEighty();
   const ninetyfive = throttleNinetyfive();
+
+  // Threshold-crossing audit signals computed UNDER the lock (so they reflect
+  // the real before/after of THIS reservation) but EMITTED after the tx commits
+  // (AGENTS.md item 4 — audit failure must not block / deadlock the spend path).
+  // null = no crossing this reservation. The audit fns have their own
+  // once-per-cycle guards, so a re-emit on a duplicate crossing is a no-op.
+  let crossedEighty = false;
+  let crossedNinetyfive = false;
+  let balanceExhausted = false;
+  let totalAfterReserve = 0;
 
   const run = async (tx: DbCtx): Promise<SocialCreditPermit | null> => {
     // Seed today's counter rows (both pools) + the prepaid balance row.
@@ -216,10 +227,48 @@ export async function reserveSocialCredits(args: {
         ),
       );
 
+    // Compute the daily-cap throttle band crossing + prepaid-balance exhaustion
+    // for THIS reservation (before vs after). Emitted after commit below.
+    const totalBefore = totalUsed;
+    const totalAfter = totalUsed + args.units;
+    totalAfterReserve = totalAfter;
+    crossedEighty = totalBefore < eighty && totalAfter >= eighty;
+    crossedNinetyfive = totalBefore < ninetyfive && totalAfter >= ninetyfive;
+    balanceExhausted = prepaidBalance - args.units <= 0;
+
     return { platform, provider, poolKind: origin, units: args.units };
   };
 
-  return args.tx ? run(args.tx) : db.transaction(run);
+  const permit = args.tx ? await run(args.tx) : await db.transaction(run);
+
+  // Operator audit AFTER the spend tx commits (a denied reservation returns null
+  // and crosses nothing, so this is a no-op then). The 80% / 95% throttle bands
+  // pause non-essential lanes (D-15); the prepaid-balance-zero is the absolute
+  // hard ceiling (D-16). Each fn is idempotent per (date, state) / (platform,
+  // provider) so a re-cross within the same cycle writes no duplicate row.
+  if (permit !== null) {
+    if (crossedEighty) {
+      await markSocialThrottleTransition({
+        platform,
+        provider,
+        state: "eighty",
+        creditsUsed: totalAfterReserve,
+      });
+    }
+    if (crossedNinetyfive) {
+      await markSocialThrottleTransition({
+        platform,
+        provider,
+        state: "ninetyfive",
+        creditsUsed: totalAfterReserve,
+      });
+    }
+    if (balanceExhausted) {
+      await markSocialBudgetExhausted({ platform, provider });
+    }
+  }
+
+  return permit;
 }
 
 /**
