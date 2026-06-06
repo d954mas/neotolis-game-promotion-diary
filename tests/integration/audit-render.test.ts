@@ -318,6 +318,34 @@ describe("schema prop honored", () => {
     expect(out.body).toContain("Author: me");
     expect(out.body).not.toContain("Action:");
   });
+
+  // Phase 08 UAT gap D: FilterChips' kindLabel switch hardcoded a
+  // youtube/reddit/... allowlist and let instagram_post fall through to
+  // "Other". An existing imported IG event's kind chip then read "Kind: Other"
+  // instead of "Kind: Instagram". This asserts the active-kind chip resolves
+  // the IG label.
+  it("FilterChips labels an instagram_post kind chip as 'Instagram', NOT 'Other' (Phase 08 UAT gap D)", async () => {
+    const FilterChips = (await import("../../src/lib/components/FilterChips.svelte")).default;
+    const out = render(FilterChips, {
+      props: {
+        filters: {
+          source: [],
+          kind: ["instagram_post"],
+          show: { kind: "any" as const },
+          defaultDateRange: false,
+          all: false,
+        },
+        sources: [],
+        games: [],
+        schema: ["kind", "source", "show", "authorIsMe"] as const,
+        onDismiss: () => {},
+        onOpenSheet: () => {},
+        onClearAll: () => {},
+      },
+    });
+    expect(out.body).toContain("Kind: Instagram");
+    expect(out.body).not.toContain("Kind: Other");
+  });
 });
 
 /**
