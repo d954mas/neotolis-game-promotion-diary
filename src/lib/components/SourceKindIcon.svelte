@@ -16,8 +16,23 @@
   //
   // Decorative — `aria-hidden="true"`. Adjacent text (the source-kind label
   // chip + display_name) carries the accessible name.
+  //
+  // EXHAUSTIVENESS: `kind` is the canonical SourceKind union (adapter.ts). The
+  // `assertSourceKindHasIcon` guard below makes a new SourceKind a COMPILE
+  // ERROR here until a matching {#if} branch is added — mirrors the central
+  // kind-display config's compile-enforcement philosophy.
 
-  type SourceKind =
+  import type { SourceKind } from "$lib/sources/adapter.js";
+
+  let { kind }: { kind: SourceKind } = $props();
+
+  // Compile-time exhaustiveness guard (type-level only — no reactive read).
+  // ICONED_SOURCE_KIND lists every kind the {#if} chain below renders. The
+  // `Exclude` check resolves to `never` ONLY when ICONED covers all of
+  // SourceKind; if adapter.ts adds a SourceKind without a branch here, the
+  // `never` constraint breaks and tsc fails. Keep this union in lockstep with
+  // the {#if} branches.
+  type IconedSourceKind =
     | "youtube_channel"
     | "reddit_account"
     | "reddit_subreddit"
@@ -25,8 +40,12 @@
     | "telegram_channel"
     | "discord_server"
     | "instagram_account";
-
-  let { kind }: { kind: SourceKind } = $props();
+  type _AllSourceKindsHaveIcon = Exclude<SourceKind, IconedSourceKind> extends never
+    ? true
+    : ["SourceKind missing a SourceKindIcon branch:", Exclude<SourceKind, IconedSourceKind>];
+  // Force the type to be evaluated; `true` holds only when the union is covered.
+  const _exhaustive: _AllSourceKindsHaveIcon = true;
+  void _exhaustive;
 </script>
 
 {#if kind === "youtube_channel"}

@@ -20,15 +20,12 @@
   // instead of a hard navigate to /sources/new. The /sources/new route
   // still exists as a fallback (non-JS / direct-link entry).
   import AddSourceModal from "$lib/components/sources/AddSourceModal.svelte";
+  import {
+    SOURCE_PLATFORM_GROUPS,
+    sourcePlatformGroupKey,
+  } from "$lib/sources/kind-display.js";
+  import type { SourceKind } from "$lib/sources/adapter.js";
   import type { PageData } from "./$types";
-
-  type SourceKind =
-    | "youtube_channel"
-    | "reddit_account"
-    | "reddit_subreddit"
-    | "twitter_account"
-    | "telegram_channel"
-    | "discord_server";
 
   type DataSourceDto = {
     id: string;
@@ -41,19 +38,6 @@
     deletedAt: Date | string | null;
     eventCount?: number;
   };
-
-  // Platform group order matches the prototype's SRC_PLATFORMS list:
-  // YouTube first, then Reddit. Newer platforms slot in by adapter
-  // registration; the prototype only ships YouTube + Reddit but the
-  // backend already produces all five enum values, so we cover them.
-  const PLATFORM_ORDER: ReadonlyArray<{ kind: SourceKind; label: string }> = [
-    { kind: "youtube_channel", label: "YouTube" },
-    { kind: "reddit_subreddit", label: "Reddit" },
-    { kind: "reddit_account", label: "Reddit" },
-    { kind: "twitter_account", label: "Twitter" },
-    { kind: "telegram_channel", label: "Telegram" },
-    { kind: "discord_server", label: "Discord" },
-  ];
 
   let { data }: { data: PageData } = $props();
 
@@ -100,31 +84,31 @@
   const totalEventCount = $derived(active.reduce((sum, s) => sum + (s.eventCount ?? 0), 0));
 
   // Group active sources by platform for the prototype-style
-  // sources-group-head dividers. The reddit_account and reddit_subreddit
-  // kinds collapse into a single "Reddit" group; the PLATFORM_ORDER list
-  // above pre-orders the groups.
-  type Group = { kind: SourceKind; label: string; items: DataSourceDto[] };
+  // sources-group-head dividers. Grouping is DERIVED from the central
+  // kind-display config (SOURCE_PLATFORM_GROUPS / sourcePlatformGroupKey):
+  // reddit_account + reddit_subreddit share the "reddit" group key, and a
+  // newly-added kind (instagram_account → "instagram") shows up automatically.
+  // No silent default — every SourceKind maps to a group via the config's
+  // `satisfies Record<SourceKind, …>` guarantee.
+  type Group = { key: string; order: number; kind: SourceKind; label: string; items: DataSourceDto[] };
   const groups: Group[] = $derived.by(() => {
-    const seenKinds = new Set<SourceKind>();
     const out: Group[] = [];
-    const labelToGroup = new Map<string, Group>();
-    for (const p of PLATFORM_ORDER) {
-      if (seenKinds.has(p.kind)) continue;
-      seenKinds.add(p.kind);
-      let g = labelToGroup.get(p.label);
+    const keyToGroup = new Map<string, Group>();
+    for (const s of active) {
+      const groupKey = sourcePlatformGroupKey(s.kind);
+      let g = keyToGroup.get(groupKey);
       if (!g) {
-        g = { kind: p.kind, label: p.label, items: [] };
-        labelToGroup.set(p.label, g);
+        const def = SOURCE_PLATFORM_GROUPS.find((p) => p.key === groupKey)!;
+        // Representative kind drives the group-head SourceKindIcon; the
+        // first source's kind is representative of the group.
+        g = { key: def.key, order: def.order, kind: s.kind, label: def.label, items: [] };
+        keyToGroup.set(groupKey, g);
         out.push(g);
       }
+      g.items.push(s);
     }
-    for (const s of active) {
-      const def = PLATFORM_ORDER.find((p) => p.kind === s.kind);
-      if (!def) continue;
-      const g = labelToGroup.get(def.label);
-      g?.items.push(s);
-    }
-    return out.filter((g) => g.items.length > 0);
+    // Sort groups by the config's platform order, stable across renders.
+    return out.sort((a, b) => a.order - b.order);
   });
 
   let restoreError = $state<string | null>(null);
@@ -313,7 +297,7 @@
               aria-expanded={expanded}
             >
               <span class="sources-group-chev" aria-hidden="true">></span>
-              <span class="kind-icon" aria-hidden="true">
+              <span class="kind-icon" aria-hidden="true" style="color: var(--k-{group.key});">
                 <SourceKindIcon kind={group.kind} />
               </span>
               <h2 class="sources-group-title">{group.label}</h2>
@@ -611,21 +595,10 @@
     gap: var(--s-2);
   }
 
-  .sources-group:nth-of-type(1) .sources-group-head .kind-icon {
-    color: var(--k-youtube);
-  }
-  .sources-group:nth-of-type(2) .sources-group-head .kind-icon {
-    color: var(--k-reddit);
-  }
-  .sources-group:nth-of-type(3) .sources-group-head .kind-icon {
-    color: var(--k-twitter);
-  }
-  .sources-group:nth-of-type(4) .sources-group-head .kind-icon {
-    color: var(--k-telegram);
-  }
-  .sources-group:nth-of-type(5) .sources-group-head .kind-icon {
-    color: var(--k-discord);
-  }
+  /* Group-head icon color is set inline via `style="color: var(--k-<key>)"`
+   * (config-driven, keyed on the platform group key) so it stays correct no
+   * matter which platforms the user has — the old `nth-of-type` rules
+   * mis-colored when a platform group was absent. */
 
   .quota-disclosure {
     border: 1px solid var(--border-hairline);
