@@ -540,6 +540,13 @@ export async function enrichFromUrl(
   // rare manual paste — the user simply types the title (the cost guardrail
   // still held: no credit was burned).
   if (parsed.kind === "instagram_post") {
+    // Recognition-only keeps the URL-parsed SHORTCODE — when no live fetch
+    // happens (provider unconfigured, cap-exhausted, error, deleted post) the
+    // media id is unknown and there is no instagram_posts cache row to match
+    // against anyway. Such an event won't enrich (thumbnail / stats / poll
+    // badge) until a real fetch resolves the media id; the next account-level
+    // poll inserts the canonical media-id row and the user can re-save / the
+    // walker fan-out covers it.
     const recognitionOnly: EnrichmentResult = {
       kind: "instagram_post",
       externalId: parsed.externalId,
@@ -591,7 +598,13 @@ export async function enrichFromUrl(
 
     return {
       kind: "instagram_post",
-      externalId: parsed.externalId,
+      // The MEDIA id (preview.externalId = post.id), NOT the URL shortcode. The
+      // single-post fetch UPSERTed instagram_posts + a snapshot keyed by the
+      // media id; saving the event with the shortcode would orphan it from the
+      // cache so feed-enrichment / metric-series / poll-state / refresh-now
+      // never match. Falls back to the parsed shortcode only if the adapter
+      // didn't surface a media id (defensive — the IG adapter always does).
+      externalId: preview.externalId ?? parsed.externalId,
       title: preview.title,
       occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,

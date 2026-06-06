@@ -497,6 +497,12 @@ async function fetchEventPreviewMetadata(
     authorUrl: ownerUrl,
     occurredAt: post.publishedAt,
     thumbnailUrl: post.thumbnailUrl ?? undefined,
+    // The MEDIA id is the canonical key for an instagram_post event — the
+    // walker, writeSnapshot, instagram_posts cache, poll-state, metric-series,
+    // and refresh-now all match instagram_posts.post_id == event.externalId.
+    // The URL-parsed externalId is the SHORTCODE (part of the permalink), which
+    // is NOT the media id, so the event must be saved with post.id to enrich.
+    externalId: post.id,
   };
 }
 
