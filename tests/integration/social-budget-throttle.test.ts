@@ -412,4 +412,113 @@ describe("social provider budget + throttle — operator audit hooks (F4)", () =
     expect(await readBalance()).toBe(3);
     expect(await countAudit("social.budget_exhausted")).toBe(0);
   });
+
+  // F3: the in-memory guards must be keyed by platform/provider, not date alone.
+  // A SECOND provider crossing the same threshold in the same process (no cron
+  // reset between the two) must write its OWN audit row — the first's guard must
+  // not suppress it.
+  const PROVIDER_B = "providerb";
+
+  it("a second provider crossing 80% in the same process is NOT suppressed by the first's guard", async () => {
+    await seedOperator();
+    await seedBalance(100000); // PLATFORM/PROVIDER
+    await db
+      .insert(socialProviderBalance)
+      .values({ platform: PLATFORM, provider: PROVIDER_B, prepaidBalanceCredits: 100000 })
+      .onConflictDoUpdate({
+        target: [socialProviderBalance.platform, socialProviderBalance.provider],
+        set: { prepaidBalanceCredits: 100000 },
+      });
+    await seedPoolUsed("cron", 79);
+    // Park provider B's cron usage at 79 too (its own counter rows).
+    await db
+      .insert(socialProviderSpend)
+      .values({
+        datePacific: todayPacific(),
+        platform: PLATFORM,
+        provider: PROVIDER_B,
+        poolKind: "cron",
+        creditsUsed: 79,
+      })
+      .onConflictDoUpdate({
+        target: [
+          socialProviderSpend.datePacific,
+          socialProviderSpend.platform,
+          socialProviderSpend.provider,
+          socialProviderSpend.poolKind,
+        ],
+        set: { creditsUsed: 79 },
+      });
+
+    // First provider crosses 80 → one audit row + populates its in-memory guard.
+    const a = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "cron",
+      units: 1,
+    });
+    expect(a).not.toBeNull();
+
+    // Second provider crosses 80 in the SAME process (no resetSocialDailyCap
+    // between) → must write its OWN row, not be suppressed by provider A's guard.
+    const b = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER_B,
+      origin: "cron",
+      units: 1,
+    });
+    expect(b).not.toBeNull();
+
+    const rows = await db
+      .select({ provider: sql<string>`${auditLog.metadata}->>'provider'` })
+      .from(auditLog)
+      .where(
+        sql`${auditLog.action} = 'social.provider_throttled'
+          AND ${auditLog.metadata}->>'state' = 'eighty'
+          AND ${auditLog.metadata}->>'platform' = ${PLATFORM}`,
+      );
+    const providers = new Set(rows.map((r) => r.provider));
+    expect(providers.has(PROVIDER)).toBe(true);
+    expect(providers.has(PROVIDER_B)).toBe(true);
+  });
+
+  it("a second provider exhausting its balance in the same process writes its OWN budget_exhausted row", async () => {
+    await seedOperator();
+    await seedBalance(1); // PLATFORM/PROVIDER exhausts on a unit-1 reserve
+    await db
+      .insert(socialProviderBalance)
+      .values({ platform: PLATFORM, provider: PROVIDER_B, prepaidBalanceCredits: 1 })
+      .onConflictDoUpdate({
+        target: [socialProviderBalance.platform, socialProviderBalance.provider],
+        set: { prepaidBalanceCredits: 1 },
+      });
+
+    const a = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "user",
+      units: 1,
+    });
+    expect(a).not.toBeNull();
+
+    // Provider B exhausts in the SAME process — its own row, not suppressed.
+    const b = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER_B,
+      origin: "user",
+      units: 1,
+    });
+    expect(b).not.toBeNull();
+
+    const rows = await db
+      .select({ provider: sql<string>`${auditLog.metadata}->>'provider'` })
+      .from(auditLog)
+      .where(
+        sql`${auditLog.action} = 'social.budget_exhausted'
+          AND ${auditLog.metadata}->>'platform' = ${PLATFORM}`,
+      );
+    const providers = new Set(rows.map((r) => r.provider));
+    expect(providers.has(PROVIDER)).toBe(true);
+    expect(providers.has(PROVIDER_B)).toBe(true);
+  });
 });
