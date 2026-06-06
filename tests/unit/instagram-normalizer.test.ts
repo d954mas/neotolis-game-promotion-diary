@@ -15,8 +15,9 @@ import {
   normalizeReelsResponse,
 } from "$lib/sources/instagram/server/normalize.js";
 
-// A media_type=2 (video/reel) item — has play_count + ig_play_count.
-const VIDEO_ITEM = {
+// A media_type=2 + product_type "clips" item — a REEL (the spike-confirmed
+// reel marker). Has play_count + ig_play_count.
+const REEL_ITEM = {
   id: "3896292935179184980_12109747",
   code: "DYSacf2OCta",
   media_type: 2,
@@ -29,6 +30,24 @@ const VIDEO_ITEM = {
   caption: { text: "First light from the new instrument." },
   image_versions2: { candidates: [{ url: "https://cdn.example/poster.jpg" }] },
   video_versions: [{ url: "https://cdn.example/video.mp4" }],
+};
+
+// A media_type=2 + product_type "feed" item — a PLAIN long-form feed VIDEO
+// (NOT a reel). Same integer media_type as a reel; only product_type tells
+// them apart. Also carries play_count.
+const VIDEO_ITEM = {
+  id: "3896292935179184980_99999999",
+  code: "DYfeedVideo",
+  media_type: 2,
+  product_type: "feed",
+  taken_at: 1780410000,
+  like_count: 120,
+  comment_count: 8,
+  play_count: 5400,
+  ig_play_count: 5400,
+  caption: { text: "A long-form feed video." },
+  image_versions2: { candidates: [{ url: "https://cdn.example/video-poster.jpg" }] },
+  video_versions: [{ url: "https://cdn.example/feed-video.mp4" }],
 };
 
 // A media_type=1 (photo) item — NO play_count / ig_play_count fields at all.
@@ -58,10 +77,11 @@ const CAROUSEL_ITEM = {
 };
 
 describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
-  it("maps a provider posts-shape item to NormalizedPost", () => {
-    const np = mapItemToNormalizedPost(VIDEO_ITEM);
+  it("maps a provider posts-shape REEL item to NormalizedPost", () => {
+    const np = mapItemToNormalizedPost(REEL_ITEM);
     expect(np.id).toBe("3896292935179184980_12109747");
-    expect(np.kind).toBe("video");
+    // product_type "clips" ⇒ reel (distinct from a plain video).
+    expect(np.kind).toBe("reel");
     // taken_at is unix SECONDS → publishedAt multiplies by 1000.
     expect(np.publishedAt.getTime()).toBe(1780416264 * 1000);
     expect(np.metrics.likes).toBe(566369);
@@ -71,8 +91,20 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
     expect(np.permalink).toBe("https://www.instagram.com/p/DYSacf2OCta/");
   });
 
+  it("distinguishes a reel (product_type=clips) from a plain video (product_type=feed)", () => {
+    // Both are integer media_type 2 — only product_type tells them apart.
+    // This FAILS on the pre-fix collapse-to-"video" behavior (which mapped
+    // every media_type=2 item to kind "video" and dropped the clips signal).
+    expect(mapItemToNormalizedPost(REEL_ITEM).kind).toBe("reel");
+    expect(mapItemToNormalizedPost(VIDEO_ITEM).kind).toBe("video");
+
+    // A photo (1) and carousel (8) are unaffected by the reel distinction.
+    expect(mapItemToNormalizedPost(PHOTO_ITEM).kind).toBe("image");
+    expect(mapItemToNormalizedPost(CAROUSEL_ITEM).kind).toBe("carousel");
+  });
+
   it("metrics by presence: a photo (media_type=1) has null views; a reel (media_type=2) maps play_count -> views", () => {
-    const reel = mapItemToNormalizedPost(VIDEO_ITEM);
+    const reel = mapItemToNormalizedPost(REEL_ITEM);
     expect(reel.metrics.views).toBe(4738925);
 
     const photo = mapItemToNormalizedPost(PHOTO_ITEM);
@@ -86,7 +118,7 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
   });
 
   it("shares is always null for Instagram", () => {
-    expect(mapItemToNormalizedPost(VIDEO_ITEM).metrics.shares).toBeNull();
+    expect(mapItemToNormalizedPost(REEL_ITEM).metrics.shares).toBeNull();
     expect(mapItemToNormalizedPost(PHOTO_ITEM).metrics.shares).toBeNull();
     expect(mapItemToNormalizedPost(CAROUSEL_ITEM).metrics.shares).toBeNull();
   });
@@ -97,11 +129,13 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
 
   it("normalizePostsResponse reads the TOP-LEVEL next_max_id cursor + more_available end signal", () => {
     const page = normalizePostsResponse({
-      items: [VIDEO_ITEM, PHOTO_ITEM, CAROUSEL_ITEM],
+      items: [REEL_ITEM, VIDEO_ITEM, PHOTO_ITEM, CAROUSEL_ITEM],
       next_max_id: "3902016900730110147_12109747",
       more_available: true,
     });
-    expect(page.posts).toHaveLength(3);
+    expect(page.posts).toHaveLength(4);
+    // The posts endpoint distinguishes all four forms via product_type.
+    expect(page.posts.map((p) => p.kind)).toEqual(["reel", "video", "image", "carousel"]);
     expect(page.nextCursor).toBe("3902016900730110147_12109747");
     expect(page.endOfFeed).toBe(false);
     expect(page.creditsUsed).toBe(1);
@@ -119,22 +153,35 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
 
   it("normalizeReelsResponse reads the NESTED paging_info.max_id cursor + unwraps items[].media", () => {
     const page = normalizeReelsResponse({
-      items: [{ media: VIDEO_ITEM }],
+      items: [{ media: REEL_ITEM }],
       paging_info: { max_id: "QVFCX1E0WHRuWE50c3p2QTU1SHJj", more_available: true },
     });
     expect(page.posts).toHaveLength(1);
     // Reels DO carry captions (supersedes RESEARCH Pitfall 8) — real caption used.
     expect(page.posts[0]!.caption).toBe("First light from the new instrument.");
     expect(page.posts[0]!.metrics.views).toBe(4738925);
+    // Every reels-endpoint item is a reel by definition.
+    expect(page.posts[0]!.kind).toBe("reel");
     // The cursor divergence is absorbed: caller sees only nextCursor.
     expect(page.nextCursor).toBe("QVFCX1E0WHRuWE50c3p2QTU1SHJj");
     expect(page.endOfFeed).toBe(false);
     expect(page.creditsUsed).toBe(1);
   });
 
+  it("normalizeReelsResponse: a reels item with NO/unexpected product_type still maps to reel", () => {
+    // The reels endpoint forces kind "reel" regardless of product_type — an
+    // item that arrived without "clips" must NOT collapse to "video".
+    const reelNoProductType = { ...VIDEO_ITEM, product_type: null };
+    const page = normalizeReelsResponse({
+      items: [{ media: reelNoProductType }],
+      paging_info: { max_id: null, more_available: false },
+    });
+    expect(page.posts[0]!.kind).toBe("reel");
+  });
+
   it("normalizeReelsResponse: paging_info.more_available=false signals end of feed", () => {
     const page = normalizeReelsResponse({
-      items: [{ media: VIDEO_ITEM }],
+      items: [{ media: REEL_ITEM }],
       paging_info: { max_id: null, more_available: false },
     });
     expect(page.endOfFeed).toBe(true);
