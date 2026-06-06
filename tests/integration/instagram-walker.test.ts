@@ -297,12 +297,12 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
   });
 });
 
-// F2 — the resumable backfill walker now SELF-ENQUEUES a continuation via the
-// outbox (atomic with the cursor write) so a multi-page bounded initial/historical
+// The resumable backfill walker self-enqueues a continuation via the outbox
+// (atomic with the cursor write) so a multi-page bounded initial/historical
 // backfill completes promptly instead of crawling one page per 6h cron tick.
 // Termination is load-bearing: continue ONLY on the deep branch while NOT complete,
 // NOT paused-by-budget, AND under the post-count cap.
-describe("instagram account walker — self-enqueued continuation (F2)", () => {
+describe("instagram account walker — self-enqueued continuation", () => {
   it("a 2-page deep backfill enqueues a continuation on tick 1, then completes on tick 2 with NO further continuation", async () => {
     await seedSource();
     // Tick 1: posts page 1 has a cursor (more available); reels empty (ends).

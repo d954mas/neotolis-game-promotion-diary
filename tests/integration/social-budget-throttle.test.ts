@@ -263,12 +263,11 @@ describe("social provider budget + throttle (prepaid credits)", () => {
   });
 });
 
-// F4 — reserveSocialCredits WIRES the operator audit hooks
-// (markSocialThrottleTransition / markSocialBudgetExhausted) that were declared
-// + documented but had ZERO call sites. A reservation that CROSSES into the 80%
-// / 95% daily-cap band writes social.provider_throttled; a reservation that
-// exhausts the prepaid balance writes social.budget_exhausted. Daily cap is 100
-// in the test env → eighty=80, ninetyfive=95, cron pool=80, user pool=20.
+// reserveSocialCredits wires the operator audit hooks: a reservation that
+// CROSSES into the 80% / 95% daily-cap band writes social.provider_throttled; a
+// reservation that exhausts the prepaid balance writes social.budget_exhausted.
+// Daily cap is 100 in the test env → eighty=80, ninetyfive=95, cron pool=80,
+// user pool=20.
 describe("social provider budget + throttle — operator audit hooks (F4)", () => {
   // ADMIN_EMAIL_ALLOWLIST is parsed (and the operator id cached) at env-load
   // time; CI boots with an empty allowlist so the audit fns no-op without a

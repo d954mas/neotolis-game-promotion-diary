@@ -1,4 +1,4 @@
-// F3 — createSource(instagram_account) maps a provider AdapterError to a clean
+// createSource(instagram_account) maps a provider AdapterError to a clean
 // AppError (4xx/5xx), NOT an opaque 500.
 //
 // canonicalizeOnCreate resolves the pasted handle → the stable IG account_id via

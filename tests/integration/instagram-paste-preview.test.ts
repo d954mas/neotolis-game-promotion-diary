@@ -139,14 +139,13 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     expect(single.calls[0]!.origin).toBe("user");
   });
 
-  it("end-to-end: a manually-pasted IG post saves with the MEDIA id so feed-enrichment matches the cache (thumbnail + stats) — F1", async () => {
-    // The review finding: instagramParseUrl returns the SHORTCODE as externalId,
-    // but fetchPostByUrl + writeSnapshot + the instagram_posts cache key on the
-    // MEDIA id. Saving the event with the shortcode orphans it from its cache row
-    // so the card never gets a thumbnail / stats / poll badge. This test drives
-    // the WHOLE pipeline (preview → createEvent → instagramEnrichFeedDtos) and
-    // asserts the saved event's externalId matches the cached post_id AND the
-    // feed card is enriched.
+  it("end-to-end: a manually-pasted IG post saves with the MEDIA id so feed-enrichment matches the cache (thumbnail + stats)", async () => {
+    // instagramParseUrl returns the SHORTCODE as externalId, but fetchPostByUrl +
+    // writeSnapshot + the instagram_posts cache key on the MEDIA id. Saving the
+    // event with the shortcode orphans it from its cache row so the card never
+    // gets a thumbnail / stats / poll badge. This test drives the whole pipeline
+    // (preview → createEvent → instagramEnrichFeedDtos) and asserts the saved
+    // event's externalId matches the cached post_id AND the feed card is enriched.
     const user = await seedUserDirectly({
       email: `ig-e2e-mediaid-${Math.random().toString(36).slice(2)}@t.io`,
     });

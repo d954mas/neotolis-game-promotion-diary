@@ -126,11 +126,9 @@ export async function reserveSocialCredits(args: {
   const eighty = throttleEighty();
   const ninetyfive = throttleNinetyfive();
 
-  // Threshold-crossing audit signals computed UNDER the lock (so they reflect
-  // the real before/after of THIS reservation) but EMITTED after the tx commits
-  // (AGENTS.md item 4 — audit failure must not block / deadlock the spend path).
-  // null = no crossing this reservation. The audit fns have their own
-  // once-per-cycle guards, so a re-emit on a duplicate crossing is a no-op.
+  // Threshold-crossing signals computed UNDER the lock (real before/after of THIS
+  // reservation) but EMITTED after commit (AGENTS.md item 4 — audit must not
+  // block / deadlock the spend path).
   let crossedEighty = false;
   let crossedNinetyfive = false;
   let balanceExhausted = false;
@@ -238,17 +236,14 @@ export async function reserveSocialCredits(args: {
     return { platform, provider, poolKind: origin, units: args.units };
   };
 
-  // ALWAYS run in our own transaction (no external tx) so the F4 audit below is
-  // unambiguously post-commit — an external tx that later rolled back would
-  // otherwise persist the audit + trip the in-memory once-per-cycle guards while
-  // the spend itself reverted.
+  // Own transaction always (never an external tx) so the operator audit below is
+  // unambiguously post-commit: a caller's tx that later rolled back would persist
+  // the audit + trip the in-memory once-per-cycle guards while the spend reverted.
   const permit = await db.transaction(run);
 
-  // Operator audit AFTER the spend tx commits (a denied reservation returns null
-  // and crosses nothing, so this is a no-op then). The 80% / 95% throttle bands
-  // pause non-essential lanes (D-15); the prepaid-balance-zero is the absolute
-  // hard ceiling (D-16). Each fn is idempotent per (date, state) / (platform,
-  // provider) so a re-cross within the same cycle writes no duplicate row.
+  // Operator audit AFTER commit (a denied reservation returns null and crosses
+  // nothing → no-op). Each fn is idempotent per (date, state) / (platform,
+  // provider), so a re-cross within the same cycle writes no duplicate row.
   if (permit !== null) {
     if (crossedEighty) {
       await markSocialThrottleTransition({

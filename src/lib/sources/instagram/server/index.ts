@@ -408,29 +408,20 @@ async function enqueueRefreshNow(input: {
 /**
  * fetchEventPreviewMetadata — adapter wrapper for the Add Event "Fetch" button
  * (POST /api/events/preview-url). Mirrors Reddit's synchronous single-post
- * preview (sources/reddit/server/index.ts): ONE by-URL provider request (1
- * credit), cap-gated against the per-user 50/day social cap, then UPSERTs the
- * instagram_posts cache + a snapshot row so the saved event renders fully in
- * /feed (thumbnail + stats + media-type pill) without a second fetch.
+ * preview: ONE by-URL provider request (1 credit), cap-gated, then UPSERTs the
+ * instagram_posts cache + a snapshot so the saved event renders fully in /feed.
  *
- * Why synchronous (NOT a queue): a one-off manual paste is rare; queues are for
- * bulk backfill/polling. 1 credit per preview gated by the daily cap is fine
- * (matches the architecture decision in issue #65).
- *
- * Cap + budget order (mirrors the refresh path):
- *   1. enforceAdapterUserQuota — the per-user 50/day social cap (counter is the
- *      audit_log SUM of event.poll_refreshed/stats_refresh rows; the row is
- *      written below AFTER a successful fetch so the count reflects real spend).
- *   2. reserveSocialCredits (origin="user") runs INSIDE instagramFetch when the
- *      "user" origin is threaded through — the operator prepaid budget gate.
- * On cap exhaustion the AppError 429 propagates so the caller (enrichFromUrl)
- * decides whether to surface it or soft-degrade to recognition-only. On budget
- * exhaustion the provider's instagramFetch throws AdapterError(operator-issue /
- * rate-limited), mapped below to the "unreachable" discriminator so the form
- * degrades to a manual title rather than hard-crashing.
- *
- * Provider not configured (SOC-05) → unreachable, mirroring Reddit's
- * empty-REDDIT_USER_AGENT preview behavior.
+ * Cap + budget order is load-bearing (mirrors the refresh path):
+ *   1. enforceAdapterUserQuota — the per-user 50/day social cap. Its counter is
+ *      the audit_log SUM of event.poll_refreshed/stats_refresh rows, and that row
+ *      is written below only AFTER a successful fetch, so the count reflects real
+ *      spend (and the gate fires on the SECOND paste, not the first).
+ *   2. reserveSocialCredits (origin="user") runs INSIDE instagramFetch — the
+ *      operator prepaid budget gate.
+ * Cap exhaustion → AppError 429 propagates (the caller decides surface vs
+ * soft-degrade). Budget exhaustion → AdapterError, mapped below to "unreachable"
+ * so the form degrades to a manual title. Provider not configured (SOC-05) →
+ * unreachable.
  */
 async function fetchEventPreviewMetadata(
   canonicalUrl: string,
