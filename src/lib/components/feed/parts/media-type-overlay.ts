@@ -1,9 +1,12 @@
-// Media-type corner-overlay glyphs — shared cross-source card helper.
+// Media-type corner-overlay pills — shared cross-source card helper.
 //
 // A feed card's thumbnail is its primary visual, but at a glance a photo, a
 // short-form clip, a carousel and a plain video look identical. This module
-// supplies a small corner glyph per content form so the user can tell them
-// apart. A bare photo gets NO overlay (a photo needs no marker).
+// supplies a small corner PILL per content form — icon + TEXT label — so the
+// user can tell them apart even over a busy, bright cover image. The TEXT is
+// the load-bearing disambiguator: a 22px icon-only glyph was unreadable over
+// detailed photos (a Reel looked like a Carousel looked like a Video). A bare
+// photo gets NO pill (a photo needs no marker).
 //
 // Lives in feed/parts/ (next to derive-card-data.ts) because it is a
 // cross-source concern: Instagram marks reel/carousel/video, YouTube marks
@@ -13,20 +16,23 @@
 //
 // Icon style mirrors $lib/components/kind-icon-svg.ts (the Iconography
 // Contract): 24px viewBox, fill="none", stroke="currentColor", round
-// caps/joins. Geometric forms only — NO brand marks. The card paints these
-// white over a subtle scrim so they stay legible on bright images.
+// caps/joins. Geometric forms only — NO brand marks. BaseFeedCard renders the
+// glyph + label in ONE pill treatment (white on a dark scrim) used by every
+// source — no per-card fork.
 
-/** The media_type values that earn a corner overlay (photo → none). */
+/** The media_type values that earn a corner pill (photo → none). */
 export type OverlayMediaType = "reel" | "carousel" | "video";
 
-interface OverlayGlyph {
-  /** a11y label — read verbatim into the overlay's aria-label / test id. */
+export interface OverlayPill {
+  /** The media kind, mirrored onto a data-attribute for per-type accent tints. */
+  type: OverlayMediaType;
+  /** Visible text + a11y label — rendered in the pill AND its aria-label. */
   label: string;
   /** Inner <svg> markup (paths only); the component wraps it in the <svg>. */
   inner: string;
 }
 
-const GLYPHS: Record<OverlayMediaType, OverlayGlyph> = {
+const GLYPHS: Record<OverlayMediaType, Omit<OverlayPill, "type">> = {
   // Reel — a clapperboard-style play marker: rounded film frame + play
   // triangle. Reads as "short-form video" without the IG brand mark.
   reel: {
@@ -51,14 +57,14 @@ const GLYPHS: Record<OverlayMediaType, OverlayGlyph> = {
 };
 
 /**
- * The overlay glyph for a media_type, or null when no overlay applies
- * (photo / image, an unknown value, or null). Pure — the card maps its
- * per-source media-type field through this and renders the glyph only
- * when non-null.
+ * The overlay pill ({ type, label, inner }) for a media_type, or null when no
+ * pill applies (photo / image, an unknown value, or null). Pure — the card
+ * maps its per-source media-type field through this and passes the pill to
+ * BaseFeedCard, which renders the icon+text markup only when non-null.
  */
-export function mediaTypeOverlay(mediaType: string | null | undefined): OverlayGlyph | null {
+export function mediaTypeOverlay(mediaType: string | null | undefined): OverlayPill | null {
   if (mediaType === "reel" || mediaType === "carousel" || mediaType === "video") {
-    return GLYPHS[mediaType];
+    return { type: mediaType, ...GLYPHS[mediaType] };
   }
   return null;
 }

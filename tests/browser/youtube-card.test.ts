@@ -1,15 +1,15 @@
 /**
- * Browser test for YoutubeFeedCard's media-type overlay.
+ * Browser test for YoutubeFeedCard's media-type pill.
  *
- * Mirrors the Instagram-card overlay assertions (instagram-card.test.ts) but
- * for YouTube: EVERY YouTube video shows the "video" play-glyph overlay for
- * now (Shorts-vs-full-video detection is deferred — see the TODO in
- * YoutubeFeedCard.svelte). The overlay reuses the SAME shared helper
- * (feed/parts/media-type-overlay.ts) and the SAME corner placement + scrim as
- * the Instagram card, so the two media cards stay visually consistent.
+ * Mirrors the Instagram-card pill assertions (instagram-card.test.ts) but for
+ * YouTube: EVERY YouTube video shows the "Video" icon+text pill for now
+ * (Shorts-vs-full-video detection is deferred — see the TODO in
+ * YoutubeFeedCard.svelte). The pill reuses the SAME shared helper
+ * (feed/parts/media-type-overlay.ts) and the SAME BaseFeedCard pill treatment
+ * as the Instagram card, so the two media cards stay visually consistent.
  *
  * Mounts the real Svelte component in Chromium (vitest browser project) so the
- * thumbnailOverlaySlot wiring is exercised against the actual compiled output,
+ * thumbnailOverlay wiring is exercised against the actual compiled output,
  * not a mock.
  */
 
@@ -71,23 +71,27 @@ afterEach(() => {
   if (host.parentNode) host.parentNode.removeChild(host);
 });
 
-describe("YoutubeFeedCard media-type overlay", () => {
-  it('renders the "video" play-glyph overlay (aria-label "Video") over the thumbnail', () => {
+describe("YoutubeFeedCard media-type pill", () => {
+  it('renders the "Video" icon+TEXT pill over the thumbnail', () => {
     const { card, component } = mountCard(makeEvent({ externalId: "dQw4w9WgXcQ" }));
-    const overlay = card.querySelector(".card-thumb .media-type-overlay") as HTMLElement | null;
-    expect(overlay, "YouTube card should render a media-type overlay").not.toBeNull();
-    expect(overlay!.getAttribute("aria-label")).toBe("Video");
-    // The glyph itself is an inline SVG inside the overlay.
-    expect(overlay!.querySelector("svg")).not.toBeNull();
+    const pill = card.querySelector(".card-thumb .media-type-pill") as HTMLElement | null;
+    expect(pill, "YouTube card should render a media-type pill").not.toBeNull();
+    // The TEXT label is the load-bearing disambiguator — visible text + aria.
+    expect(pill!.textContent?.trim()).toBe("Video");
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Video");
+    expect(pill!.getAttribute("aria-label")).toBe("Video");
+    expect(pill!.getAttribute("data-media-type")).toBe("video");
+    // A small glyph rides alongside the text for visual flavor.
+    expect(pill!.querySelector("svg")).not.toBeNull();
     unmount(component);
   });
 
-  it("overlay sits over the IMAGE, not the empty placeholder (no externalId → no thumbnail → no overlay)", () => {
+  it("pill sits over the IMAGE, not the empty placeholder (no externalId → no thumbnail → no pill)", () => {
     // No externalId → deriveThumbnailUrl returns null → BaseFeedCard shows the
-    // .card-thumb.empty KindIcon placeholder and gates the overlay slot off (it
-    // marks a picture, not a placeholder).
+    // .card-thumb.empty KindIcon placeholder and gates the pill off (it marks a
+    // picture, not a placeholder).
     const { card, component } = mountCard(makeEvent({ externalId: null }));
-    expect(card.querySelector(".media-type-overlay")).toBeNull();
+    expect(card.querySelector(".media-type-pill")).toBeNull();
     unmount(component);
   });
 });

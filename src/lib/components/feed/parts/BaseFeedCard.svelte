@@ -26,6 +26,7 @@
   import KindIcon from "../../KindIcon.svelte";
   import AuthorAvatar from "./AuthorAvatar.svelte";
   import { eventKindLabel } from "$lib/sources/kind-display.js";
+  import type { OverlayPill } from "./media-type-overlay.js";
   import type { CardEventKind, CardEventLite } from "./derive-card-data.js";
   import {
     formatOccurredAt,
@@ -55,7 +56,7 @@
     currentUserName,
     statsSlot,
     extraSlot,
-    thumbnailOverlaySlot,
+    thumbnailOverlay = null,
     onThumbnailError,
   }: {
     event: CardEventLite;
@@ -89,11 +90,14 @@
      *  but kept so future per-platform additions don't need another
      *  prop drop. */
     extraSlot?: import("svelte").Snippet;
-    /** Optional corner overlay rendered INSIDE .card-thumb, over the <img>.
-     *  Used by Instagram to mark a reel / carousel / video with a small
-     *  glyph (a bare photo gets none). Rendered only when a thumbnail image
-     *  is shown so it sits on the picture, not on the empty placeholder. */
-    thumbnailOverlaySlot?: import("svelte").Snippet;
+    /** Optional media-type pill rendered INSIDE .card-thumb, top-left over the
+     *  <img>. The shared mediaTypeOverlay() helper produces the { type, label,
+     *  inner } shape; BaseFeedCard renders the icon+TEXT pill markup + CSS once
+     *  (ONE treatment for every source — no per-card fork). Used by Instagram
+     *  to mark reel / carousel / video and by YouTube to mark video; a bare
+     *  photo passes null → no pill. Rendered only when a thumbnail image is
+     *  shown so it sits on the picture, not on the empty placeholder. */
+    thumbnailOverlay?: OverlayPill | null;
     /** Optional thumbnail-load-error handler. Used by hotlinked-thumbnail
      *  cards (Instagram, D-08) whose CDN URL expires — on <img> error the
      *  wrapper flips its thumbnail to null so the .card-thumb.empty
@@ -379,7 +383,25 @@
         {:else}
           <KindIcon kind={event.kind} size={36} />
         {/if}
-        {#if thumbnailUrl && thumbnailOverlaySlot}{@render thumbnailOverlaySlot()}{/if}
+        {#if thumbnailUrl && thumbnailOverlay}
+          <span
+            class="media-type-pill"
+            data-media-type={thumbnailOverlay.type}
+            aria-label={thumbnailOverlay.label}
+            title={thumbnailOverlay.label}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true">{@html thumbnailOverlay.inner}</svg
+            >
+            <span class="media-type-pill-label">{thumbnailOverlay.label}</span>
+          </span>
+        {/if}
       </div>
     {/if}
 
@@ -714,6 +736,55 @@
   .card-thumb.empty :global(svg) {
     color: var(--card-accent, var(--text-4));
     opacity: 0.45;
+  }
+
+  /* Media-type pill (reel / carousel / video) — THE single shared treatment
+   * for every source (Instagram, YouTube). Top-LEFT of the thumbnail, over the
+   * image, clear of the top-right sync/overflow affordances. Icon + TEXT: the
+   * text is what disambiguates a Reel from a Carousel from a Video over a busy
+   * bright cover — a 22px icon-only glyph was unreadable. A solid dark scrim +
+   * backdrop-blur keeps the white label legible on any image. pointer-events:
+   * none so it never steals the card's open-detail click. */
+  .media-type-pill {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: calc(100% - 12px);
+    padding: 3px 8px 3px 6px;
+    border-radius: var(--r-pill);
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(2px);
+    color: #fff;
+    font-size: 11.5px;
+    font-weight: var(--w-sb);
+    line-height: 1;
+    letter-spacing: 0.01em;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .media-type-pill svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    display: block;
+  }
+  .media-type-pill-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Cheap per-type accent tints — the text already disambiguates, this is just
+   * a subtle reinforcement (reel/video = warm play accent, carousel = cool). */
+  .media-type-pill[data-media-type="reel"],
+  .media-type-pill[data-media-type="video"] {
+    background: color-mix(in oklab, var(--accent) 24%, rgba(0, 0, 0, 0.72));
+  }
+  .media-type-pill[data-media-type="carousel"] {
+    background: color-mix(in oklab, #3a6df0 24%, rgba(0, 0, 0, 0.72));
   }
   .card-notes {
     margin: 0;

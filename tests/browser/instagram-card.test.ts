@@ -125,12 +125,12 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
     unmount(component);
   });
 
-  it("media-type overlay: reel / carousel / video each render the correct corner glyph; photo renders none", () => {
+  it("media-type pill: reel / carousel / video each render the correct icon+TEXT pill; photo renders none", () => {
     const cases: Array<{ mediaType: string; label: string | null }> = [
       { mediaType: "reel", label: "Reel" },
       { mediaType: "carousel", label: "Carousel" },
       { mediaType: "video", label: "Video" },
-      // A bare photo (image) needs no marker — no overlay rendered.
+      // A bare photo (image) needs no marker — no pill rendered.
       { mediaType: "image", label: null },
     ];
 
@@ -142,22 +142,27 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
           mediaType,
         }),
       );
-      const overlay = card.querySelector(".card-thumb .media-type-overlay") as HTMLElement | null;
+      const pill = card.querySelector(".card-thumb .media-type-pill") as HTMLElement | null;
       if (label === null) {
-        expect(overlay, `${mediaType} should render NO overlay`).toBeNull();
+        expect(pill, `${mediaType} should render NO pill`).toBeNull();
       } else {
-        expect(overlay, `${mediaType} should render an overlay`).not.toBeNull();
-        expect(overlay!.getAttribute("aria-label")).toBe(label);
-        // The glyph itself is an inline SVG inside the overlay.
-        expect(overlay!.querySelector("svg")).not.toBeNull();
+        expect(pill, `${mediaType} should render a pill`).not.toBeNull();
+        // The TEXT label is the load-bearing disambiguator — it renders as
+        // visible text inside the pill AND mirrors into aria-label.
+        expect(pill!.textContent?.trim()).toBe(label);
+        expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe(label);
+        expect(pill!.getAttribute("aria-label")).toBe(label);
+        expect(pill!.getAttribute("data-media-type")).toBe(mediaType);
+        // A small glyph rides alongside the text for visual flavor.
+        expect(pill!.querySelector("svg")).not.toBeNull();
       }
       unmount(component);
     }
   });
 
-  it("media-type overlay sits over the IMAGE, not the empty placeholder (no thumbnail → no overlay)", () => {
+  it("media-type pill sits over the IMAGE, not the empty placeholder (no thumbnail → no pill)", () => {
     // No thumbnail URL → BaseFeedCard shows the .card-thumb.empty placeholder
-    // and the overlay slot is gated off (it marks a picture, not a placeholder).
+    // and the pill is gated off (it marks a picture, not a placeholder).
     const { card, component } = mountCard(
       makeEvent({
         stats: { viewCount: 1, likeCount: 1, commentCount: 1, polledAt: new Date() },
@@ -165,7 +170,7 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
         mediaType: "reel",
       }),
     );
-    expect(card.querySelector(".media-type-overlay")).toBeNull();
+    expect(card.querySelector(".media-type-pill")).toBeNull();
     unmount(component);
   });
 
