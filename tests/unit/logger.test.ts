@@ -68,6 +68,18 @@ describe("logger redaction", () => {
     }
   });
 
+  it("redacts the operator API-key envelope field names (YouTube + ScrapeCreators)", async () => {
+    // Both keys survive in the env singleton for the process lifetime after
+    // scrubKekFromEnv() wipes them from process.env (env.ts SECRET_KEYS). The
+    // transitive *.apiKey path does NOT match these singleton field names, so
+    // each gets a dedicated REDACT_PATHS entry. This asserts the env-key
+    // (uppercase snake) shape — a logger.info({ env }) dump must redact them.
+    const { REDACT_PATHS } = await import("../../src/lib/server/logger.js");
+    for (const field of ["*.SERVICE_YOUTUBE_API_KEYS", "*.SCRAPECREATORS_API_KEY"]) {
+      expect(REDACT_PATHS, `${field} must be a dedicated redact path`).toContain(field);
+    }
+  });
+
   it("process.env.* is not accessed outside src/lib/server/config/env.ts", async () => {
     // Static-grep tripwire. The ESLint contract is configured separately,
     // but a runtime guard catches the case where the lint config drifts or a
