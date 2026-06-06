@@ -90,10 +90,10 @@ async function seedBalance(credits: number): Promise<void> {
     });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   // Clear the module-level audit-emission + balance-exhausted guards so each
   // test starts from a clean slate (the afterEach TRUNCATE clears the rows).
-  resetSocialDailyCap();
+  await resetSocialDailyCap();
 });
 
 describe("social provider budget + throttle (prepaid credits)", () => {
