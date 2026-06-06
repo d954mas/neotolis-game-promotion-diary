@@ -362,10 +362,12 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     // No throw — the form must still let the user save a bare event.
     const result = await enrichFromUrl(user.id, "https://www.instagram.com/p/NOPE1/", "127.0.0.1");
 
-    // Recognition-only shape: kind + shortcode + canonical permalink, EMPTY title.
+    // Recognition-only shape: kind + canonical permalink, EMPTY title, and a
+    // NULL externalId (NOT the shortcode — storing it would strand the event on
+    // the pending badge, issue #69).
     expect(result.kind).toBe("instagram_post");
     expect(result.title).toBe("");
-    expect(result.externalId).toBe("NOPE1");
+    expect(result.externalId).toBeNull();
     expect(result.canonicalUrl).toBe("https://www.instagram.com/p/NOPE1/");
     expect(result.thumbnailUrl).toBeNull();
 
@@ -391,7 +393,7 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
 
     expect(result.kind).toBe("instagram_post");
     expect(result.title).toBe("");
-    expect(result.externalId).toBe("BOOM1");
+    expect(result.externalId).toBeNull();
   });
 
   it("an EXPECTED adapter throw (AppError) degrades to recognition-only (N-1)", async () => {
@@ -412,7 +414,7 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
       );
       expect(result.kind).toBe("instagram_post");
       expect(result.title).toBe("");
-      expect(result.externalId).toBe("APPERR1");
+      expect(result.externalId).toBeNull();
     } finally {
       spy.mockRestore();
     }
@@ -449,6 +451,7 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
 
     expect(result.kind).toBe("instagram_post");
     expect(result.title).toBe("");
+    expect(result.externalId).toBeNull();
     // The provider WAS called (the cap was consulted) but no cache row landed.
     expect(single.calls).toHaveLength(1);
     const cached = await db.select().from(instagramPosts);

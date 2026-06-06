@@ -543,13 +543,14 @@ export async function enrichFromUrl(
   // the soft path over a hard 429 — no credit was burned, so the cost guardrail
   // still held.
   if (parsed.kind === "instagram_post") {
-    // Recognition-only carries the URL SHORTCODE, not the media id the cache keys
-    // on (no live fetch). It won't enrich, and a later account poll won't re-bind
-    // it (that poll creates a SEPARATE media-id-keyed event) — re-paste once the
-    // provider recovers to get an enriched event.
+    // Recognition-only has NO media id (no live fetch resolved one). externalId
+    // is null, NOT the URL shortcode: the shortcode is not the cache key, so
+    // storing it would strand the event on the "pending" badge with no stats
+    // forever (issue #69). null yields an honest stats-less manual card; re-paste
+    // once the provider recovers to get an enriched, media-id-keyed event.
     const recognitionOnly: EnrichmentResult = {
       kind: "instagram_post",
-      externalId: parsed.externalId,
+      externalId: null,
       title: "",
       occurredAt: null,
       thumbnailUrl: null,
@@ -602,9 +603,10 @@ export async function enrichFromUrl(
       // single-post fetch UPSERTed instagram_posts + a snapshot keyed by the
       // media id; saving the event with the shortcode would orphan it from the
       // cache so feed-enrichment / metric-series / poll-state / refresh-now
-      // never match. Falls back to the parsed shortcode only if the adapter
-      // didn't surface a media id (defensive — the IG adapter always does).
-      externalId: preview.externalId ?? parsed.externalId,
+      // never match. Falls back to null (never the shortcode) if the adapter
+      // somehow didn't surface a media id (defensive — the IG adapter always
+      // does): an unenriched-but-honest card beats a permanently-pending one.
+      externalId: preview.externalId ?? null,
       title: preview.title,
       occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,
