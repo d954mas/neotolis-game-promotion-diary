@@ -6,7 +6,7 @@
 // uniform ProviderPage hides the posts(next_max_id)/reels(paging_info.max_id)
 // cursor divergence (Plan 02), so the walker only ever sees nextCursor.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { ProviderPage } from "../../src/lib/sources/social-provider.js";
@@ -17,9 +17,16 @@ import type { ProviderPage } from "../../src/lib/sources/social-provider.js";
 interface ScriptedProvider {
   pages: { posts: ProviderPage[]; reels: ProviderPage[] };
   calls: Array<{ feed: "posts" | "reels"; cursor: string | null }>;
+  /** When set for a feed, the next fetchPosts call for that feed throws an
+   *  AdapterError of this category (budget-pause simulation) instead of paging. */
+  throwOn: { posts?: "rate-limited" | "operator-issue"; reels?: "rate-limited" | "operator-issue" };
 }
 
-const provider: ScriptedProvider = { pages: { posts: [], reels: [] }, calls: [] };
+const provider: ScriptedProvider = {
+  pages: { posts: [], reels: [] },
+  calls: [],
+  throwOn: {},
+};
 
 function emptyPage(): ProviderPage {
   return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1 };
@@ -42,6 +49,13 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
         ): Promise<ProviderPage> {
           const feed = opts.kindFilter ?? "posts";
           provider.calls.push({ feed, cursor });
+          const category = provider.throwOn[feed];
+          if (category !== undefined) {
+            // Simulate the BUDGET-02 reserve refusal the HTTP seam raises when the
+            // operator's prepaid budget / daily-cap is exhausted (instagram/http.ts).
+            const { AdapterError: Err } = await import("../../src/lib/sources/errors.js");
+            throw new Err("scripted budget pause", { category });
+          }
           const next = provider.pages[feed].shift();
           return next ?? emptyPage();
         },
@@ -54,8 +68,10 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
+const { env } = await import("../../src/lib/server/config/env.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { outbox } = await import("../../src/lib/server/db/schema/outbox.js");
 const { dataSourceChannelState } =
   await import("../../src/lib/server/db/schema/data-source-channel-state.js");
 const { instagramPosts } = await import("../../src/lib/server/db/schema/index.js");
@@ -65,6 +81,14 @@ const { getInstagramBackfillState } =
   await import("../../src/lib/sources/instagram/server/backfill-state.js");
 
 const ACCOUNT = "acct-walker";
+
+/** Read pending continuation jobs queued for THIS account via the outbox. The
+ *  continuation is enqueued via enqueueViaOutbox (atomic with the cursor write),
+ *  so the queue intent lives in the outbox table until the forwarder ships it. */
+async function readContinuationOutbox() {
+  const rows = await db.select().from(outbox).where(eq(outbox.queue, "instagram.backfill.account"));
+  return rows.filter((r) => (r.payload as { channelKey?: string }).channelKey === ACCOUNT);
+}
 
 function post(id: string, daysAgo: number, kind: "image" | "video" = "image") {
   return {
@@ -111,9 +135,17 @@ async function readChannelState() {
   return row;
 }
 
+const envMut = env as { SOCIAL_BACKFILL_MAX_POSTS: number };
+let originalMaxPosts: number;
+
 beforeEach(() => {
   provider.pages = { posts: [], reels: [] };
   provider.calls = [];
+  provider.throwOn = {};
+  originalMaxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
+});
+afterEach(() => {
+  envMut.SOCIAL_BACKFILL_MAX_POSTS = originalMaxPosts;
 });
 
 describe("instagram account walker (resumable, cursor-persisted)", () => {
@@ -262,5 +294,189 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
     const cs = await readChannelState();
     // last_polled stamped, but NOT marked complete (would silently swallow a typo).
     expect(cs?.backfillComplete).toBe(false);
+  });
+});
+
+// The resumable backfill walker self-enqueues a continuation via the outbox
+// (atomic with the cursor write) so a multi-page bounded initial/historical
+// backfill completes promptly instead of crawling one page per 6h cron tick.
+// Termination is load-bearing: continue ONLY on the deep branch while NOT complete,
+// NOT paused-by-budget, AND under the post-count cap.
+describe("instagram account walker — self-enqueued continuation", () => {
+  it("a 2-page deep backfill enqueues a continuation on tick 1, then completes on tick 2 with NO further continuation", async () => {
+    await seedSource();
+    // Tick 1: posts page 1 has a cursor (more available); reels empty (ends).
+    provider.pages.posts = [
+      {
+        posts: [post("c1", 1), post("c2", 2)],
+        nextCursor: "PAGE2",
+        endOfFeed: false,
+        creditsUsed: 1,
+      },
+    ];
+    provider.pages.reels = [emptyPage()];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    // Account NOT complete (posts feed still has a cursor) AND deep branch →
+    // exactly ONE continuation queued via the outbox (atomic with cursor write).
+    let cs = await readChannelState();
+    expect(cs?.backfillComplete).toBe(false);
+    let continuations = await readContinuationOutbox();
+    expect(continuations).toHaveLength(1);
+    const payload = continuations[0]!.payload as {
+      channelKey: string;
+      flow: string;
+      triggerUserId?: string;
+    };
+    expect(payload.channelKey).toBe(ACCOUNT);
+    expect(payload.flow).toBe("initial");
+    // Continuation runs on the cron pool — triggerUserId omitted (trigger pays once).
+    expect(payload.triggerUserId).toBeUndefined();
+    // singletonKey dedupes parallel triggers for this account.
+    expect((continuations[0]!.options as { singletonKey?: string }).singletonKey).toBe(
+      `backfill-account-${ACCOUNT}`,
+    );
+
+    // Tick 2 (the continuation): posts page 2 ends → both feeds complete →
+    // account complete → NO further continuation.
+    provider.pages.posts = [
+      { posts: [post("c3", 3)], nextCursor: null, endOfFeed: true, creditsUsed: 1 },
+    ];
+    provider.pages.reels = []; // reels already complete — walker skips it
+
+    await handleBackfillAccount({
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    cs = await readChannelState();
+    expect(cs?.backfillComplete).toBe(true);
+    // Still exactly ONE continuation row total — tick 2 did NOT enqueue another
+    // (account complete is the terminal stop; no infinite loop).
+    continuations = await readContinuationOutbox();
+    expect(continuations).toHaveLength(1);
+
+    const inserted = await db.select().from(events).where(eq(events.kind, "instagram_post"));
+    expect(inserted.map((e) => e.externalId).sort()).toEqual(["c1", "c2", "c3"]);
+  });
+
+  it("a budget-paused tick enqueues NO continuation (cron retries after the daily-cap reset)", async () => {
+    await seedSource();
+    // The posts feed reserve is refused (budget exhausted) → AdapterError
+    // rate-limited → the walker pauses this tick and persists the cursor, but
+    // MUST NOT self-continue (the next reserve would be refused too — spin).
+    provider.throwOn.posts = "rate-limited";
+    provider.pages.reels = [emptyPage()];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    const cs = await readChannelState();
+    expect(cs?.backfillComplete).toBe(false);
+    const st = await getInstagramBackfillState(ACCOUNT);
+    expect(st.operatorPaused).toBe(true);
+    // No continuation — a budget pause is NOT a resume trigger.
+    const continuations = await readContinuationOutbox();
+    expect(continuations).toHaveLength(0);
+  });
+
+  it("a cap-reached tick enqueues NO continuation (the post-count cap is a terminal bound)", async () => {
+    envMut.SOCIAL_BACKFILL_MAX_POSTS = 2;
+    await seedSource();
+    // The provider would page forever (cursor always set), but the cap=2 stops
+    // the deep walk after 2 posts → the posts feed is marked complete at the cap
+    // → account complete → NO continuation.
+    provider.pages.posts = [
+      {
+        posts: [post("k1", 1), post("k2", 2)],
+        nextCursor: "MORE",
+        endOfFeed: false,
+        creditsUsed: 1,
+      },
+    ];
+    provider.pages.reels = [emptyPage()];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    const st = await getInstagramBackfillState(ACCOUNT);
+    expect(st.collected).toBe(2); // exactly the cap
+    expect(st.posts.complete).toBe(true);
+    const cs = await readChannelState();
+    expect(cs?.backfillComplete).toBe(true);
+    const continuations = await readContinuationOutbox();
+    expect(continuations).toHaveLength(0);
+  });
+
+  it("an incremental new-only sweep NEVER self-continues even when a feed page returns a cursor (page-1-reset would loop)", async () => {
+    // Seed a COMPLETE account so a subsequent tick takes the incremental/exhausted
+    // branch (which resets every feed to page 1 each tick — a continuation there
+    // would re-fetch page 1 forever).
+    await seedSource();
+    // Tick 1 (deep): each feed returns ONE post then ends → account complete.
+    // (A genuinely-empty first page on a brand-new source trips the Pitfall-4
+    // not_found heuristic instead of completing — so we collect a real post.)
+    provider.pages.posts = [
+      { posts: [post("seed_p", 1)], nextCursor: null, endOfFeed: true, creditsUsed: 1 },
+    ];
+    provider.pages.reels = [
+      { posts: [post("seed_r", 1, "video")], nextCursor: null, endOfFeed: true, creditsUsed: 1 },
+    ];
+    await handleBackfillAccount({
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+    expect((await readChannelState())?.backfillComplete).toBe(true);
+    // Clear any continuation noise from the deep tick (there should be none —
+    // tick 1 completed the account, so shouldContinue was false).
+    await db.delete(outbox);
+
+    // Tick 2 (incremental/exhausted): posts page 1 returns a cursor (more new
+    // posts), so the feed is NOT marked complete this tick — but the incremental
+    // branch resets to page 1 every tick, so a continuation would loop.
+    provider.pages.posts = [
+      { posts: [post("n1", 1)], nextCursor: "NEWMORE", endOfFeed: false, creditsUsed: 1 },
+    ];
+    provider.pages.reels = [emptyPage()];
+    await handleBackfillAccount({
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "incremental",
+      },
+    });
+
+    // No continuation — the incremental branch is single-page-by-design.
+    const continuations = await readContinuationOutbox();
+    expect(continuations).toHaveLength(0);
   });
 });

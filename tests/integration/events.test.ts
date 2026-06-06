@@ -1348,6 +1348,29 @@ describe("createEventSchema + preview-url", () => {
     expect(body.error).toBe("unsupported_url");
   });
 
+  it("POST /api/events/preview-url with a non-http(s) scheme → 422 'validation_failed' at the boundary", async () => {
+    // previewUrlSchema restricts the URL scheme to http(s) (P2-3): a file:// /
+    // gopher:// URL is rejected at the route before enrichFromUrl runs, so the
+    // 422 carries the schema's "validation_failed" code (NOT "unsupported_url",
+    // which is the service-layer parse-miss). "validate at boundaries" made
+    // explicit.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t8b-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events/preview-url", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url: "file:///etc/passwd" }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("validation_failed");
+  });
+
   it("anonymous POST /api/events/preview-url → 401 unauthorized (sweep complement)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();

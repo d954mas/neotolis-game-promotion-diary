@@ -12,12 +12,15 @@
 // pool/throttle gates fire first; the hard-ceiling test writes a small balance
 // row directly to assert the "cannot spend what isn't there" path.
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
+import { seedUserDirectly } from "./helpers.js";
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { socialProviderSpend, socialProviderBalance } =
   await import("../../src/lib/server/db/schema/index.js");
+const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
+const { env } = await import("../../src/lib/server/config/env.js");
 const {
   reserveSocialCredits,
   getSocialThrottleState,
@@ -257,5 +260,265 @@ describe("social provider budget + throttle (prepaid credits)", () => {
     expect(view.creditsUsed).toBe(7);
     expect(view.dailyCap).toBe(100);
     expect(view.prepaidBalance).toBe(100000 - 7);
+  });
+});
+
+// reserveSocialCredits wires the operator audit hooks: a reservation that
+// CROSSES into the 80% / 95% daily-cap band writes social.provider_throttled; a
+// reservation that exhausts the prepaid balance writes social.budget_exhausted.
+// Daily cap is 100 in the test env → eighty=80, ninetyfive=95, cron pool=80,
+// user pool=20.
+describe("social provider budget + throttle — operator audit hooks (F4)", () => {
+  // ADMIN_EMAIL_ALLOWLIST is parsed (and the operator id cached) at env-load
+  // time; CI boots with an empty allowlist so the audit fns no-op without a
+  // resolvable operator. Mutate the live Set + clear the resolver cache (via
+  // resetSocialDailyCap) so the operator resolves to a seeded user — then the
+  // audit row actually lands and the WIRING is observable.
+  const allowlistMut = env as { ADMIN_EMAIL_ALLOWLIST: Set<string> };
+  let originalAllowlist: Set<string>;
+  const OPERATOR_EMAIL = "op-social-audit@test.local";
+
+  async function seedOperator(): Promise<void> {
+    await seedUserDirectly({ email: OPERATOR_EMAIL });
+    allowlistMut.ADMIN_EMAIL_ALLOWLIST = new Set([OPERATOR_EMAIL]);
+    // Clear the cached operator id + audit-emission guards so the resolver
+    // re-resolves against the mutated allowlist for this test.
+    await resetSocialDailyCap();
+  }
+
+  async function countAudit(action: string): Promise<number> {
+    const rows = await db
+      .select({ id: auditLog.id })
+      .from(auditLog)
+      .where(sql`${auditLog.action} = ${action}`);
+    return rows.length;
+  }
+
+  beforeEach(() => {
+    originalAllowlist = env.ADMIN_EMAIL_ALLOWLIST;
+  });
+  afterEach(() => {
+    allowlistMut.ADMIN_EMAIL_ALLOWLIST = originalAllowlist;
+  });
+
+  it("a reservation that crosses 80% writes ONE social.provider_throttled audit row (state=eighty)", async () => {
+    await seedOperator();
+    // Park cron usage at 79 so a cron reservation of 1 lands total at 80 (= the
+    // eighty band). Cron pool limit is 80 → 79+1=80 is allowed.
+    await seedPoolUsed("cron", 79);
+    await seedBalance(100000);
+    expect(await countAudit("social.provider_throttled")).toBe(0);
+
+    const permit = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "cron",
+      units: 1,
+    });
+    expect(permit).not.toBeNull();
+
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(
+        sql`${auditLog.action} = 'social.provider_throttled'
+          AND ${auditLog.metadata}->>'state' = 'eighty'
+          AND ${auditLog.metadata}->>'platform' = ${PLATFORM}
+          AND ${auditLog.metadata}->>'provider' = ${PROVIDER}`,
+      );
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.metadata as { date_pacific?: string }).date_pacific).toBe(todayPacific());
+    expect(await getSocialThrottleState(PLATFORM, PROVIDER)).toBe("eighty");
+  });
+
+  it("a reservation that crosses 95% writes social.provider_throttled (state=ninetyfive)", async () => {
+    await seedOperator();
+    // Total at 94 (cron 80 + user 14); a user reservation of 1 lands total at 95
+    // (the ninetyfive band). User pool 14+1=15 ≤ 20; total 94+1=95 ≤ 95 allowed.
+    await seedPoolUsed("cron", 80);
+    await seedPoolUsed("user", 14);
+    await seedBalance(100000);
+
+    const permit = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "user",
+      units: 1,
+    });
+    expect(permit).not.toBeNull();
+
+    const rows = await db
+      .select({ id: auditLog.id })
+      .from(auditLog)
+      .where(
+        sql`${auditLog.action} = 'social.provider_throttled'
+          AND ${auditLog.metadata}->>'state' = 'ninetyfive'`,
+      );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("a reservation BELOW the 80% band writes NO throttle audit (transition, not every call)", async () => {
+    await seedOperator();
+    await seedBalance(100000);
+
+    const permit = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "user",
+      units: 1,
+    });
+    expect(permit).not.toBeNull();
+    expect(await countAudit("social.provider_throttled")).toBe(0);
+  });
+
+  it("a reservation that exhausts the prepaid balance writes ONE social.budget_exhausted audit row", async () => {
+    await seedOperator();
+    // Balance of exactly 1 → a reservation of 1 lands the balance at 0 (exhausted).
+    await seedBalance(1);
+    expect(await countAudit("social.budget_exhausted")).toBe(0);
+
+    const permit = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "user",
+      units: 1,
+    });
+    expect(permit).not.toBeNull();
+    expect(await readBalance()).toBe(0);
+
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(
+        sql`${auditLog.action} = 'social.budget_exhausted'
+          AND ${auditLog.metadata}->>'platform' = ${PLATFORM}
+          AND ${auditLog.metadata}->>'provider' = ${PROVIDER}`,
+      );
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.metadata as { date_pacific?: string }).date_pacific).toBe(todayPacific());
+  });
+
+  it("a reservation that leaves the balance above 0 writes NO budget_exhausted audit", async () => {
+    await seedOperator();
+    await seedBalance(5);
+
+    const permit = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "user",
+      units: 2,
+    });
+    expect(permit).not.toBeNull();
+    expect(await readBalance()).toBe(3);
+    expect(await countAudit("social.budget_exhausted")).toBe(0);
+  });
+
+  // F3: the in-memory guards must be keyed by platform/provider, not date alone.
+  // A SECOND provider crossing the same threshold in the same process (no cron
+  // reset between the two) must write its OWN audit row — the first's guard must
+  // not suppress it.
+  const PROVIDER_B = "providerb";
+
+  it("a second provider crossing 80% in the same process is NOT suppressed by the first's guard", async () => {
+    await seedOperator();
+    await seedBalance(100000); // PLATFORM/PROVIDER
+    await db
+      .insert(socialProviderBalance)
+      .values({ platform: PLATFORM, provider: PROVIDER_B, prepaidBalanceCredits: 100000 })
+      .onConflictDoUpdate({
+        target: [socialProviderBalance.platform, socialProviderBalance.provider],
+        set: { prepaidBalanceCredits: 100000 },
+      });
+    await seedPoolUsed("cron", 79);
+    // Park provider B's cron usage at 79 too (its own counter rows).
+    await db
+      .insert(socialProviderSpend)
+      .values({
+        datePacific: todayPacific(),
+        platform: PLATFORM,
+        provider: PROVIDER_B,
+        poolKind: "cron",
+        creditsUsed: 79,
+      })
+      .onConflictDoUpdate({
+        target: [
+          socialProviderSpend.datePacific,
+          socialProviderSpend.platform,
+          socialProviderSpend.provider,
+          socialProviderSpend.poolKind,
+        ],
+        set: { creditsUsed: 79 },
+      });
+
+    // First provider crosses 80 → one audit row + populates its in-memory guard.
+    const a = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "cron",
+      units: 1,
+    });
+    expect(a).not.toBeNull();
+
+    // Second provider crosses 80 in the SAME process (no resetSocialDailyCap
+    // between) → must write its OWN row, not be suppressed by provider A's guard.
+    const b = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER_B,
+      origin: "cron",
+      units: 1,
+    });
+    expect(b).not.toBeNull();
+
+    const rows = await db
+      .select({ provider: sql<string>`${auditLog.metadata}->>'provider'` })
+      .from(auditLog)
+      .where(
+        sql`${auditLog.action} = 'social.provider_throttled'
+          AND ${auditLog.metadata}->>'state' = 'eighty'
+          AND ${auditLog.metadata}->>'platform' = ${PLATFORM}`,
+      );
+    const providers = new Set(rows.map((r) => r.provider));
+    expect(providers.has(PROVIDER)).toBe(true);
+    expect(providers.has(PROVIDER_B)).toBe(true);
+  });
+
+  it("a second provider exhausting its balance in the same process writes its OWN budget_exhausted row", async () => {
+    await seedOperator();
+    await seedBalance(1); // PLATFORM/PROVIDER exhausts on a unit-1 reserve
+    await db
+      .insert(socialProviderBalance)
+      .values({ platform: PLATFORM, provider: PROVIDER_B, prepaidBalanceCredits: 1 })
+      .onConflictDoUpdate({
+        target: [socialProviderBalance.platform, socialProviderBalance.provider],
+        set: { prepaidBalanceCredits: 1 },
+      });
+
+    const a = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER,
+      origin: "user",
+      units: 1,
+    });
+    expect(a).not.toBeNull();
+
+    // Provider B exhausts in the SAME process — its own row, not suppressed.
+    const b = await reserveSocialCredits({
+      platform: PLATFORM,
+      provider: PROVIDER_B,
+      origin: "user",
+      units: 1,
+    });
+    expect(b).not.toBeNull();
+
+    const rows = await db
+      .select({ provider: sql<string>`${auditLog.metadata}->>'provider'` })
+      .from(auditLog)
+      .where(
+        sql`${auditLog.action} = 'social.budget_exhausted'
+          AND ${auditLog.metadata}->>'platform' = ${PLATFORM}`,
+      );
+    const providers = new Set(rows.map((r) => r.provider));
+    expect(providers.has(PROVIDER)).toBe(true);
+    expect(providers.has(PROVIDER_B)).toBe(true);
   });
 });

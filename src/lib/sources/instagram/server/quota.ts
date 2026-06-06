@@ -77,16 +77,18 @@ function userPoolDaily(): number {
 }
 
 /**
- * Module-level audit-emission guard. Map<date_pacific, Set<state>>. Resets on
- * container restart; the cron clears it at midnight Pacific via
- * resetSocialDailyCap. Defense-in-depth: a prior-emit lookup against audit_log
- * handles the container-restart case where the Set is empty but the row was
- * already written today.
+ * Throttle audit-emission guard, keyed by `${datePacific}|${platform}|${provider}`
+ * so a second provider in the same process tracks its own crossings. Cleared at
+ * midnight Pacific by resetSocialDailyCap; the audit_log lookup is the defense-
+ * in-depth across container restart.
  */
 const auditedTransitions = new Map<string, Set<"eighty" | "ninetyfive">>();
 
-/** Module-level guard so social.budget_exhausted emits at most once per process. */
-let budgetExhaustedEmitted = false;
+/**
+ * Budget-exhausted guard, keyed by `${platform}|${provider}` (balance exhaustion
+ * is per-provider, NOT date-scoped). Cleared on cron reset + restart.
+ */
+const budgetExhaustedEmitted = new Set<string>();
 
 /**
  * Cached operator user_id resolved from ADMIN_EMAIL_ALLOWLIST[0]. `undefined` =
@@ -115,7 +117,6 @@ export async function reserveSocialCredits(args: {
   origin: SocialQuotaPool;
   units: number;
   now?: Date;
-  tx?: DbCtx;
 }): Promise<SocialCreditPermit | null> {
   if (!Number.isInteger(args.units) || args.units <= 0) {
     throw new Error("Social provider credit units must be a positive integer");
@@ -124,7 +125,16 @@ export async function reserveSocialCredits(args: {
   const datePacific = todayPacific(args.now ?? new Date());
   const { platform, provider, origin } = args;
   const poolLimit = origin === "cron" ? cronPoolDaily() : userPoolDaily();
+  const eighty = throttleEighty();
   const ninetyfive = throttleNinetyfive();
+
+  // Threshold-crossing signals computed UNDER the lock (real before/after of THIS
+  // reservation) but EMITTED after commit (AGENTS.md item 4 — audit must not
+  // block / deadlock the spend path).
+  let crossedEighty = false;
+  let crossedNinetyfive = false;
+  let balanceExhausted = false;
+  let totalAfterReserve = 0;
 
   const run = async (tx: DbCtx): Promise<SocialCreditPermit | null> => {
     // Seed today's counter rows (both pools) + the prepaid balance row.
@@ -216,10 +226,51 @@ export async function reserveSocialCredits(args: {
         ),
       );
 
+    // Compute the daily-cap throttle band crossing + prepaid-balance exhaustion
+    // for THIS reservation (before vs after). Emitted after commit below.
+    const totalBefore = totalUsed;
+    const totalAfter = totalUsed + args.units;
+    totalAfterReserve = totalAfter;
+    crossedEighty = totalBefore < eighty && totalAfter >= eighty;
+    crossedNinetyfive = totalBefore < ninetyfive && totalAfter >= ninetyfive;
+    balanceExhausted = prepaidBalance - args.units <= 0;
+
     return { platform, provider, poolKind: origin, units: args.units };
   };
 
-  return args.tx ? run(args.tx) : db.transaction(run);
+  // Own transaction always (never an external tx) so the operator audit below is
+  // unambiguously post-commit: a caller's tx that later rolled back would persist
+  // the audit + trip the in-memory once-per-cycle guards while the spend reverted.
+  const permit = await db.transaction(run);
+
+  // Operator audit AFTER commit (a denied reservation returns null and crosses
+  // nothing → no-op). Each fn is idempotent per (date, state) / (platform,
+  // provider), so a re-cross within the same cycle writes no duplicate row.
+  if (permit !== null) {
+    if (crossedEighty) {
+      await markSocialThrottleTransition({
+        platform,
+        provider,
+        state: "eighty",
+        creditsUsed: totalAfterReserve,
+        datePacific,
+      });
+    }
+    if (crossedNinetyfive) {
+      await markSocialThrottleTransition({
+        platform,
+        provider,
+        state: "ninetyfive",
+        creditsUsed: totalAfterReserve,
+        datePacific,
+      });
+    }
+    if (balanceExhausted) {
+      await markSocialBudgetExhausted({ platform, provider, datePacific });
+    }
+  }
+
+  return permit;
 }
 
 /**
@@ -322,7 +373,7 @@ export async function getSocialSpendToday(
  */
 export async function resetSocialDailyCap(now: Date = new Date()): Promise<void> {
   auditedTransitions.clear();
-  budgetExhaustedEmitted = false;
+  budgetExhaustedEmitted.clear();
   cachedOperatorId = undefined;
   const datePacific = todayPacific(now);
   // Seed today's counter rows at zero for any (platform, provider) that has a
@@ -359,23 +410,24 @@ export async function resetSocialDailyCap(now: Date = new Date()): Promise<void>
 }
 
 /**
- * Write audit `social.provider_throttled` ONCE per (date_pacific, state).
- * Idempotency layered: module-level Set (fast path within container lifetime) +
- * audit_log lookup (handles container restart). Resolves the operator via
- * ADMIN_EMAIL_ALLOWLIST[0] (mirrors youtube markThrottleTransition).
+ * Write audit `social.provider_throttled` ONCE per (date_pacific, platform,
+ * provider, state). In-memory Set is the fast path; the audit_log lookup is the
+ * cross-restart fallback. Operator resolves via ADMIN_EMAIL_ALLOWLIST[0].
+ * `datePacific` is threaded from the reservation so a now-passing caller is
+ * consistent; defaults to today.
  */
 export async function markSocialThrottleTransition(args: {
   platform: string;
   provider: string;
   state: "eighty" | "ninetyfive";
   creditsUsed: number;
+  datePacific?: string;
 }): Promise<void> {
-  const datePacific = todayPacific();
-  const seen = auditedTransitions.get(datePacific) ?? new Set<"eighty" | "ninetyfive">();
+  const datePacific = args.datePacific ?? todayPacific();
+  const guardKey = `${datePacific}|${args.platform}|${args.provider}`;
+  const seen = auditedTransitions.get(guardKey) ?? new Set<"eighty" | "ninetyfive">();
   if (seen.has(args.state)) return;
 
-  // Defense in depth — handles container restart where the Set is empty but
-  // the row was already written earlier today.
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- system-emitted operator audit; idempotency key is (date_pacific, platform, provider, state), not user_id
   const priorRows = await db
     .select({ id: auditLog.id })
@@ -390,7 +442,7 @@ export async function markSocialThrottleTransition(args: {
     .limit(1);
   if (priorRows.length > 0) {
     seen.add(args.state);
-    auditedTransitions.set(datePacific, seen);
+    auditedTransitions.set(guardKey, seen);
     return;
   }
 
@@ -401,7 +453,7 @@ export async function markSocialThrottleTransition(args: {
       "social.provider_throttled threshold crossed but no operator user_id resolvable",
     );
     seen.add(args.state);
-    auditedTransitions.set(datePacific, seen);
+    auditedTransitions.set(guardKey, seen);
     return;
   }
 
@@ -419,20 +471,23 @@ export async function markSocialThrottleTransition(args: {
   });
 
   seen.add(args.state);
-  auditedTransitions.set(datePacific, seen);
+  auditedTransitions.set(guardKey, seen);
 }
 
 /**
- * Write audit `social.budget_exhausted` ONCE when the prepaid balance first
- * hits 0. Module-level guard (process lifetime) + audit_log lookup for
- * cross-restart idempotency.
+ * Write audit `social.budget_exhausted` ONCE per (platform, provider) when its
+ * prepaid balance first hits 0. In-memory Set keyed by `${platform}|${provider}`
+ * + audit_log lookup for cross-restart idempotency. `datePacific` is threaded
+ * from the reservation for caller consistency; defaults to today.
  */
 export async function markSocialBudgetExhausted(args: {
   platform: string;
   provider: string;
+  datePacific?: string;
 }): Promise<void> {
-  if (budgetExhaustedEmitted) return;
-  const datePacific = todayPacific();
+  const guardKey = `${args.platform}|${args.provider}`;
+  if (budgetExhaustedEmitted.has(guardKey)) return;
+  const datePacific = args.datePacific ?? todayPacific();
 
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- system-emitted operator audit; idempotency key is (platform, provider), not user_id
   const priorRows = await db
@@ -445,7 +500,7 @@ export async function markSocialBudgetExhausted(args: {
     )
     .limit(1);
   if (priorRows.length > 0) {
-    budgetExhaustedEmitted = true;
+    budgetExhaustedEmitted.add(guardKey);
     return;
   }
 
@@ -455,7 +510,7 @@ export async function markSocialBudgetExhausted(args: {
       { platform: args.platform, provider: args.provider },
       "social.budget_exhausted but no operator user_id resolvable",
     );
-    budgetExhaustedEmitted = true;
+    budgetExhaustedEmitted.add(guardKey);
     return;
   }
 
@@ -465,7 +520,7 @@ export async function markSocialBudgetExhausted(args: {
     ipAddress: "127.0.0.1",
     metadata: { date_pacific: datePacific, platform: args.platform, provider: args.provider },
   });
-  budgetExhaustedEmitted = true;
+  budgetExhaustedEmitted.add(guardKey);
 }
 
 /**

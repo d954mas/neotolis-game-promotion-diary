@@ -71,9 +71,10 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.createQueue(QUEUES.INSTAGRAM_POLL_CRON);
   await boss.createQueue(QUEUES.INSTAGRAM_QUOTA_RESET);
 
-  // batchSize=1 keeps the backfill stream single-flight per worker; the
-  // producer-side singletonKey by channelKey dedupes parallel triggers across
-  // users to the same account.
+  // batchSize=1 keeps the backfill stream single-flight per worker. The
+  // producer-side singletonKey is a no-op for dedup on this standard-policy queue
+  // (no singletonSeconds); duplicate events are prevented by onConflictDoNothing
+  // on the insert.
   await boss.work(QUEUES.INSTAGRAM_BACKFILL_ACCOUNT, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handleBackfillAccount(
@@ -132,10 +133,11 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
 
 /**
  * backfillSource — user-driven "Pull new content" / cron-driven initial-fetch.
- * Enqueues an account-level walk. singletonKey by channelKey dedupes parallel
- * triggers across users; priority puts user-initiated jobs ahead of cron walks.
- * The trigger user pays the per-user cap (origin==="user"); subscribers
- * free-ride on the channel-wide fan-out.
+ * Enqueues an account-level walk. singletonKey is a no-op for dedup on this
+ * standard-policy queue (no singletonSeconds) — duplicate events are prevented by
+ * onConflictDoNothing on the insert; priority puts user-initiated jobs ahead of
+ * cron walks. The trigger user pays the per-user cap (origin==="user");
+ * subscribers free-ride on the channel-wide fan-out.
  */
 async function backfillSource(
   source: PollableSource,
@@ -182,7 +184,52 @@ async function canonicalizeOnCreate(
       { handle_url: input.handleUrl },
     );
   }
-  const resolved = await instagramAccountAdapterCore.resolveHandleToAccountId(parsed.handle);
+  // resolveHandleToAccountId issues a provider request that can throw
+  // AdapterError on 401/402/429/5xx (bad key, rate-limit, upstream outage). The
+  // route mapper (_shared.ts mapErr) only knows AppError / NotFoundError, so an
+  // unmapped AdapterError here becomes an opaque 500. Map it to a typed AppError
+  // by category (SOURCE-REFERENCE §4.5 taxonomy; same category→code shape as the
+  // refresh-content path + fetchEventPreviewMetadata). The unconfigured case is
+  // already gated earlier in createSource (kind_not_configured); don't regress it.
+  let resolved: { accountId: string; displayName: string | null } | null;
+  try {
+    resolved = await instagramAccountAdapterCore.resolveHandleToAccountId(parsed.handle);
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    if (err instanceof AdapterError) {
+      if (err.category === "not-found") {
+        // Treated identically to the null-resolve below — the handle is
+        // missing/private/misspelled (422, no phantom source).
+        resolved = null;
+      } else if (err.category === "rate-limited") {
+        throw new AppError(
+          "Instagram is rate-limited right now — try adding this account again shortly.",
+          "instagram_rate_limited",
+          429,
+          { handle: parsed.handle },
+        );
+      } else if (err.category === "operator-issue" || err.category === "permanent") {
+        // Provider misconfigured / disabled / ToS-blocked from the operator's
+        // side — the user can't fix it; surface a clean 503, not a 500.
+        throw new AppError(
+          "Instagram import is temporarily unavailable.",
+          "instagram_provider_unavailable",
+          503,
+          { handle: parsed.handle },
+        );
+      } else {
+        // transient — upstream 5xx / network blip. 502 so the UI offers a retry.
+        throw new AppError(
+          "Could not reach Instagram to resolve that handle — try again.",
+          "instagram_unreachable",
+          502,
+          { handle: parsed.handle },
+        );
+      }
+    } else {
+      throw err;
+    }
+  }
   if (resolved === null) {
     throw new AppError(
       "Could not resolve that Instagram handle — it may be private, misspelled, or the provider is not configured.",
@@ -330,7 +377,7 @@ async function enqueueRefreshNow(input: {
   const { eq } = await import("drizzle-orm");
   const dbCtx = input.tx ?? db;
   const [row] = await dbCtx
-    .select({ accountId: instagramPosts.postId, account: instagramPosts.accountId })
+    .select({ account: instagramPosts.accountId })
     .from(instagramPosts)
     .where(eq(instagramPosts.postId, input.externalId))
     .limit(1);
@@ -360,29 +407,20 @@ async function enqueueRefreshNow(input: {
 /**
  * fetchEventPreviewMetadata — adapter wrapper for the Add Event "Fetch" button
  * (POST /api/events/preview-url). Mirrors Reddit's synchronous single-post
- * preview (sources/reddit/server/index.ts): ONE by-URL provider request (1
- * credit), cap-gated against the per-user 50/day social cap, then UPSERTs the
- * instagram_posts cache + a snapshot row so the saved event renders fully in
- * /feed (thumbnail + stats + media-type pill) without a second fetch.
+ * preview: ONE by-URL provider request (1 credit), cap-gated, then UPSERTs the
+ * instagram_posts cache + a snapshot so the saved event renders fully in /feed.
  *
- * Why synchronous (NOT a queue): a one-off manual paste is rare; queues are for
- * bulk backfill/polling. 1 credit per preview gated by the daily cap is fine
- * (matches the architecture decision in issue #65).
- *
- * Cap + budget order (mirrors the refresh path):
- *   1. enforceAdapterUserQuota — the per-user 50/day social cap (counter is the
- *      audit_log SUM of event.poll_refreshed/stats_refresh rows; the row is
- *      written below AFTER a successful fetch so the count reflects real spend).
- *   2. reserveSocialCredits (origin="user") runs INSIDE instagramFetch when the
- *      "user" origin is threaded through — the operator prepaid budget gate.
- * On cap exhaustion the AppError 429 propagates so the caller (enrichFromUrl)
- * decides whether to surface it or soft-degrade to recognition-only. On budget
- * exhaustion the provider's instagramFetch throws AdapterError(operator-issue /
- * rate-limited), mapped below to the "unreachable" discriminator so the form
- * degrades to a manual title rather than hard-crashing.
- *
- * Provider not configured (SOC-05) → unreachable, mirroring Reddit's
- * empty-REDDIT_USER_AGENT preview behavior.
+ * Cap + budget order is load-bearing (mirrors the refresh path):
+ *   1. enforceAdapterUserQuota — the per-user 50/day social cap. Its counter is
+ *      the audit_log SUM of event.poll_refreshed/stats_refresh rows, and that row
+ *      is written below only AFTER a successful fetch, so the count reflects real
+ *      spend (and the gate fires on the SECOND paste, not the first).
+ *   2. reserveSocialCredits (origin="user") runs INSIDE instagramFetch — the
+ *      operator prepaid budget gate.
+ * Cap exhaustion → AppError 429 propagates (the caller decides surface vs
+ * soft-degrade). Budget exhaustion → AdapterError, mapped below to "unreachable"
+ * so the form degrades to a manual title. Provider not configured (SOC-05) →
+ * unreachable.
  */
 async function fetchEventPreviewMetadata(
   canonicalUrl: string,
@@ -431,6 +469,24 @@ async function fetchEventPreviewMetadata(
     return { kind: "unavailable" };
   }
 
+  // Reel-as-`/p/` media_type reconciliation (P2-2). The single-post endpoint has
+  // no product_type, so a reel shared via a `/p/<code>/` permalink (rather than
+  // `/reel/<code>/`) is URL-classified "video" by the normalizer. If the account
+  // walker already imported this same post and resolved it to "short" (it sees
+  // product_type on the feed/reels endpoints), prefer that cached value over the
+  // URL-derived one — one cache lookup, no schema change. RESIDUAL LIMIT: a
+  // genuinely-new `/p/` reel with no cache row stays "video" (a hard limit of
+  // the single-post endpoint — no product_type to disambiguate, no `/reel/` slug
+  // in the URL); the next account-level poll corrects it.
+  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
+  const { eq } = await import("drizzle-orm");
+  const [cached] = await db
+    .select({ mediaType: instagramPosts.mediaType })
+    .from(instagramPosts)
+    .where(eq(instagramPosts.postId, post.id))
+    .limit(1);
+  const mediaType = cached?.mediaType === "short" ? "short" : post.kind;
+
   // UPSERT the public-data cache + snapshot so the saved event renders fully in
   // /feed (thumbnail + stats + media-type pill) — exactly like the walker does
   // per post. Failure here is fatal to the preview (the caller catches the
@@ -438,7 +494,7 @@ async function fetchEventPreviewMetadata(
   await writeSnapshot({
     postId: post.id,
     accountId: post.ownerId,
-    mediaType: post.kind,
+    mediaType,
     caption: post.caption,
     permalink: canonicalUrl,
     thumbnailUrl: post.thumbnailUrl,
@@ -474,11 +530,17 @@ async function fetchEventPreviewMetadata(
 
   return {
     kind: "ok",
-    title: buildPreviewTitle(post.caption, post.kind, post.publishedAt),
+    title: buildPreviewTitle(post.caption, mediaType, post.publishedAt),
     authorName: post.ownerUsername ?? "",
     authorUrl: ownerUrl,
     occurredAt: post.publishedAt,
     thumbnailUrl: post.thumbnailUrl ?? undefined,
+    // The MEDIA id is the canonical key for an instagram_post event — the
+    // walker, writeSnapshot, instagram_posts cache, poll-state, metric-series,
+    // and refresh-now all match instagram_posts.post_id == event.externalId.
+    // The URL-parsed externalId is the SHORTCODE (part of the permalink), which
+    // is NOT the media id, so the event must be saved with post.id to enrich.
+    externalId: post.id,
   };
 }
 

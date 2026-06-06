@@ -530,16 +530,16 @@ export async function enrichFromUrl(
   // fully in /feed. The "Fetch" button now auto-fills title (caption first
   // line) + description + thumbnail.
   //
-  // GRACEFUL DEGRADE is load-bearing: a failed preview (provider not
-  // configured, network error, budget/cap exhaustion, deleted post) must NOT
-  // break manual entry. Every non-ok path falls through to the recognition-only
-  // shape (kind + shortcode + canonical permalink, empty title) — exactly what
-  // the form needs to lock kind=Instagram and let the user type the title (the
-  // required-asterisk field forbids an empty save). For cap-exhaustion we prefer
-  // this soft path over a hard 429 so the Add Event UX never dead-ends on a
-  // rare manual paste — the user simply types the title (the cost guardrail
-  // still held: no credit was burned).
+  // GRACEFUL DEGRADE is load-bearing: every non-ok path (provider unconfigured,
+  // network error, budget/cap exhaustion, deleted post) falls through to the
+  // recognition-only shape so manual entry never dead-ends. Cap-exhaustion takes
+  // the soft path over a hard 429 — no credit was burned, so the cost guardrail
+  // still held.
   if (parsed.kind === "instagram_post") {
+    // Recognition-only carries the URL SHORTCODE, not the media id the cache keys
+    // on (no live fetch). It won't enrich, and a later account poll won't re-bind
+    // it (that poll creates a SEPARATE media-id-keyed event) — re-paste once the
+    // provider recovers to get an enriched event.
     const recognitionOnly: EnrichmentResult = {
       kind: "instagram_post",
       externalId: parsed.externalId,
@@ -562,7 +562,7 @@ export async function enrichFromUrl(
       });
     } catch (err) {
       // Cap-exhaustion (AppError 429) → soft-degrade to recognition-only rather
-      // than dead-ending the form. Any other adapter throw also degrades.
+      // than dead-ending the form.
       if (err instanceof AppError && err.code === "requests_quota_exhausted") {
         logger.info(
           { userId, url: parsed.canonicalUrl },
@@ -570,6 +570,14 @@ export async function enrichFromUrl(
         );
         return recognitionOnly;
       }
+      // EXPECTED failures (AdapterError network/operator-issue, any other typed
+      // AppError) soft-degrade — manual entry must never dead-end. But an
+      // UNEXPECTED throw (a programmer bug in the adapter: bad import, undefined
+      // access, etc.) is NOT in the degrade contract — re-throw it so it
+      // surfaces as a 500 + escaped-error log rather than hiding behind a benign
+      // WARN. Mirrors the reddit branch, which lets all throws propagate.
+      const { AdapterError } = await import("$lib/sources/errors.js");
+      if (!(err instanceof AppError) && !(err instanceof AdapterError)) throw err;
       logger.warn(
         { userId, url: parsed.canonicalUrl, err: String((err as Error)?.message ?? err) },
         "instagram preview threw; degrading to recognition-only manual entry",
@@ -583,7 +591,13 @@ export async function enrichFromUrl(
 
     return {
       kind: "instagram_post",
-      externalId: parsed.externalId,
+      // The MEDIA id (preview.externalId = post.id), NOT the URL shortcode. The
+      // single-post fetch UPSERTed instagram_posts + a snapshot keyed by the
+      // media id; saving the event with the shortcode would orphan it from the
+      // cache so feed-enrichment / metric-series / poll-state / refresh-now
+      // never match. Falls back to the parsed shortcode only if the adapter
+      // didn't surface a media id (defensive — the IG adapter always does).
+      externalId: preview.externalId ?? parsed.externalId,
       title: preview.title,
       occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,

@@ -380,6 +380,14 @@ export type EventPreviewMetadata =
       occurredAt?: Date;
       thumbnailUrl?: string;
       html?: string;
+      // The canonical id the adapter's read paths (cache lookup, snapshot,
+      // poll-state, refresh-now) key on, when it differs from the URL-parsed
+      // externalId. Instagram sets this to the MEDIA id (post.id) because the
+      // shortcode in the permalink is NOT what instagram_posts.post_id stores —
+      // saving the event with the shortcode would orphan it from its cache row.
+      // Adapters whose URL-parsed externalId already matches the cache key (e.g.
+      // YouTube's videoId) leave this undefined and the caller keeps the parsed id.
+      externalId?: string;
     }
   | { kind: "private" }
   | { kind: "unavailable" }

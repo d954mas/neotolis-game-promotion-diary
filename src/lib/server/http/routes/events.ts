@@ -236,8 +236,16 @@ const attachSchema = z.union([
 // write. The /events/new client calls this before the user submits the
 // form so they see auto-filled title + thumbnail + external_id without
 // committing the row.
+// http(s)-only at the boundary. z.string().url() alone accepts file://,
+// gopher://, etc. The downstream URL parsers reject any non-http(s)-Instagram /
+// -YouTube / -Reddit shape before a fetch ever fires, so this is harmless
+// today — but "validate at boundaries" (AGENTS.md) wants the scheme constraint
+// stated explicitly here rather than relied upon transitively.
 const previewUrlSchema = z.object({
-  url: z.string().url(),
+  url: z
+    .string()
+    .url()
+    .refine((u) => /^https?:\/\//i.test(u), { message: "url must use http(s)" }),
 });
 
 // PATCH /api/events/bulk schema (D-12). Tri-state semantics per game id

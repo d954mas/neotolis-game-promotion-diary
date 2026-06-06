@@ -72,8 +72,20 @@ const { instagramPosts, instagramPostSnapshots } =
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
 const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
-const { enrichFromUrl } = await import("../../src/lib/server/services/events-mutation.js");
+const { enrichFromUrl, createEvent } =
+  await import("../../src/lib/server/services/events-mutation.js");
+const { mapEventsToDtos } = await import("../../src/lib/server/dto.js");
+const { instagramEnrichFeedDtos } =
+  await import("../../src/lib/sources/instagram/server/feed-enrichment.js");
 const { env } = await import("../../src/lib/server/config/env.js");
+const { instagramAdapter } = await import("../../src/lib/sources/instagram/server/index.js");
+const { AppError } = await import("../../src/lib/server/services/errors.js");
+
+interface InstagramEnrichment {
+  stats: { viewCount: number | null; likeCount: number | null; commentCount: number | null } | null;
+  thumbnailUrl: string | null;
+  mediaType: string | null;
+}
 
 const PLATFORM = "instagram_account";
 
@@ -113,8 +125,11 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     expect(result.authorName).toBe("neonicle_dev");
     expect(result.authorUrl).toBe("https://www.instagram.com/neonicle_dev/");
     expect(result.occurredAt?.toISOString()).toBe("2026-06-01T12:00:00.000Z");
-    // externalId is the URL-intrinsic shortcode (parseIngestUrl), canonical URL preserved.
-    expect(result.externalId).toBe("PCODE1");
+    // externalId is the MEDIA id (post.id), NOT the URL shortcode — the cache,
+    // snapshot, feed-enrichment, metric-series, poll-state, and refresh-now all
+    // key on instagram_posts.post_id == event.externalId. The shortcode (PCODE1)
+    // is part of the permalink but is NOT the media id. Canonical URL preserved.
+    expect(result.externalId).toBe("p-ok");
     expect(result.canonicalUrl).toBe("https://www.instagram.com/p/PCODE1/");
 
     // The provider was called with the canonical permalink + the user-pool origin
@@ -122,6 +137,75 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     expect(single.calls).toHaveLength(1);
     expect(single.calls[0]!.url).toBe("https://www.instagram.com/p/PCODE1/");
     expect(single.calls[0]!.origin).toBe("user");
+  });
+
+  it("end-to-end: a manually-pasted IG post saves with the MEDIA id so feed-enrichment matches the cache (thumbnail + stats)", async () => {
+    // instagramParseUrl returns the SHORTCODE as externalId, but fetchPostByUrl +
+    // writeSnapshot + the instagram_posts cache key on the MEDIA id. Saving the
+    // event with the shortcode orphans it from its cache row so the card never
+    // gets a thumbnail / stats / poll badge. This test drives the whole pipeline
+    // (preview → createEvent → instagramEnrichFeedDtos) and asserts the saved
+    // event's externalId matches the cached post_id AND the feed card is enriched.
+    const user = await seedUserDirectly({
+      email: `ig-e2e-mediaid-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+
+    // Media id (post.id) is the long numeric id; the shortcode (E2ESC1) is what
+    // appears in the URL. They are DIFFERENT — that is the entire bug surface.
+    const MEDIA_ID = "3912161556549155524";
+    single.next = singlePost({
+      id: MEDIA_ID,
+      shortcode: "E2ESC1",
+      kind: "image",
+      metrics: { views: null, likes: 88, comments: 9 },
+    });
+
+    // 1. Preview (the "Fetch" button) → the route returns enriched.externalId to
+    //    the client, which then passes it back as input.externalId on save.
+    const enriched = await enrichFromUrl(
+      user.id,
+      "https://www.instagram.com/p/E2ESC1/",
+      "127.0.0.1",
+    );
+    expect(enriched.externalId).toBe(MEDIA_ID);
+
+    // 2. Save the event with the previewed externalId (mirrors the route → form
+    //    → POST /api/events round-trip — caller-supplied externalId always wins).
+    const created = await createEvent(
+      user.id,
+      {
+        kind: "instagram_post",
+        title: enriched.title || "manual IG post",
+        occurredAt: enriched.occurredAt ?? new Date(),
+        url: enriched.canonicalUrl,
+        externalId: enriched.externalId,
+      },
+      "127.0.0.1",
+    );
+
+    // The saved event carries the MEDIA id — the cache key, NOT the shortcode.
+    expect(created.externalId).toBe(MEDIA_ID);
+    const [cached] = await db
+      .select()
+      .from(instagramPosts)
+      .where(eq(instagramPosts.postId, MEDIA_ID));
+    expect(cached).toBeDefined();
+    expect(created.externalId).toBe(cached!.postId);
+
+    // 3. Run the read path the /feed loader uses. With the shortcode bug it would
+    //    find no matching instagram_posts row → no thumbnail / stats. With the
+    //    media id it enriches fully.
+    const dtos = await mapEventsToDtos(user.id, [created]);
+    await instagramEnrichFeedDtos(user.id, dtos);
+
+    const decorated = dtos[0] as (typeof dtos)[0] & { instagramEnrichment?: InstagramEnrichment };
+    expect(decorated.instagramEnrichment).toBeDefined();
+    expect(decorated.instagramEnrichment!.thumbnailUrl).toBe(
+      "https://cdn.instagram.com/media-1.jpg",
+    );
+    expect(decorated.instagramEnrichment!.stats).not.toBeNull();
+    expect(decorated.instagramEnrichment!.stats!.likeCount).toBe(88);
+    expect(decorated.instagramEnrichment!.stats!.commentCount).toBe(9);
   });
 
   it("UPSERTs the instagram_posts cache row + a snapshot so the saved event renders fully in /feed", async () => {
@@ -190,6 +274,39 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     await enrichFromUrl(user.id, "https://www.instagram.com/p/CAR1/", "127.0.0.1");
     const [car] = await db.select().from(instagramPosts).where(eq(instagramPosts.postId, "car-1"));
     expect(car!.mediaType).toBe("carousel");
+  });
+
+  it("a reel shared as a /p/ link prefers the cached 'short' media_type over the URL-derived 'video' (P2-2)", async () => {
+    const user = await seedUserDirectly({
+      email: `ig-preview-pshort-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // The account walker already imported this reel (it sees product_type on the
+    // feed/reels endpoints) and cached it as "short".
+    await db.insert(instagramPosts).values({
+      postId: "p-as-reel",
+      accountId: "owner-99",
+      mediaType: "short",
+      permalink: "https://www.instagram.com/p/PREEL1/",
+    });
+
+    // Now the user pastes the /p/ permalink. The single-post API has no
+    // product_type and the URL is /p/ (not /reel/), so the normalizer resolves
+    // the post to "video" — the URL-derived classification is wrong for a reel.
+    single.next = singlePost({ id: "p-as-reel", shortcode: "PREEL1", kind: "video" });
+
+    const result = await enrichFromUrl(user.id, "https://www.instagram.com/p/PREEL1/", "127.0.0.1");
+
+    // The cached "short" wins over the URL-derived "video": the pill stays
+    // correct AND the caption-less title fallback uses "short".
+    const [cached] = await db
+      .select()
+      .from(instagramPosts)
+      .where(eq(instagramPosts.postId, "p-as-reel"));
+    expect(cached!.mediaType).toBe("short");
+    // (Caption present here, so the title is the caption first line — the
+    // media_type only surfaces in the caption-less fallback. The cache value is
+    // the load-bearing assertion: the pill renders off instagram_posts.media_type.)
+    expect(result.kind).toBe("instagram_post");
   });
 
   it("consults the per-user cap (writes the cap-counter audit row that getUserQuotaUsedToday SUMs)", async () => {
@@ -275,6 +392,51 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     expect(result.kind).toBe("instagram_post");
     expect(result.title).toBe("");
     expect(result.externalId).toBe("BOOM1");
+  });
+
+  it("an EXPECTED adapter throw (AppError) degrades to recognition-only (N-1)", async () => {
+    const user = await seedUserDirectly({
+      email: `ig-preview-apperr-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // A typed AppError out of the adapter is an expected failure mode — the
+    // form must still let the user save a bare event.
+    const spy = vi
+      .spyOn(instagramAdapter, "fetchEventPreviewMetadata")
+      .mockRejectedValueOnce(new AppError("instagram down", "instagram_unreachable", 502));
+
+    try {
+      const result = await enrichFromUrl(
+        user.id,
+        "https://www.instagram.com/p/APPERR1/",
+        "127.0.0.1",
+      );
+      expect(result.kind).toBe("instagram_post");
+      expect(result.title).toBe("");
+      expect(result.externalId).toBe("APPERR1");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("an UNEXPECTED adapter throw (raw Error = programmer bug) re-throws instead of hiding (N-1)", async () => {
+    const user = await seedUserDirectly({
+      email: `ig-preview-bug-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // A raw Error is NOT in the graceful-degrade contract — it represents a
+    // programmer bug in the adapter (bad import, undefined access, etc.). It
+    // must surface (→ 500 + escaped-error log) rather than be swallowed as a
+    // benign WARN. Mirrors the reddit branch (which lets all throws propagate).
+    const spy = vi
+      .spyOn(instagramAdapter, "fetchEventPreviewMetadata")
+      .mockRejectedValueOnce(new TypeError("cannot read properties of undefined"));
+
+    try {
+      await expect(
+        enrichFromUrl(user.id, "https://www.instagram.com/p/BUG1/", "127.0.0.1"),
+      ).rejects.toThrow("cannot read properties of undefined");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("a deleted/private post (null body) degrades to recognition-only", async () => {

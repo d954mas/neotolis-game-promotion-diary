@@ -38,6 +38,8 @@ import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { logger } from "$lib/server/logger.js";
 import { writeAuditStrict } from "$lib/server/audit.js";
+import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
+import { QUEUES } from "$lib/server/queues.js";
 import {
   markSourceNeedsReconnect,
   clearNeedsReconnect,
@@ -396,7 +398,64 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   //    (feed-enrichment) overlays it onto each IG event DTO's
   //    metadata.operator_paused, which the PollingBadge consumes.
   state.operatorPaused = pausedByBudget;
-  await writeInstagramBackfillState(channelKey, state);
+
+  // Account-level complete = BOTH feeds exhausted AND not paused mid-budget.
+  // Computed BEFORE the state write so the continuation gate below can read it
+  // inside the same transaction.
+  const accountComplete = !pausedByBudget && FEEDS.every((f) => state[f].complete);
+
+  // SELF-ENQUEUE the next page of a bounded DEEP backfill (initial / historical)
+  // so a multi-page archive completes promptly instead of crawling one page per
+  // 6h cron tick. The cursor write + the continuation intent commit ATOMICALLY
+  // via the outbox in the SAME transaction (AGENTS.md atomic-dual-write — never
+  // boss.send outside a state-mutating tx): if the worker crashes after the
+  // commit, the forwarder still delivers; if it crashes before, neither lands.
+  //
+  // Termination is load-bearing — enqueue ONLY when ALL hold:
+  //   - branch === "deep"            the resumable historical/initial walk that
+  //                                  RESUMES from the persisted cursor (strictly
+  //                                  advances each tick). The incremental /
+  //                                  exhausted branches reset every feed to page
+  //                                  1 each tick (new-only sweep, BACK-03) and
+  //                                  are bounded by the date window — a
+  //                                  continuation there would re-fetch page 1
+  //                                  forever (infinite loop). They are
+  //                                  single-page by design and rely on cron.
+  //   - !accountComplete             both feeds NOT yet exhausted → real work left.
+  //   - !pausedByBudget              a budget pause means the next reserve would
+  //                                  be refused too — let cron retry after the
+  //                                  daily-cap reset / top-up, don't spin.
+  //   - state.collected < maxPosts   the BACK-01 post-count cap bounds historical
+  //                                  depth; at the cap the deep branch already
+  //                                  marks feeds complete (→ accountComplete), but
+  //                                  this is the explicit belt-and-suspenders stop.
+  // singletonKey is a no-op for dedup on this standard-policy queue (no
+  // singletonSeconds). Duplicate EVENTS are prevented by onConflictDoNothing on
+  // the insert; a concurrent double-fetch's spend is bounded by the prepaid
+  // ceiling (reserveSocialCredits). Kept harmless + future-proof if the policy
+  // ever gains singletonSeconds.
+  const shouldContinue =
+    branch === "deep" && !accountComplete && !pausedByBudget && state.collected < maxPosts;
+  await db.transaction(async (tx) => {
+    await writeInstagramBackfillState(channelKey, state, tx);
+    if (shouldContinue) {
+      await enqueueViaOutbox(
+        tx,
+        QUEUES.INSTAGRAM_BACKFILL_ACCOUNT,
+        {
+          kind: KIND,
+          channelKey,
+          // triggerUserId OMITTED — continuation pages run on the cron pool
+          // (Pitfall 5: the trigger user pays the per-user cap ONCE on the first
+          // page; subsequent pages free-ride, mirroring YouTube/Reddit).
+          depthBoundIso: job.data.depthBoundIso,
+          flow,
+          forceDeep: job.data.forceDeep,
+        },
+        { singletonKey: `backfill-account-${channelKey}` },
+      );
+    }
+  });
   if (branch === "deep" && oldestFetchedOccurredAt !== null) {
     // Frontier = the oldest event this deep walk fetched. markChannelBackfillFrontier
     // WHERE-guards the deeper-only move, so a shallower write never rolls it back.
@@ -409,8 +468,6 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
     }
   }
 
-  // Account-level complete = BOTH feeds exhausted AND not paused mid-budget.
-  const accountComplete = !pausedByBudget && FEEDS.every((f) => state[f].complete);
   if (accountComplete) {
     await markChannelBackfillComplete(KIND, channelKey);
   }

@@ -65,6 +65,15 @@ export const REDACT_PATHS = [
   // snake) and the singleton field name (lowerCamel).
   "*.SERVICE_YOUTUBE_API_KEYS",
   "*.serviceYoutubeApiKeys",
+  // Operator's prepaid ScrapeCreators API key. Same lifetime trap as the
+  // YouTube key envelope above: scrubKekFromEnv() wipes SCRAPECREATORS_API_KEY
+  // from process.env after boot (see SECRET_KEYS in env.ts), but the env
+  // singleton retains it for the process lifetime — a stray logger.info({ env })
+  // would leak it. The transitive *.apiKey / *.api_key paths do NOT match the
+  // singleton field name, so the key gets its own dedicated paths (env-key
+  // uppercase snake + singleton lowerCamel), mirroring the YouTube entries.
+  "*.SCRAPECREATORS_API_KEY",
+  "*.scrapecreatorsApiKey",
   // Phase 03.1 — Reddit response/request opsec (DV-RDT-7).
   // Reddit doesn't use OAuth under DV-RDT-7 (public-`.json` adapter only),
   // but the redact list treats these field names as redacted regardless:
