@@ -1,9 +1,15 @@
-// Instagram media-type corner-overlay glyphs.
+// Media-type corner-overlay glyphs — shared cross-source card helper.
 //
-// The IG feed card's 4:5 thumbnail is its primary visual, but a photo, reel,
-// carousel and plain video look identical at a glance. This module supplies a
-// small Instagram-style corner glyph per content form so the user can tell
-// them apart. A bare photo gets NO overlay (a photo needs no marker).
+// A feed card's thumbnail is its primary visual, but at a glance a photo, a
+// short-form clip, a carousel and a plain video look identical. This module
+// supplies a small corner glyph per content form so the user can tell them
+// apart. A bare photo gets NO overlay (a photo needs no marker).
+//
+// Lives in feed/parts/ (next to derive-card-data.ts) because it is a
+// cross-source concern: Instagram marks reel/carousel/video, YouTube marks
+// video. Per AGENTS.md "modules don't leak", a shared UI helper used by more
+// than one source adapter belongs in the shared card layer, not inside any
+// one adapter's ui/ directory.
 //
 // Icon style mirrors $lib/components/kind-icon-svg.ts (the Iconography
 // Contract): 24px viewBox, fill="none", stroke="currentColor", round
@@ -47,7 +53,7 @@ const GLYPHS: Record<OverlayMediaType, OverlayGlyph> = {
 /**
  * The overlay glyph for a media_type, or null when no overlay applies
  * (photo / image, an unknown value, or null). Pure — the card maps its
- * `instagramEnrichment.mediaType` through this and renders the glyph only
+ * per-source media-type field through this and renders the glyph only
  * when non-null.
  */
 export function mediaTypeOverlay(mediaType: string | null | undefined): OverlayGlyph | null {

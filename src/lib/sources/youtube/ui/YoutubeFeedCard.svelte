@@ -28,6 +28,7 @@
 
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
   import { metricColor } from "$lib/util/metric-colors.js";
+  import { mediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
   import {
     deriveThumbnailUrl,
     formatStat,
@@ -84,6 +85,17 @@
   });
 
   const thumbnailUrl = $derived.by(() => deriveThumbnailUrl(event));
+
+  // Media-type corner glyph. Every YouTube video shows the "video" play
+  // triangle for now — the feed thumbnail alone doesn't tell a Short from a
+  // full video. This is THE single derivation point for that decision.
+  //
+  // TODO: Shorts detection (aspect/duration heuristic) → "short". When the
+  // poller starts capturing aspect ratio / duration on youtube_video
+  // snapshots, branch here to map verticals to a "short" overlay; the glyph
+  // catalog in media-type-overlay.ts already carries a short-form ("reel")
+  // marker to reuse. No other file needs to change.
+  const overlay = $derived.by(() => mediaTypeOverlay("video"));
 </script>
 
 <BaseFeedCard
@@ -102,7 +114,24 @@
   {onDeleteForever}
   {currentUserName}
   statsSlot={statsSnippet}
+  thumbnailOverlaySlot={overlay ? overlaySnippet : undefined}
 />
+
+{#snippet overlaySnippet()}
+  {#if overlay}
+    <span class="media-type-overlay" aria-label={overlay.label} title={overlay.label}>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true">{@html overlay.inner}</svg
+      >
+    </span>
+  {/if}
+{/snippet}
 
 {#snippet statsSnippet()}
   {#if event.stats}
@@ -167,3 +196,32 @@
     </div>
   {/if}
 {/snippet}
+
+<style>
+  /* Media-type corner glyph — same placement + scrim as the Instagram card
+   * (see InstagramFeedCard.svelte). Top-right of the 16:9 thumbnail, over the
+   * image. The overlay markup renders inside BaseFeedCard's .card-thumb via the
+   * thumbnailOverlaySlot snippet, so the selector is :global to reach it. The
+   * dark scrim disc keeps the white glyph legible on bright thumbnails.
+   * pointer-events:none so it never steals the card's open-detail click. */
+  :global([data-kind="youtube_video"] .media-type-overlay) {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--r-sm);
+    background: var(--overlay-dark);
+    color: #fff;
+    pointer-events: none;
+    z-index: 1;
+  }
+  :global([data-kind="youtube_video"] .media-type-overlay svg) {
+    width: 15px;
+    height: 15px;
+    display: block;
+  }
+</style>

@@ -34,7 +34,7 @@
 
   import { metricColor } from "$lib/util/metric-colors.js";
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
-  import { mediaTypeOverlay } from "./media-type-overlay.js";
+  import { mediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
   import {
     deriveThumbnailUrl,
     formatStat,
