@@ -194,6 +194,12 @@ async function canonicalizeOnCreate(
   return {
     canonicalHandleUrl: `https://www.instagram.com/${parsed.handle}/`,
     resolvedExternalId: resolved.accountId,
+    // Thread the display name resolveAccount already fetched (full_name /
+    // username) so data_sources.display_name is the real account name, not the
+    // bare account_id. createSource only applies it when the user didn't type
+    // an explicit displayName. Mirrors how a renamable display name is read
+    // from source-of-truth (AGENTS.md no-denorm); this is the create-time seed.
+    displayName: resolved.displayName,
   };
 }
 

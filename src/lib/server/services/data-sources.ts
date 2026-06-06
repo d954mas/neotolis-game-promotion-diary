@@ -522,6 +522,11 @@ export async function createSource(
   // normalization already happened above via normalizeSourceOnCreate.
   let canonicalHandleUrl = input.handleUrl;
   let resolvedChannelId = input.channelId ?? null;
+  // Display name resolved by the adapter at create time (e.g. Instagram
+  // resolveAccount → full_name/username). A user-typed displayName ALWAYS
+  // wins; this only fills the gap when the caller left it blank so the row
+  // shows the real account name instead of the bare id.
+  let resolvedDisplayName = input.displayName ?? null;
   if (adapter.canonicalizeOnCreate !== undefined) {
     const result = await adapter.canonicalizeOnCreate(
       { kind: input.kind, handleUrl: input.handleUrl, channelId: input.channelId ?? null },
@@ -529,6 +534,9 @@ export async function createSource(
     );
     canonicalHandleUrl = result.canonicalHandleUrl;
     resolvedChannelId = result.resolvedExternalId;
+    if (resolvedDisplayName === null && result.displayName != null && result.displayName !== "") {
+      resolvedDisplayName = result.displayName;
+    }
   }
 
   // Race-free, deadlock-safe quota path. withQuotaGuard takes a per-user
@@ -557,7 +565,7 @@ export async function createSource(
           kind: input.kind,
           handleUrl: canonicalHandleUrl,
           channelId: resolvedChannelId,
-          displayName: input.displayName ?? null,
+          displayName: resolvedDisplayName,
           isOwnedByMe: input.isOwnedByMe ?? true,
           autoImport: input.autoImport ?? true,
           metadata: input.metadata ?? {},

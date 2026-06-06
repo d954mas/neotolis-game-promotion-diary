@@ -279,11 +279,20 @@ export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
  *  - Rewrite handle_url to its canonical form (e.g. /watch?v=XYZ -> /channel/UC...)
  *  - Resolve an external id (channel_id, account_id) at create time so the
  *    worker takes the fast path (no resolve quota burn on first backfill).
+ *  - Surface a display name the adapter already fetched while resolving (e.g.
+ *    Instagram resolveAccount returns full_name/username) so createSource
+ *    persists it on data_sources.display_name instead of leaving the row
+ *    showing the bare id. Omit / null when the adapter resolves the display
+ *    name later on the worker (YouTube channel title).
  *
  *  Returns the input unchanged if no canonicalization applies. */
 export interface CanonicalizeResult {
   canonicalHandleUrl: string;
   resolvedExternalId: string | null;
+  /** Display name resolved at create time, when the adapter already has it.
+   *  createSource uses it ONLY when the caller did not supply an explicit
+   *  displayName (a user-typed name always wins). Omit / null → no change. */
+  displayName?: string | null;
 }
 
 /** Input shape consumed by canonicalizeOnCreate. Mirrors the relevant slice
