@@ -10,7 +10,17 @@
 // Shape (under metadata.instagram):
 //   { posts: { cursor: string|null, complete: bool },
 //     reels: { cursor: string|null, complete: bool },
-//     collected: number }
+//     collected: number,
+//     operatorPaused: bool }
+//
+// `operatorPaused` (BUDGET-01) is the account-level UI hint that the operator's
+// prepaid social budget is spent / throttled, so the walker paused polling for
+// this account. It lives HERE — on the source-of-truth channel-state row the
+// walker already owns — NOT denormalized onto each event row (AGENTS.md
+// no-denorm P0). The read side (feed-enrichment) overlays it onto each IG event
+// DTO's metadata.operator_paused at load time (mirroring how fetchPollStateMap
+// overlays publishedAt/lastPolledAt), so the PollingBadge lights up. ONE write
+// flips it on pause and ONE on resume — no per-event fan-out, no stale-data bug.
 //
 // Reuses the same JSONB column the YouTube walker uses for lastBackfillPageToken;
 // the IG sub-tree lives under its own `instagram` key so the two never collide.
@@ -34,6 +44,12 @@ export interface InstagramBackfillState {
   posts: InstagramFeedState;
   reels: InstagramFeedState;
   collected: number;
+  /** BUDGET-01: the operator's prepaid social budget is spent / throttled and
+   *  the walker paused this account's polling this tick. Surfaced to the
+   *  PollingBadge via feed-enrichment's metadata.operator_paused overlay. The
+   *  walker sets it true when a tick is paused by budget, false on a successful
+   *  unpaused tick — so the badge is not sticky after the budget is restored. */
+  operatorPaused: boolean;
 }
 
 const EMPTY_FEED: InstagramFeedState = { cursor: null, complete: false };
@@ -49,6 +65,7 @@ export function readInstagramBackfillState(
     posts: { ...EMPTY_FEED, ...(ig?.posts ?? {}) },
     reels: { ...EMPTY_FEED, ...(ig?.reels ?? {}) },
     collected: typeof ig?.collected === "number" ? ig.collected : 0,
+    operatorPaused: ig?.operatorPaused === true,
   };
 }
 
@@ -85,7 +102,7 @@ export async function resetInstagramBackfillState(
 ): Promise<void> {
   await writeInstagramBackfillState(
     channelKey,
-    { posts: { ...EMPTY_FEED }, reels: { ...EMPTY_FEED }, collected: 0 },
+    { posts: { ...EMPTY_FEED }, reels: { ...EMPTY_FEED }, collected: 0, operatorPaused: false },
     dbCtx,
   );
 }

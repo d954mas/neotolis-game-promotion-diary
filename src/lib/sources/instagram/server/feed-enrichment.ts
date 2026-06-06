@@ -6,14 +6,21 @@
 // pre-filter, internal filtering is the contract (mirrors
 // youtube/reddit enrichFeedDtos).
 //
-// Two batched lookups, both PUBLIC-DATA (no userId scope — allowlisted in
-// Plan 01; the tenant guarantee comes from the events SELECT in
+// Three batched lookups, all PUBLIC-DATA / channel-global (no userId scope —
+// allowlisted in Plan 01; the tenant guarantee comes from the events SELECT in
 // mapEventsToDtos):
 //   1. instagram_post_snapshots — DISTINCT ON (post_id) latest view / like /
 //      comment counts. Raw SQL because Drizzle's pg-core builder has no
 //      first-class DISTINCT ON helper (same as youtubeEnrichFeedDtos).
 //   2. instagram_posts — per-post thumbnail_url + media_type (D-08 hotlink
-//      thumbnail refreshed each poll).
+//      thumbnail refreshed each poll) + account_id (the channel key).
+//   3. data_source_channel_state — the per-account operator-budget-paused hint
+//      (BUDGET-01). The walker flips metadata.instagram.operatorPaused on the
+//      account's channel-state row (source of truth) when polling is paused by
+//      the operator's prepaid budget; we overlay it onto each event's
+//      metadata.operator_paused so the PollingBadge renders the "Paused ·
+//      operator budget reached" variant. No per-event denormalization — one
+//      channel-state row drives every event of the account.
 //
 // Metrics-by-presence (D-05): a NULL snapshot column stays NULL on the dto
 // (a photo / carousel has no views → null, NOT 0). The UI renders only the
@@ -38,9 +45,10 @@
 // Errors are swallowed at WARN — a failed enrichment query MUST NOT break
 // the /feed render. The card falls back to a stats-less view.
 
-import { inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { instagramPosts } from "$lib/server/db/schema/index.js";
+import { dataSourceChannelState } from "$lib/server/db/schema/data-source-channel-state.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
 
@@ -119,25 +127,77 @@ export async function instagramEnrichFeedDtos(
       });
     }
 
-    // 2. Thumbnail + media_type from instagram_posts (post-keyed public-data).
-    //    NO account display name read here — the handle lives on data_sources
-    //    and the card reads it from the `source` prop (no-denorm rule).
+    // 2. Thumbnail + media_type + account_id from instagram_posts (post-keyed
+    //    public-data). NO account display name read here — the handle lives on
+    //    data_sources and the card reads it from the `source` prop (no-denorm
+    //    rule). account_id IS carried — it is the intrinsic IG account key
+    //    (= data_source_channel_state.channelKey), URL-identity-safe, not a
+    //    renameable display value — and lets us resolve the account's
+    //    operator-budget-paused hint below (BUDGET-01) without touching
+    //    data_sources.
     const postRows = await db
       .select({
         postId: instagramPosts.postId,
         thumbnailUrl: instagramPosts.thumbnailUrl,
         mediaType: instagramPosts.mediaType,
+        accountId: instagramPosts.accountId,
       })
       .from(instagramPosts)
       .where(inArray(instagramPosts.postId, externalIds));
-    const postMeta = new Map<string, { thumbnailUrl: string | null; mediaType: string | null }>();
+    const postMeta = new Map<
+      string,
+      { thumbnailUrl: string | null; mediaType: string | null; accountId: string | null }
+    >();
     for (const r of postRows) {
-      postMeta.set(r.postId, { thumbnailUrl: r.thumbnailUrl, mediaType: r.mediaType });
+      postMeta.set(r.postId, {
+        thumbnailUrl: r.thumbnailUrl,
+        mediaType: r.mediaType,
+        accountId: r.accountId,
+      });
+    }
+
+    // 3. Operator-budget-paused accounts (BUDGET-01). The walker flips
+    //    metadata.instagram.operatorPaused on the per-account channel-state row
+    //    (the source of truth) when a poll/backfill tick is paused by the
+    //    operator's prepaid budget, and clears it on a successful unpaused tick.
+    //    We read that flag here and overlay it onto each event's
+    //    metadata.operator_paused so the PollingBadge lights up — exactly the
+    //    way fetchPollStateMap overlays publishedAt/lastPolledAt. NO per-event
+    //    denormalization: one channel-state row drives every event of the
+    //    account. data_source_channel_state carries no user_id (channel-global,
+    //    like instagram_posts); the tenant guarantee comes from the upstream
+    //    events SELECT in mapEventsToDtos.
+    const accountIds = [
+      ...new Set(
+        postRows.map((r) => r.accountId).filter((id): id is string => id !== null && id !== ""),
+      ),
+    ];
+    const pausedAccounts = new Set<string>();
+    if (accountIds.length > 0) {
+      const stateRows = await db
+        .select({
+          channelKey: dataSourceChannelState.channelKey,
+          metadata: dataSourceChannelState.metadata,
+        })
+        .from(dataSourceChannelState)
+        .where(
+          and(
+            eq(dataSourceChannelState.kind, "instagram_account"),
+            inArray(dataSourceChannelState.channelKey, accountIds),
+          ),
+        );
+      for (const r of stateRows) {
+        const ig = (r.metadata as { instagram?: { operatorPaused?: unknown } } | null)?.instagram;
+        if (ig?.operatorPaused === true) pausedAccounts.add(r.channelKey);
+      }
     }
 
     // In-place decoration. Iterate the filtered subset and attach
     // instagramEnrichment to each; the card-props mapper (Plan 07) reads the
-    // same shape.
+    // same shape. The operator-paused hint is merged into the DTO's metadata
+    // (NOT the decoration) because the PollingBadge reads
+    // event.metadata.operator_paused — the same verbatim-projected events.metadata
+    // column it reads for every kind.
     for (const dto of igDtos) {
       const eid = dto.externalId as string;
       const meta = postMeta.get(eid) ?? null;
@@ -146,6 +206,13 @@ export async function instagramEnrichFeedDtos(
         thumbnailUrl: meta?.thumbnailUrl ?? null,
         mediaType: meta?.mediaType ?? null,
       };
+      if (meta?.accountId !== null && meta?.accountId !== undefined && pausedAccounts.has(meta.accountId)) {
+        const base =
+          dto.metadata !== null && typeof dto.metadata === "object"
+            ? (dto.metadata as Record<string, unknown>)
+            : {};
+        dto.metadata = { ...base, operator_paused: true };
+      }
     }
   } catch (err) {
     logger.warn(

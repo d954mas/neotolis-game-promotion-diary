@@ -171,6 +171,10 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
       posts: { cursor: null, complete: false },
       reels: { cursor: null, complete: false },
       collected: 0,
+      // Carry the prior paused flag — a successful (unpaused) tick below clears
+      // it; a re-paused tick re-sets it. Resetting it to false here would make
+      // the badge flicker off mid-pause on every incremental sweep.
+      operatorPaused: state.operatorPaused,
     };
   }
 
@@ -385,6 +389,16 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
 
   // 6. Persist state. Advance the channel frontier (deep-mode walks only — an
   //    incremental new-only sweep doesn't deepen the historical floor).
+  //
+  //    BUDGET-01 producer: the account-level operator-budget-paused hint. SET
+  //    when this tick was paused because the operator's prepaid social budget /
+  //    daily-cap throttle refused a page reserve (AdapterError operator-issue |
+  //    rate-limited, caught above); CLEARED when a tick completes without a
+  //    budget pause (budget restored / topped up) so the badge is not sticky.
+  //    Lives on the channel-state row (source of truth) — the read side
+  //    (feed-enrichment) overlays it onto each IG event DTO's
+  //    metadata.operator_paused, which the PollingBadge consumes.
+  state.operatorPaused = pausedByBudget;
   await writeInstagramBackfillState(channelKey, state);
   if (branch === "deep" && oldestFetchedOccurredAt !== null) {
     // Frontier = the oldest event this deep walk fetched. markChannelBackfillFrontier
