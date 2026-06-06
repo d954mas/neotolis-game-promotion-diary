@@ -94,8 +94,8 @@
   // TODO: Shorts detection (aspect/duration heuristic) → "short". When the
   // poller starts capturing aspect ratio / duration on youtube_video
   // snapshots, branch in deriveMediaTypeOverlay to map verticals to a "short"
-  // pill; the glyph catalog in media-type-overlay.ts already carries a
-  // short-form ("reel") marker to reuse. No other file needs to change.
+  // pill; the glyph catalog in media-type-overlay.ts already carries the
+  // short-form ("short") marker to reuse. No other file needs to change.
   const overlay = $derived.by(() => deriveMediaTypeOverlay(event));
 </script>
 

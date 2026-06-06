@@ -95,7 +95,7 @@
      *  <img>. The shared mediaTypeOverlay() helper produces the { type, label,
      *  inner } shape; BaseFeedCard renders the icon+TEXT pill markup + CSS once
      *  (ONE treatment for every source — no per-card fork). Used by Instagram
-     *  to mark reel / carousel / video and by YouTube to mark video; a bare
+     *  to mark short / carousel / video and by YouTube to mark video; a bare
      *  photo passes null → no pill. Rendered only when a thumbnail image is
      *  shown so it sits on the picture, not on the empty placeholder. */
     thumbnailOverlay?: OverlayPill | null;

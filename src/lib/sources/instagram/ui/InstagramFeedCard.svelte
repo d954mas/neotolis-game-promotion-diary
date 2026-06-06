@@ -88,7 +88,7 @@
 
   const stats = $derived(event.instagramEnrichment?.stats ?? null);
 
-  // Media-type pill (reel / carousel / video). A bare photo maps to null → no
+  // Media-type pill (short / carousel / video). A bare photo maps to null → no
   // pill. The kind→pill decision lives in ONE shared place
   // (deriveMediaTypeOverlay) used by the feed cards AND the event detail.
   // BaseFeedCard renders the icon+text pill (ONE shared treatment) over the

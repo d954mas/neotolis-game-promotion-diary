@@ -5,11 +5,11 @@
 // supplies a small corner PILL per content form — icon + TEXT label — so the
 // user can tell them apart even over a busy, bright cover image. The TEXT is
 // the load-bearing disambiguator: a 22px icon-only glyph was unreadable over
-// detailed photos (a Reel looked like a Carousel looked like a Video). A bare
+// detailed photos (a Short looked like a Carousel looked like a Video). A bare
 // photo gets NO pill (a photo needs no marker).
 //
 // Lives in feed/parts/ (next to derive-card-data.ts) because it is a
-// cross-source concern: Instagram marks reel/carousel/video, YouTube marks
+// cross-source concern: Instagram marks short/carousel/video, YouTube marks
 // video. Per AGENTS.md "modules don't leak", a shared UI helper used by more
 // than one source adapter belongs in the shared card layer, not inside any
 // one adapter's ui/ directory.
@@ -21,7 +21,7 @@
 // source — no per-card fork.
 
 /** The media_type values that earn a corner pill (photo → none). */
-export type OverlayMediaType = "reel" | "carousel" | "video";
+export type OverlayMediaType = "short" | "carousel" | "video";
 
 export interface OverlayPill {
   /** The media kind, mirrored onto a data-attribute for per-type accent tints. */
@@ -33,10 +33,11 @@ export interface OverlayPill {
 }
 
 const GLYPHS: Record<OverlayMediaType, Omit<OverlayPill, "type">> = {
-  // Reel — a clapperboard-style play marker: rounded film frame + play
-  // triangle. Reads as "short-form video" without the IG brand mark.
-  reel: {
-    label: "Reel",
+  // Short — a clapperboard-style play marker: rounded film frame + play
+  // triangle. Reads as "short-form video" without any platform brand mark
+  // ("Short" is the unified IG-Reels / YT-Shorts / TikTok term).
+  short: {
+    label: "Short",
     inner: `<rect x="3" y="3" width="18" height="18" rx="4" />
       <path d="M3 8h18" />
       <path d="M8.5 3.5 11 8" />
@@ -49,7 +50,7 @@ const GLYPHS: Record<OverlayMediaType, Omit<OverlayPill, "type">> = {
     inner: `<rect x="8" y="3" width="13" height="13" rx="2.5" />
       <path d="M16 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2" />`,
   },
-  // Video — a plain play triangle (long-form feed video, not a reel).
+  // Video — a plain play triangle (long-form feed video, not a short).
   video: {
     label: "Video",
     inner: `<path d="M8 5v14l11-7z" fill="currentColor" stroke="none" />`,
@@ -63,7 +64,7 @@ const GLYPHS: Record<OverlayMediaType, Omit<OverlayPill, "type">> = {
  * BaseFeedCard, which renders the icon+text markup only when non-null.
  */
 export function mediaTypeOverlay(mediaType: string | null | undefined): OverlayPill | null {
-  if (mediaType === "reel" || mediaType === "carousel" || mediaType === "video") {
+  if (mediaType === "short" || mediaType === "carousel" || mediaType === "video") {
     return { type: mediaType, ...GLYPHS[mediaType] };
   }
   return null;
@@ -84,7 +85,7 @@ export interface MediaTypeOverlayEvent {
  * detail so the per-kind decision lives in one place (DRY):
  *   - youtube_video  → always the "Video" pill (a feed thumbnail can't tell a
  *     Short from a full video yet; Shorts detection is deferred).
- *   - instagram_post → the post's media_type (reel / video / carousel → pill;
+ *   - instagram_post → the post's media_type (short / video / carousel → pill;
  *     image / missing → null).
  *   - any other kind → null (no pill).
  * Pure; the caller renders <MediaTypePill> only when this is non-null (and a

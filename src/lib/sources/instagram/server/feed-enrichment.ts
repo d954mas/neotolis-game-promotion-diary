@@ -69,7 +69,7 @@ export interface InstagramEnrichment {
    *  snapshot writer. NULL until the post is resolved. */
   thumbnailUrl: string | null;
   /** Content form from instagram_posts.media_type ("image" | "carousel" |
-   *  "video" | "reel", D-06). Drives the per-form card affordance (reel play
+   *  "video" | "short", D-06). Drives the per-form card affordance (short play
    *  badge vs carousel stack). NULL until resolved. */
   mediaType: string | null;
 }

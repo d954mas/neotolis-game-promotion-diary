@@ -29,7 +29,7 @@ export interface WriteSnapshotArgs {
   postId: string;
   /** Stable IG user id (the channel key). Nullable until resolveAccount runs. */
   accountId?: string | null;
-  /** NormalizedPost.kind — "image" | "carousel" | "video" | "reel". */
+  /** NormalizedPost.kind — "image" | "carousel" | "video" | "short". */
   mediaType?: string | null;
   caption?: string | null;
   permalink?: string | null;

@@ -2,7 +2,7 @@
  * Browser test for InstagramFeedCard (Phase 08 Plan 07, VIZ-05 surface).
  *
  * Asserts the three load-bearing IG-card contracts from 08-UI-SPEC:
- *   - Metrics-by-presence (D-05): a reel event (viewCount present) renders
+ *   - Metrics-by-presence (D-05): a short event (viewCount present) renders
  *     the views chip; a photo event (viewCount null) renders NO views chip.
  *     A null metric is omitted — never a 0-or-dash.
  *   - onerror fallback (D-08): when the hotlinked CDN thumbnail fails to
@@ -87,12 +87,12 @@ afterEach(() => {
 });
 
 describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
-  it("reel event (viewCount present) renders the views chip + likes + comments", () => {
+  it("short event (viewCount present) renders the views chip + likes + comments", () => {
     const { card, component } = mountCard(
       makeEvent({
         stats: { viewCount: 12000, likeCount: 800, commentCount: 42, polledAt: new Date() },
-        thumbnailUrl: "https://scontent.cdninstagram.com/v/reel-thumb.jpg",
-        mediaType: "reel",
+        thumbnailUrl: "https://scontent.cdninstagram.com/v/short-thumb.jpg",
+        mediaType: "short",
       }),
     );
     const nums = Array.from(card.querySelectorAll(".card-stats .num")).map((n) =>
@@ -125,9 +125,9 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
     unmount(component);
   });
 
-  it("media-type pill: reel / carousel / video each render the correct icon+TEXT pill; photo renders none", () => {
+  it("media-type pill: short / carousel / video each render the correct icon+TEXT pill; photo renders none", () => {
     const cases: Array<{ mediaType: string; label: string | null }> = [
-      { mediaType: "reel", label: "Reel" },
+      { mediaType: "short", label: "Short" },
       { mediaType: "carousel", label: "Carousel" },
       { mediaType: "video", label: "Video" },
       // A bare photo (image) needs no marker — no pill rendered.
@@ -167,7 +167,7 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
       makeEvent({
         stats: { viewCount: 1, likeCount: 1, commentCount: 1, polledAt: new Date() },
         thumbnailUrl: null,
-        mediaType: "reel",
+        mediaType: "short",
       }),
     );
     expect(card.querySelector(".media-type-pill")).toBeNull();

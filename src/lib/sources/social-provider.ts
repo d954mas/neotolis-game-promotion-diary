@@ -16,11 +16,13 @@ export type SocialPlatform = "instagram" | "tiktok" | "twitter"; // grows per la
 export interface NormalizedPost {
   /** Platform-native post/reel id → events.external_id. */
   id: string;
-  /** D-04 content shape → events.metadata.media_type. `reel` is distinct from
-   *  `video`: a reel (provider integer media_type 2 + product_type "clips") is
+  /** D-04 content shape → events.metadata.media_type. `short` is distinct from
+   *  `video`: a short (provider integer media_type 2 + product_type "clips") is
    *  the IG short-form surface, a plain `video` (media_type 2, NOT clips) is a
-   *  long-form feed video. The card renders a different corner glyph per form. */
-  kind: "video" | "reel" | "image" | "carousel" | "text";
+   *  long-form feed video. `short` is the ONE cross-platform term for the
+   *  short-form video form (IG Reels / YouTube Shorts / TikTok). The card
+   *  renders a different corner glyph per form. */
+  kind: "video" | "short" | "image" | "carousel" | "text";
   publishedAt: Date;
   /**
    * D-04 / D-05 metrics-by-presence: a metric whose source field is absent on

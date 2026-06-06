@@ -446,7 +446,7 @@ describe("EventDetail renders instagram_post like the other pollable kinds (Phas
 });
 
 describe("EventDetailContent media-type pill (Phase 08 detail-view parity)", () => {
-  // The Reel / Carousel / Video pill — previously feed-card only — must also
+  // The Short / Carousel / Video pill — previously feed-card only — must also
   // ride the EVENT DETAIL thumbnail (same shared MediaTypePill + the
   // deriveMediaTypeOverlay kind→pill helper). One mount in EventDetailContent
   // covers BOTH the modal and the /events/[id] full page (the shared
@@ -479,17 +479,17 @@ describe("EventDetailContent media-type pill (Phase 08 detail-view parity)", () 
     return root.querySelector(".detail-thumb .media-type-pill");
   }
 
-  it("instagram_post media_type=reel → 'Reel' pill on the detail thumbnail (bare + modal)", () => {
-    const bare = mountBare({ event: makeIgEvent("reel") });
-    const modal = mountInModal({ event: makeIgEvent("reel") });
+  it("instagram_post media_type=short → 'Short' pill on the detail thumbnail (bare + modal)", () => {
+    const bare = mountBare({ event: makeIgEvent("short") });
+    const modal = mountInModal({ event: makeIgEvent("short") });
     const barePill = pillOf(bare.root);
     const modalPill = pillOf(modal.root);
-    expect(barePill, "reel pill should render on the bare detail mount").not.toBeNull();
-    expect(modalPill, "reel pill should render on the modal detail mount").not.toBeNull();
-    expect(barePill!.getAttribute("aria-label")).toBe("Reel");
-    expect(barePill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Reel");
-    expect(barePill!.getAttribute("data-media-type")).toBe("reel");
-    expect(modalPill!.getAttribute("aria-label")).toBe("Reel");
+    expect(barePill, "short pill should render on the bare detail mount").not.toBeNull();
+    expect(modalPill, "short pill should render on the modal detail mount").not.toBeNull();
+    expect(barePill!.getAttribute("aria-label")).toBe("Short");
+    expect(barePill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Short");
+    expect(barePill!.getAttribute("data-media-type")).toBe("short");
+    expect(modalPill!.getAttribute("aria-label")).toBe("Short");
     unmount(bare.component);
     unmount(modal.component);
   });

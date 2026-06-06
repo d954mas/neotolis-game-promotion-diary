@@ -18,23 +18,25 @@ import { z } from "zod";
 import type { NormalizedPost, ProviderPage } from "$lib/sources/social-provider.js";
 
 // ---- LIVE-CONFIRMED media_type integers (08-SPIKE.md) ----
-// 1 = image, 2 = video/reel, 8 = carousel. The integer alone CANNOT tell a reel
-// from a plain feed video — both are 2. The discriminator is `product_type`:
-// the spike confirmed a reel carries product_type === "clips" (a `/p/...` post
-// whose poster frame URL contains `CLIPS...video_default_cover_frame`). A
-// plain video (product_type "feed" or anything not "clips") stays kind "video".
-// Items from the REELS endpoint are reels by definition — the caller passes
-// `forceReel` so an unexpected/absent product_type there still maps to "reel".
+// 1 = image, 2 = video/short, 8 = carousel. The integer alone CANNOT tell a
+// short-form clip from a plain feed video — both are 2. The discriminator is
+// `product_type`: the spike confirmed a short-form clip carries
+// product_type === "clips" (a `/p/...` post whose poster frame URL contains
+// `CLIPS...video_default_cover_frame`). A plain video (product_type "feed" or
+// anything not "clips") stays kind "video". Items from the REELS endpoint are
+// short-form by definition — the caller passes `forceShort` so an
+// unexpected/absent product_type there still maps to "short". ("short" is the
+// unified cross-platform term for the IG-Reels / YT-Shorts / TikTok form.)
 function mediaTypeToKind(
   mediaType: number,
   productType: string | null | undefined,
-  forceReel: boolean,
+  forceShort: boolean,
 ): NormalizedPost["kind"] {
   switch (mediaType) {
     case 1:
       return "image";
     case 2:
-      return forceReel || productType === "clips" ? "reel" : "video";
+      return forceShort || productType === "clips" ? "short" : "video";
     case 8:
       return "carousel";
     default:
@@ -124,19 +126,19 @@ function pickPermalink(item: MediaItem): string | null {
  * to a NormalizedPost. Exported pure so the unit test asserts the mapping
  * directly without spinning up the provider.
  *
- * `forceReel` is set by the reels-endpoint path: every item from /reels is a
- * reel by definition, so it maps to kind "reel" even if `product_type` is
- * absent/unexpected. The posts path leaves it false and relies on
- * `product_type === "clips"` to tell a reel from a plain feed video.
+ * `forceShort` is set by the reels-endpoint path: every item from /reels is a
+ * short-form clip by definition, so it maps to kind "short" even if
+ * `product_type` is absent/unexpected. The posts path leaves it false and
+ * relies on `product_type === "clips"` to tell a short from a plain feed video.
  *
  * Metrics-by-presence (D-05): `views = play_count ?? ig_play_count ?? null` —
  * a photo/carousel (media_type 1/8) has neither field → null, NOT 0. `shares`
  * is ALWAYS null for Instagram (no share field, D-04 / 08-SPIKE.md).
  */
-export function mapItemToNormalizedPost(item: MediaItem, forceReel = false): NormalizedPost {
+export function mapItemToNormalizedPost(item: MediaItem, forceShort = false): NormalizedPost {
   return {
     id: item.id,
-    kind: mediaTypeToKind(item.media_type, item.product_type, forceReel),
+    kind: mediaTypeToKind(item.media_type, item.product_type, forceShort),
     publishedAt: new Date(item.taken_at * 1000), // taken_at is unix SECONDS
     metrics: {
       views: item.play_count ?? item.ig_play_count ?? null,
@@ -155,8 +157,8 @@ export function normalizePostsResponse(json: unknown): ProviderPage {
   const parsed = POSTS_RESPONSE.parse(json);
   return {
     // Explicit lambda — NOT a bare `.map(mapItemToNormalizedPost)`: Array.map
-    // passes the index as the 2nd arg, which would bind to `forceReel`. The
-    // posts path leaves forceReel false (product_type discriminates reels).
+    // passes the index as the 2nd arg, which would bind to `forceShort`. The
+    // posts path leaves forceShort false (product_type discriminates shorts).
     posts: parsed.items.map((item) => mapItemToNormalizedPost(item)),
     nextCursor: parsed.next_max_id ?? null,
     endOfFeed: parsed.more_available === false,

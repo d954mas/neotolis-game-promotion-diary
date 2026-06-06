@@ -43,7 +43,7 @@ export const instagramPosts = pgTable(
     // Nullable until resolveAccount has run. This is an intrinsic identifier
     // (the account key), not a renameable display name — safe to carry.
     accountId: text("account_id"),
-    // The NormalizedPost.kind: "image" | "carousel" | "video" | "reel"
+    // The NormalizedPost.kind: "image" | "carousel" | "video" | "short"
     // (D-06: content form lives here, not in events.kind which stays the
     // platform-level 'instagram_post' for both posts AND reels).
     mediaType: text("media_type"),

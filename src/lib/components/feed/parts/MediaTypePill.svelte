@@ -1,5 +1,5 @@
 <script lang="ts">
-  // MediaTypePill — THE single shared corner pill (reel / carousel / video)
+  // MediaTypePill — THE single shared corner pill (short / carousel / video)
   // marking a thumbnail's content form. ONE treatment for every source
   // (Instagram, YouTube) AND every surface (the feed card thumbnail and the
   // event-detail thumbnail) — no per-card / per-surface fork.
@@ -7,7 +7,7 @@
   // Extracted verbatim from BaseFeedCard's inline pill markup + CSS so the
   // feed look is pixel-identical AND the event-detail thumbnail reuses the
   // exact same icon+TEXT pill. The TEXT is the load-bearing disambiguator: a
-  // 22px icon-only glyph was unreadable over busy bright covers (a Reel looked
+  // 22px icon-only glyph was unreadable over busy bright covers (a Short looked
   // like a Carousel looked like a Video). A solid dark scrim + backdrop-blur
   // keeps the white label legible on any image. pointer-events: none so it
   // never steals the host's click (open-detail / play facade).
@@ -40,11 +40,11 @@
 </span>
 
 <style>
-  /* Media-type pill (reel / carousel / video) — THE single shared treatment
+  /* Media-type pill (short / carousel / video) — THE single shared treatment
    * for every source (Instagram, YouTube) and every surface (feed card +
    * event detail). Top-LEFT of the thumbnail, over the image, clear of the
    * top-right sync/overflow affordances. Icon + TEXT: the text is what
-   * disambiguates a Reel from a Carousel from a Video over a busy bright
+   * disambiguates a Short from a Carousel from a Video over a busy bright
    * cover — a 22px icon-only glyph was unreadable. A solid dark scrim +
    * backdrop-blur keeps the white label legible on any image. pointer-events:
    * none so it never steals the host's click. */
@@ -81,8 +81,8 @@
     text-overflow: ellipsis;
   }
   /* Cheap per-type accent tints — the text already disambiguates, this is just
-   * a subtle reinforcement (reel/video = warm play accent, carousel = cool). */
-  .media-type-pill[data-media-type="reel"],
+   * a subtle reinforcement (short/video = warm play accent, carousel = cool). */
+  .media-type-pill[data-media-type="short"],
   .media-type-pill[data-media-type="video"] {
     background: color-mix(in oklab, var(--accent) 24%, rgba(0, 0, 0, 0.72));
   }

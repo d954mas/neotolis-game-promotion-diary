@@ -291,7 +291,7 @@
   const thumbnailUrl = $derived(deriveThumbnailUrl(event as unknown as CardEventLite));
   const showDetailThumb = $derived(mediaShape || thumbnailUrl !== null);
 
-  // Media-type pill (reel / carousel / video) over the detail thumbnail —
+  // Media-type pill (short / carousel / video) over the detail thumbnail —
   // SAME shared pill the feed card uses (deriveMediaTypeOverlay + MediaTypePill),
   // so the detail reads as a zoomed-in version of the clicked card. The IG
   // media_type rides on instagramEnrichment, attached to the DTO by the loader's
