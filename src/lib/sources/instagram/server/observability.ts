@@ -32,11 +32,7 @@ import type {
   ObservabilityDailyStats,
 } from "$lib/sources/adapter.js";
 import { isInstagramConfigured } from "./provider/registry.js";
-import {
-  getSocialSpendToday,
-  getSocialThrottleState,
-  type SocialThrottleState,
-} from "./quota.js";
+import { getSocialSpendToday, getSocialThrottleState, type SocialThrottleState } from "./quota.js";
 
 const PLATFORM = "instagram";
 const PROVIDER = "scrapecreators";

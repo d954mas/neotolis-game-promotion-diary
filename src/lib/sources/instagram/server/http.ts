@@ -34,11 +34,7 @@ import {
   socialProviderRequestDuration,
   socialProviderRequests,
 } from "$lib/server/metrics.js";
-import {
-  getSocialSpendToday,
-  reserveSocialCredits,
-  type SocialQuotaPool,
-} from "./quota.js";
+import { getSocialSpendToday, reserveSocialCredits, type SocialQuotaPool } from "./quota.js";
 import type { SocialPlatform } from "$lib/sources/social-provider.js";
 
 /**
@@ -113,7 +109,12 @@ export async function instagramFetch(url: URL, ctx: InstagramFetchContext): Prom
       const { prepaidBalance } = await getSocialSpendToday(reservePlatform, reserveProvider);
       const exhausted = prepaidBalance <= 0;
       logger.warn(
-        { platform: reservePlatform, provider: reserveProvider, origin: ctx.origin, prepaidBalance },
+        {
+          platform: reservePlatform,
+          provider: reserveProvider,
+          origin: ctx.origin,
+          prepaidBalance,
+        },
         `${ctx.logTag}: reserveSocialCredits null -> AdapterError(${exhausted ? "operator-issue" : "rate-limited"})`,
       );
       throw new AdapterError(

@@ -206,7 +206,11 @@ export async function instagramEnrichFeedDtos(
         thumbnailUrl: meta?.thumbnailUrl ?? null,
         mediaType: meta?.mediaType ?? null,
       };
-      if (meta?.accountId !== null && meta?.accountId !== undefined && pausedAccounts.has(meta.accountId)) {
+      if (
+        meta?.accountId !== null &&
+        meta?.accountId !== undefined &&
+        pausedAccounts.has(meta.accountId)
+      ) {
         const base =
           dto.metadata !== null && typeof dto.metadata === "object"
             ? (dto.metadata as Record<string, unknown>)

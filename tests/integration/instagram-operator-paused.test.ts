@@ -81,15 +81,12 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { handleBackfillAccount } = await import(
-  "../../src/lib/sources/instagram/server/handlers/backfill-account.js"
-);
-const { getInstagramBackfillState } = await import(
-  "../../src/lib/sources/instagram/server/backfill-state.js"
-);
-const { instagramEnrichFeedDtos } = await import(
-  "../../src/lib/sources/instagram/server/feed-enrichment.js"
-);
+const { handleBackfillAccount } =
+  await import("../../src/lib/sources/instagram/server/handlers/backfill-account.js");
+const { getInstagramBackfillState } =
+  await import("../../src/lib/sources/instagram/server/backfill-state.js");
+const { instagramEnrichFeedDtos } =
+  await import("../../src/lib/sources/instagram/server/feed-enrichment.js");
 const { mapEventsToDtos } = await import("../../src/lib/server/dto.js");
 
 const ACCOUNT = "acct-paused";

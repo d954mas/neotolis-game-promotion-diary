@@ -20,10 +20,7 @@
   // instead of a hard navigate to /sources/new. The /sources/new route
   // still exists as a fallback (non-JS / direct-link entry).
   import AddSourceModal from "$lib/components/sources/AddSourceModal.svelte";
-  import {
-    SOURCE_PLATFORM_GROUPS,
-    sourcePlatformGroupKey,
-  } from "$lib/sources/kind-display.js";
+  import { SOURCE_PLATFORM_GROUPS, sourcePlatformGroupKey } from "$lib/sources/kind-display.js";
   import type { SourceKind } from "$lib/sources/adapter.js";
   import type { PageData } from "./$types";
 
@@ -90,7 +87,13 @@
   // newly-added kind (instagram_account → "instagram") shows up automatically.
   // No silent default — every SourceKind maps to a group via the config's
   // `satisfies Record<SourceKind, …>` guarantee.
-  type Group = { key: string; order: number; kind: SourceKind; label: string; items: DataSourceDto[] };
+  type Group = {
+    key: string;
+    order: number;
+    kind: SourceKind;
+    label: string;
+    items: DataSourceDto[];
+  };
   const groups: Group[] = $derived.by(() => {
     const out: Group[] = [];
     const keyToGroup = new Map<string, Group>();

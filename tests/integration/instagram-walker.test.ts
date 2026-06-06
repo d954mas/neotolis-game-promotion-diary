@@ -79,7 +79,9 @@ function post(id: string, daysAgo: number, kind: "image" | "video" = "image") {
 }
 
 async function seedSource(opts: { autoImport?: boolean } = {}): Promise<string> {
-  const user = await seedUserDirectly({ email: `walker-${Math.random().toString(36).slice(2)}@t.io` });
+  const user = await seedUserDirectly({
+    email: `walker-${Math.random().toString(36).slice(2)}@t.io`,
+  });
   const [row] = await db
     .insert(dataSources)
     .values({
@@ -119,12 +121,22 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
     await seedSource();
     // Tick 1: posts page with a cursor (more_available); reels empty (ends).
     provider.pages.posts = [
-      { posts: [post("p1", 1), post("p2", 2)], nextCursor: "CURSOR_A", endOfFeed: false, creditsUsed: 1 },
+      {
+        posts: [post("p1", 1), post("p2", 2)],
+        nextCursor: "CURSOR_A",
+        endOfFeed: false,
+        creditsUsed: 1,
+      },
     ];
     provider.pages.reels = [emptyPage()];
 
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const st1 = await getInstagramBackfillState(ACCOUNT);
@@ -140,7 +152,12 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
     provider.calls = [];
 
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     // Second tick passed the stored cursor back to the provider's posts feed.
@@ -158,11 +175,21 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
     // Posts ends immediately; reels has a cursor (still going).
     provider.pages.posts = [emptyPage()];
     provider.pages.reels = [
-      { posts: [post("r1", 1, "video")], nextCursor: "REEL_CURSOR", endOfFeed: false, creditsUsed: 1 },
+      {
+        posts: [post("r1", 1, "video")],
+        nextCursor: "REEL_CURSOR",
+        endOfFeed: false,
+        creditsUsed: 1,
+      },
     ];
 
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     // Posts ended but reels still has a cursor → account NOT complete.
@@ -179,7 +206,12 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
       { posts: [post("r2", 2, "video")], nextCursor: null, endOfFeed: true, creditsUsed: 1 },
     ];
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     cs = await readChannelState();
@@ -194,7 +226,12 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
     provider.pages.reels = [emptyPage()];
 
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const cached = await db.select().from(instagramPosts);
@@ -210,7 +247,12 @@ describe("instagram account walker (resumable, cursor-persisted)", () => {
     provider.pages.reels = [emptyPage()];
 
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const [src] = await db.select().from(dataSources).where(eq(dataSources.id, sourceId)).limit(1);

@@ -72,7 +72,9 @@ function post(id: string, daysAgo: number) {
 }
 
 async function seedCompletedSource(frontier: Date): Promise<string> {
-  const user = await seedUserDirectly({ email: `incr-${Math.random().toString(36).slice(2)}@t.io` });
+  const user = await seedUserDirectly({
+    email: `incr-${Math.random().toString(36).slice(2)}@t.io`,
+  });
   const [row] = await db
     .insert(dataSources)
     .values({
@@ -131,7 +133,13 @@ describe("instagram incremental refresh (post-backfill_complete)", () => {
     // Incremental refresh — target shallow (epoch). exhausted branch ⇒
     // since = frontier ⇒ only > frontier collected.
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "incremental", triggerUserId: undefined },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "incremental",
+        triggerUserId: undefined,
+      },
     });
 
     const imported = await db.select().from(events).where(eq(events.kind, "instagram_post"));

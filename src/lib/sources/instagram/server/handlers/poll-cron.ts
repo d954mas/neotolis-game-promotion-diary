@@ -155,7 +155,14 @@ export async function handleInstagramPollCron(job: PollCronJob, boss: MinimalBos
   }
 
   logger.info(
-    { jobId: job.id, tier, throttle, candidates: candidates.length, picked: picked.length, enqueued },
+    {
+      jobId: job.id,
+      tier,
+      throttle,
+      candidates: candidates.length,
+      picked: picked.length,
+      enqueued,
+    },
     "instagram.poll.cron: tick complete",
   );
 }

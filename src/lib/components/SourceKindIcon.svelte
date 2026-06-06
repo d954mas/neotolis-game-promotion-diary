@@ -40,9 +40,10 @@
     | "telegram_channel"
     | "discord_server"
     | "instagram_account";
-  type _AllSourceKindsHaveIcon = Exclude<SourceKind, IconedSourceKind> extends never
-    ? true
-    : ["SourceKind missing a SourceKindIcon branch:", Exclude<SourceKind, IconedSourceKind>];
+  type _AllSourceKindsHaveIcon =
+    Exclude<SourceKind, IconedSourceKind> extends never
+      ? true
+      : ["SourceKind missing a SourceKindIcon branch:", Exclude<SourceKind, IconedSourceKind>];
   // Force the type to be evaluated; `true` holds only when the union is covered.
   const _exhaustive: _AllSourceKindsHaveIcon = true;
   void _exhaustive;

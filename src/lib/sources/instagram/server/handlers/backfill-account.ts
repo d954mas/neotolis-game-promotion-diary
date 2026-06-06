@@ -49,10 +49,7 @@ import {
   markChannelBackfillComplete,
 } from "$lib/server/services/channel-state.js";
 import { instagramAccountAdapterCore as adapter, type InstagramFeed } from "../adapter.js";
-import {
-  readInstagramBackfillState,
-  writeInstagramBackfillState,
-} from "../backfill-state.js";
+import { readInstagramBackfillState, writeInstagramBackfillState } from "../backfill-state.js";
 import { env } from "$lib/server/config/env.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import type { RawEvent, SourceKind } from "$lib/sources/adapter.js";

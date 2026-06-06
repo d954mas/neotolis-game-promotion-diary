@@ -29,23 +29,23 @@ describe("instagram tier resolution (reuses tier-resolver, BACK-04)", () => {
 
   it("an IG post published 1h ago → active (age < 24h)", () => {
     const publishedAt = new Date(now.getTime() - 60 * 60 * 1000);
-    expect(
-      tierForIgPost({ publishedAt, lastPolledAt: polled, lastPollStatus: "ok" }, now),
-    ).toBe("active");
+    expect(tierForIgPost({ publishedAt, lastPolledAt: polled, lastPollStatus: "ok" }, now)).toBe(
+      "active",
+    );
   });
 
   it("an IG post published 5d ago → cold (24h ≤ age < 28d)", () => {
     const publishedAt = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
-    expect(
-      tierForIgPost({ publishedAt, lastPolledAt: polled, lastPollStatus: "ok" }, now),
-    ).toBe("cold");
+    expect(tierForIgPost({ publishedAt, lastPolledAt: polled, lastPollStatus: "ok" }, now)).toBe(
+      "cold",
+    );
   });
 
   it("an IG post published 60d ago (already polled) → frozen (age ≥ 28d)", () => {
     const publishedAt = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-    expect(
-      tierForIgPost({ publishedAt, lastPolledAt: polled, lastPollStatus: "ok" }, now),
-    ).toBe("frozen");
+    expect(tierForIgPost({ publishedAt, lastPolledAt: polled, lastPollStatus: "ok" }, now)).toBe(
+      "frozen",
+    );
   });
 
   it("an IG post with NULL published_at → pending (taken_at not yet resolved)", () => {

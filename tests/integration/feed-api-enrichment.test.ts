@@ -29,15 +29,19 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos, youtubeVideoSnapshots, youtubeChannels, instagramPosts, instagramPostSnapshots } =
-  await import("../../src/lib/server/db/schema/index.js");
+const {
+  youtubeVideos,
+  youtubeVideoSnapshots,
+  youtubeChannels,
+  instagramPosts,
+  instagramPostSnapshots,
+} = await import("../../src/lib/server/db/schema/index.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
 const { toEventDto } = await import("../../src/lib/server/dto.js");
-const { instagramEnrichFeedDtos } = await import(
-  "../../src/lib/sources/instagram/server/feed-enrichment.js"
-);
+const { instagramEnrichFeedDtos } =
+  await import("../../src/lib/sources/instagram/server/feed-enrichment.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);

@@ -73,7 +73,9 @@ function fullPage(seed: number): ProviderPage {
 }
 
 async function seedSource(): Promise<string> {
-  const user = await seedUserDirectly({ email: `bound-${Math.random().toString(36).slice(2)}@t.io` });
+  const user = await seedUserDirectly({
+    email: `bound-${Math.random().toString(36).slice(2)}@t.io`,
+  });
   const [row] = await db
     .insert(dataSources)
     .values({
@@ -113,7 +115,12 @@ describe("instagram backfill bounding (post-count cap + date window)", () => {
       const st = await getInstagramBackfillState(ACCOUNT);
       if (st.posts.complete && st.reels.complete) break;
       await handleBackfillAccount({
-        data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+        data: {
+          kind: "instagram_account",
+          channelKey: ACCOUNT,
+          depthBoundIso: "1970-01-01T00:00:00Z",
+          flow: "initial",
+        },
       });
     }
 
@@ -143,7 +150,12 @@ describe("instagram backfill bounding (post-count cap + date window)", () => {
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
     await handleBackfillAccount({
-      data: { kind: "instagram_account", channelKey: ACCOUNT, depthBoundIso: sevenDaysAgo, flow: "initial" },
+      data: {
+        kind: "instagram_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: sevenDaysAgo,
+        flow: "initial",
+      },
     });
 
     const imported = await db.select().from(events).where(eq(events.kind, "instagram_post"));
