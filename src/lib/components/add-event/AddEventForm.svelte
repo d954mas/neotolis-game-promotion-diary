@@ -51,6 +51,11 @@
     // author_name, Reddit subreddit/author, etc). Persisted to
     // events.metadata so FeedCard.sourceLabel can read it back.
     metadata?: Record<string, unknown>;
+    // The MEDIA id the preview flow resolved (POST /api/events/preview-url
+    // returns it). Forwarded on save so the event keys on the same id the
+    // snapshot/enrichment caches use. Load-bearing for Instagram: its URL
+    // carries only the shortcode, NOT the media-id cache key (issue #69).
+    externalId?: string | null;
   };
 
   let {
@@ -105,6 +110,11 @@
   // in FeedCard sourceLabel (e.g. "Rick Astley (YouTube channel)") via
   // metadata.channelTitle / metadata.subreddit / metadata.author.
   let fetchedMetadata = $state<Record<string, unknown>>({});
+  // The media id resolved by the URL preview (POST /api/events/preview-url),
+  // forwarded on save so the event keys on the snapshot/enrichment cache id —
+  // load-bearing for Instagram, whose URL is only a shortcode (issue #69).
+  // Null until a successful fetch; cleared on Reset / URL edit.
+  let fetchedExternalId = $state<string | null>(null);
 
   // After a successful fetch, the URL + kind are AUTHORITATIVE — the
   // adapter parsed them from the live URL. Lock both inputs so the user
@@ -113,6 +123,7 @@
   function resetFetch(): void {
     fetched = false;
     fetchedSrc = "";
+    fetchedExternalId = null;
     urlError = null;
   }
   let urlError = $state<string | null>(null);
@@ -279,7 +290,12 @@
         sourceLabel?: string | null;
         authorName?: string | null;
         authorUrl?: string | null;
+        externalId?: string | null;
       };
+      // The resolved media id — forwarded on save so the event keys on the
+      // snapshot/enrichment cache id (issue #69). Null for kinds/URLs the
+      // adapter couldn't resolve a stable id for.
+      fetchedExternalId = data.externalId ?? null;
       if (data.title && title.trim().length === 0) {
         title = data.title;
       }
@@ -377,6 +393,7 @@
         authorIsMe,
         occurredAt: new Date(occurredAt).toISOString(),
         metadata: Object.keys(fetchedMetadata).length > 0 ? fetchedMetadata : undefined,
+        externalId: fetchedExternalId,
       });
     } catch {
       errorText = m.error_server_generic();
@@ -476,6 +493,7 @@
         bind:value={url}
         oninput={() => {
           fetched = false;
+          fetchedExternalId = null;
           urlError = null;
         }}
         onkeydown={(e) => {

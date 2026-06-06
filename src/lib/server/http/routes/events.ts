@@ -150,6 +150,13 @@ const createEventSchema = z
     // "Author: me / not me" at create time. Service defaults to false when
     // omitted (preserves existing semantics).
     authorIsMe: z.boolean().optional(),
+    // The MEDIA id resolved by the preview flow (POST /api/events/preview-url
+    // returns it). Round-trips through the save body so the saved event keys on
+    // the same id the snapshot/enrichment caches use. Load-bearing for
+    // instagram_post: its URL carries only the shortcode, which is NOT the
+    // media-id cache key — so it must come from the preview, not be re-derived
+    // from the URL. createEvent prefers this caller-supplied value.
+    externalId: z.string().min(1).nullable().optional(),
   })
   .superRefine(urlRequiredForPollableKinds)
   .transform((obj) => {

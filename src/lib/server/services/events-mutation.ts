@@ -195,7 +195,14 @@ export async function createEvent(
     // services through syncStats/create flows.
     const { parseAnyUrl } = await import("$lib/sources/url.js");
     const parsed = parseAnyUrl(input.url);
-    if (parsed !== null && parsed.kind === input.kind) {
+    // instagram_post is excluded: its URL carries only the shortcode, which is
+    // NOT the media-id key the snapshot / feed-enrichment caches use. The media
+    // id is resolved ONLY by the preview flow and arrives as an explicit
+    // input.externalId (handled above). Deriving the shortcode here would save
+    // an event whose external_id never matches any snapshot — stuck on the
+    // "pending" badge with no stats forever (issue #69). Leaving it null yields
+    // an honest stats-less manual card instead.
+    if (parsed !== null && parsed.kind === input.kind && parsed.kind !== "instagram_post") {
       derivedExternalId = parsed.externalId;
     }
   }
