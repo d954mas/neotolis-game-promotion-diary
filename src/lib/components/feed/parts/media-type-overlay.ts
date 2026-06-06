@@ -68,3 +68,32 @@ export function mediaTypeOverlay(mediaType: string | null | undefined): OverlayP
   }
   return null;
 }
+
+/** The minimal event shape deriveMediaTypeOverlay reads: the discriminating
+ *  `kind` plus the IG enrichment's media_type (attached by
+ *  sources/instagram/server/feed-enrichment.ts — present on both the feed-card
+ *  CardEventLite and the cast event-detail DTO). Kept structural so feed cards
+ *  AND the event-detail surface can pass their own event type unchanged. */
+export interface MediaTypeOverlayEvent {
+  kind: string;
+  instagramEnrichment?: { mediaType?: string | null } | null;
+}
+
+/**
+ * THE single kind→pill derivation, shared by the feed cards and the event
+ * detail so the per-kind decision lives in one place (DRY):
+ *   - youtube_video  → always the "Video" pill (a feed thumbnail can't tell a
+ *     Short from a full video yet; Shorts detection is deferred).
+ *   - instagram_post → the post's media_type (reel / video / carousel → pill;
+ *     image / missing → null).
+ *   - any other kind → null (no pill).
+ * Pure; the caller renders <MediaTypePill> only when this is non-null (and a
+ * thumbnail image is actually shown).
+ */
+export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPill | null {
+  if (event.kind === "youtube_video") return mediaTypeOverlay("video");
+  if (event.kind === "instagram_post") {
+    return mediaTypeOverlay(event.instagramEnrichment?.mediaType ?? "");
+  }
+  return null;
+}

@@ -34,7 +34,7 @@
 
   import { metricColor } from "$lib/util/metric-colors.js";
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
-  import { mediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
+  import { deriveMediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
   import {
     deriveThumbnailUrl,
     formatStat,
@@ -89,10 +89,12 @@
   const stats = $derived(event.instagramEnrichment?.stats ?? null);
 
   // Media-type pill (reel / carousel / video). A bare photo maps to null → no
-  // pill. BaseFeedCard renders the icon+text pill (ONE shared treatment) over
-  // the thumbnail image only — gated on a present <img> — so the empty
-  // placeholder stays clean.
-  const overlay = $derived.by(() => mediaTypeOverlay(event.instagramEnrichment?.mediaType));
+  // pill. The kind→pill decision lives in ONE shared place
+  // (deriveMediaTypeOverlay) used by the feed cards AND the event detail.
+  // BaseFeedCard renders the icon+text pill (ONE shared treatment) over the
+  // thumbnail image only — gated on a present <img> — so the empty placeholder
+  // stays clean.
+  const overlay = $derived.by(() => deriveMediaTypeOverlay(event));
 </script>
 
 <BaseFeedCard
