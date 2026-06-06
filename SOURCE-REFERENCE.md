@@ -623,3 +623,52 @@ Deliberate skip:
   - `GET /api/events/deleted` (events.ts:374) does NOT call `enrichFeedDtos`. `DeletedEventsPanel.svelte` renders soft-deleted events with a compact KindIcon + strikethrough-title view — no stats line, no channel chip. The skip is documented inline with a load-bearing WHY comment at the call site.
 
 Reference implementation: YouTube — `src/lib/sources/youtube/server/feed-enrichment.ts`. The Phase 03.0.3 P2 commit replaced the inline JOIN in `/feed/+page.server.ts:162-237` with a single adapter loop that all three callsites share. Issue #29 Part 2 was the load-bearing motivation: pre-fix, the SSR first batch on `/feed` was enriched inline but `GET /api/events` cursor-paginated batches dropped both `stats` and `channelTitle` on every card past the first SSR batch.
+
+## 12. UI integration is config-driven and compile-enforced
+
+*Established in Phase 08; supersedes the old per-surface switch approach.*
+
+Adding a new `EventKind` / `SourceKind` used to mean editing ~7 UI surfaces that each carried their OWN per-kind `switch` with a SILENT `default → "Other"` / skip. A missed surface mis-rendered at runtime (the new kind fell into the default arm) instead of failing the build. The classic symptom: Instagram shipped its adapter, but the `/sources` list silently dropped `instagram_account` rows because the page's local `PLATFORM_ORDER` didn't list the kind — a `continue` skip with no error.
+
+**The central config is now the single touch-point.** Per-kind UI facts live in `src/lib/sources/kind-display.ts`:
+
+```typescript
+export const EVENT_KIND_DISPLAY = {
+  youtube_video: { label: () => m.event_kind_label_youtube_video(), pollable: true,  chartable: true  },
+  // … one entry per EventKind …
+} satisfies Record<EventKind, EventKindDisplay>;
+
+export const SOURCE_KIND_DISPLAY = {
+  instagram_account: { label: () => m.source_kind_label_instagram_account(),
+                       platformGroup: { key: "instagram", label: "Instagram", order: 2 } },
+  // … one entry per SourceKind …
+} satisfies Record<SourceKind, SourceKindDisplay>;
+```
+
+**The `satisfies Record<EventKind, …>` / `Record<SourceKind, …>` makes an omission a COMPILE ERROR.** The `Record` requires every key in the union, so a new kind that is missing from the config fails `pnpm typecheck` (`Property 'X' is missing in type … but required in type 'Record<EventKind, EventKindDisplay>'`). This is the same "you can't forget a case" philosophy the codebase already enforces in `errors.ts categoryToSnapshotStatus` (§4.5 — a switch with no `default`) and `AuditFlow` (§9.1 — TS union + Postgres CHECK). `tests/unit/kind-display.test.ts` adds a belt-and-suspenders runtime check (every key resolves a non-empty label + required fields).
+
+**What the config carries (KISS — only what surfaces actually read today):**
+
+| Field | Type | Drives |
+| ----- | ---- | ------ |
+| `EVENT_KIND_DISPLAY[k].label` | `() => string` | Every event-kind label across the UI (paraglide resolver) |
+| `EVENT_KIND_DISPLAY[k].pollable` | `boolean` | PollingBadge visibility (freshness / operator-paused / refresh-now) — youtube_video / reddit_post / instagram_post |
+| `EVENT_KIND_DISPLAY[k].chartable` | `boolean` | Per-event metric-history chart + game-chart markers |
+| `SOURCE_KIND_DISPLAY[k].label` | `() => string` | Every source-kind label |
+| `SOURCE_KIND_DISPLAY[k].platformGroup` | `{ key, label, order }` | `/sources` list grouping (reddit_account + reddit_subreddit share one "Reddit" group) |
+
+Derived helper sets — `POLLABLE_EVENT_KINDS`, `CHARTABLE_EVENT_KINDS`, `SOURCE_PLATFORM_GROUPS` — are computed FROM the config so they can never drift from the per-kind flags. Color is deliberately NOT in the config: chart-theme `resolveKindColor` already resolves `--k-<kind>` dynamically for any kind, so duplicating it would create a second source of truth. Icons live in `kind-icon-svg.ts` (event icons) and `SourceKindIcon.svelte` (source-row icons, which carries its own type-level exhaustiveness guard).
+
+**Surfaces that read from the config** (the full roster — a future contributor adds a kind in ONE place and these update automatically):
+
+- `src/lib/components/event-detail/EventDetailHeader.svelte` — kind label + PollingBadge gate (`POLLABLE_EVENT_KINDS`)
+- `src/lib/components/PollingBadge.svelte` — `POLLABLE_EVENT_KINDS` membership
+- `src/lib/components/event-detail/EventDetailContent.svelte` — `CHARTABLE_EVENT_KINDS` membership
+- `src/lib/components/FilterChips.svelte` + `FiltersSheet.svelte` — kind labels (`eventKindLabel`)
+- `src/lib/components/feed/parts/BaseFeedCard.svelte` — kind label (`eventKindLabel`)
+- `src/routes/sources/+page.svelte` — platform grouping (`SOURCE_PLATFORM_GROUPS` / `sourcePlatformGroupKey`)
+- `src/lib/util/source-kind-label.ts` — `sourceKindLabel` is now a thin re-export over `sourceKindDisplayLabel` (so SourceRow / FiltersSheet resolve through the same config)
+
+**Deliberate exclusions** (NOT config-driven, by design): the manual create/edit kind dropdowns (`events/[id]/edit`, `add-event/AddEventForm`) carry their own import-only allowlists — they intentionally expose a SUBSET of kinds (no auto-imported kinds in the manual-create picker), so they are not a "forgot a case" footgun and stay separate.
+
+**Threading a resolved display name at create time.** `CanonicalizeResult` (adapter.ts) carries an optional `displayName?: string | null`. When an adapter already fetched the account's display name while resolving the handle (Instagram `resolveAccount` returns full_name/username), it returns it here; `createSource` persists it on `data_sources.display_name` ONLY when the caller didn't supply an explicit `displayName` (a user-typed name always wins). This is why a newly-added Instagram source shows its real account name instead of the bare account id. YouTube omits it (the channel title is resolved later on the worker).
