@@ -444,3 +444,85 @@ describe("EventDetail renders instagram_post like the other pollable kinds (Phas
     unmount(bare.component);
   });
 });
+
+describe("EventDetailContent media-type pill (Phase 08 detail-view parity)", () => {
+  // The Reel / Carousel / Video pill — previously feed-card only — must also
+  // ride the EVENT DETAIL thumbnail (same shared MediaTypePill + the
+  // deriveMediaTypeOverlay kind→pill helper). One mount in EventDetailContent
+  // covers BOTH the modal and the /events/[id] full page (the shared
+  // dual-render body), so asserting on the bare + modal mount proves both
+  // surfaces. The pill is gated on a present thumbnail <img> + a non-null
+  // derived pill; an IG photo (media_type=image) → null → no pill.
+
+  // An IG event with a CDN thumbnail so the .detail-thumb <img> renders (the
+  // pill rides the picture, not the empty KindIcon placeholder). media_type is
+  // overridden per-case below.
+  function makeIgEvent(mediaType: string | null) {
+    return {
+      ...baseEvent,
+      id: "ev_ig_pill",
+      kind: "instagram_post" as const,
+      title: "IG media-type pill event",
+      externalId: "Cabc123XYZ",
+      stats: null,
+      // deriveThumbnailUrl(instagram_post) reads instagramEnrichment.thumbnailUrl,
+      // and deriveMediaTypeOverlay reads instagramEnrichment.mediaType.
+      instagramEnrichment: {
+        stats: null,
+        thumbnailUrl: "https://scontent.cdninstagram.com/v/detail-thumb.jpg",
+        mediaType,
+      },
+    };
+  }
+
+  function pillOf(root: HTMLElement): HTMLElement | null {
+    return root.querySelector(".detail-thumb .media-type-pill");
+  }
+
+  it("instagram_post media_type=reel → 'Reel' pill on the detail thumbnail (bare + modal)", () => {
+    const bare = mountBare({ event: makeIgEvent("reel") });
+    const modal = mountInModal({ event: makeIgEvent("reel") });
+    const barePill = pillOf(bare.root);
+    const modalPill = pillOf(modal.root);
+    expect(barePill, "reel pill should render on the bare detail mount").not.toBeNull();
+    expect(modalPill, "reel pill should render on the modal detail mount").not.toBeNull();
+    expect(barePill!.getAttribute("aria-label")).toBe("Reel");
+    expect(barePill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Reel");
+    expect(barePill!.getAttribute("data-media-type")).toBe("reel");
+    expect(modalPill!.getAttribute("aria-label")).toBe("Reel");
+    unmount(bare.component);
+    unmount(modal.component);
+  });
+
+  it("instagram_post media_type=carousel → 'Carousel' pill", () => {
+    const bare = mountBare({ event: makeIgEvent("carousel") });
+    const pill = pillOf(bare.root);
+    expect(pill).not.toBeNull();
+    expect(pill!.getAttribute("aria-label")).toBe("Carousel");
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Carousel");
+    expect(pill!.getAttribute("data-media-type")).toBe("carousel");
+    unmount(bare.component);
+  });
+
+  it("instagram_post media_type=image → NO pill (a bare photo needs no marker)", () => {
+    const bare = mountBare({ event: makeIgEvent("image") });
+    // The thumbnail <img> still renders (image post has a thumbnail), but the
+    // pill is gated off — image maps to null in deriveMediaTypeOverlay.
+    expect(bare.root.querySelector(".detail-thumb img")).not.toBeNull();
+    expect(pillOf(bare.root)).toBeNull();
+    unmount(bare.component);
+  });
+
+  it("youtube_video → 'Video' pill on the detail thumbnail (over the play facade)", () => {
+    // baseEvent is youtube_video with externalId="abc123" → deriveThumbnailUrl
+    // yields the YouTube mqdefault URL, so the facade <img> renders and the pill
+    // rides it.
+    const bare = mountBare();
+    const pill = pillOf(bare.root);
+    expect(pill, "YouTube detail should render the Video pill").not.toBeNull();
+    expect(pill!.getAttribute("aria-label")).toBe("Video");
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Video");
+    expect(pill!.getAttribute("data-media-type")).toBe("video");
+    unmount(bare.component);
+  });
+});
