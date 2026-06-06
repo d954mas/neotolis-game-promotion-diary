@@ -74,6 +74,8 @@ const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
 const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
 const { enrichFromUrl } = await import("../../src/lib/server/services/events-mutation.js");
 const { env } = await import("../../src/lib/server/config/env.js");
+const { instagramAdapter } = await import("../../src/lib/sources/instagram/server/index.js");
+const { AppError } = await import("../../src/lib/server/services/errors.js");
 
 const PLATFORM = "instagram_account";
 
@@ -192,6 +194,39 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     expect(car!.mediaType).toBe("carousel");
   });
 
+  it("a reel shared as a /p/ link prefers the cached 'short' media_type over the URL-derived 'video' (P2-2)", async () => {
+    const user = await seedUserDirectly({
+      email: `ig-preview-pshort-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // The account walker already imported this reel (it sees product_type on the
+    // feed/reels endpoints) and cached it as "short".
+    await db.insert(instagramPosts).values({
+      postId: "p-as-reel",
+      accountId: "owner-99",
+      mediaType: "short",
+      permalink: "https://www.instagram.com/p/PREEL1/",
+    });
+
+    // Now the user pastes the /p/ permalink. The single-post API has no
+    // product_type and the URL is /p/ (not /reel/), so the normalizer resolves
+    // the post to "video" — the URL-derived classification is wrong for a reel.
+    single.next = singlePost({ id: "p-as-reel", shortcode: "PREEL1", kind: "video" });
+
+    const result = await enrichFromUrl(user.id, "https://www.instagram.com/p/PREEL1/", "127.0.0.1");
+
+    // The cached "short" wins over the URL-derived "video": the pill stays
+    // correct AND the caption-less title fallback uses "short".
+    const [cached] = await db
+      .select()
+      .from(instagramPosts)
+      .where(eq(instagramPosts.postId, "p-as-reel"));
+    expect(cached!.mediaType).toBe("short");
+    // (Caption present here, so the title is the caption first line — the
+    // media_type only surfaces in the caption-less fallback. The cache value is
+    // the load-bearing assertion: the pill renders off instagram_posts.media_type.)
+    expect(result.kind).toBe("instagram_post");
+  });
+
   it("consults the per-user cap (writes the cap-counter audit row that getUserQuotaUsedToday SUMs)", async () => {
     const user = await seedUserDirectly({
       email: `ig-preview-cap-${Math.random().toString(36).slice(2)}@t.io`,
@@ -275,6 +310,51 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
     expect(result.kind).toBe("instagram_post");
     expect(result.title).toBe("");
     expect(result.externalId).toBe("BOOM1");
+  });
+
+  it("an EXPECTED adapter throw (AppError) degrades to recognition-only (N-1)", async () => {
+    const user = await seedUserDirectly({
+      email: `ig-preview-apperr-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // A typed AppError out of the adapter is an expected failure mode — the
+    // form must still let the user save a bare event.
+    const spy = vi
+      .spyOn(instagramAdapter, "fetchEventPreviewMetadata")
+      .mockRejectedValueOnce(new AppError("instagram down", "instagram_unreachable", 502));
+
+    try {
+      const result = await enrichFromUrl(
+        user.id,
+        "https://www.instagram.com/p/APPERR1/",
+        "127.0.0.1",
+      );
+      expect(result.kind).toBe("instagram_post");
+      expect(result.title).toBe("");
+      expect(result.externalId).toBe("APPERR1");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("an UNEXPECTED adapter throw (raw Error = programmer bug) re-throws instead of hiding (N-1)", async () => {
+    const user = await seedUserDirectly({
+      email: `ig-preview-bug-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // A raw Error is NOT in the graceful-degrade contract — it represents a
+    // programmer bug in the adapter (bad import, undefined access, etc.). It
+    // must surface (→ 500 + escaped-error log) rather than be swallowed as a
+    // benign WARN. Mirrors the reddit branch (which lets all throws propagate).
+    const spy = vi
+      .spyOn(instagramAdapter, "fetchEventPreviewMetadata")
+      .mockRejectedValueOnce(new TypeError("cannot read properties of undefined"));
+
+    try {
+      await expect(
+        enrichFromUrl(user.id, "https://www.instagram.com/p/BUG1/", "127.0.0.1"),
+      ).rejects.toThrow("cannot read properties of undefined");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("a deleted/private post (null body) degrades to recognition-only", async () => {

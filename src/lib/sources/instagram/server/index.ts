@@ -431,6 +431,24 @@ async function fetchEventPreviewMetadata(
     return { kind: "unavailable" };
   }
 
+  // Reel-as-`/p/` media_type reconciliation (P2-2). The single-post endpoint has
+  // no product_type, so a reel shared via a `/p/<code>/` permalink (rather than
+  // `/reel/<code>/`) is URL-classified "video" by the normalizer. If the account
+  // walker already imported this same post and resolved it to "short" (it sees
+  // product_type on the feed/reels endpoints), prefer that cached value over the
+  // URL-derived one — one cache lookup, no schema change. RESIDUAL LIMIT: a
+  // genuinely-new `/p/` reel with no cache row stays "video" (a hard limit of
+  // the single-post endpoint — no product_type to disambiguate, no `/reel/` slug
+  // in the URL); the next account-level poll corrects it.
+  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
+  const { eq } = await import("drizzle-orm");
+  const [cached] = await db
+    .select({ mediaType: instagramPosts.mediaType })
+    .from(instagramPosts)
+    .where(eq(instagramPosts.postId, post.id))
+    .limit(1);
+  const mediaType = cached?.mediaType === "short" ? "short" : post.kind;
+
   // UPSERT the public-data cache + snapshot so the saved event renders fully in
   // /feed (thumbnail + stats + media-type pill) — exactly like the walker does
   // per post. Failure here is fatal to the preview (the caller catches the
@@ -438,7 +456,7 @@ async function fetchEventPreviewMetadata(
   await writeSnapshot({
     postId: post.id,
     accountId: post.ownerId,
-    mediaType: post.kind,
+    mediaType,
     caption: post.caption,
     permalink: canonicalUrl,
     thumbnailUrl: post.thumbnailUrl,
@@ -474,7 +492,7 @@ async function fetchEventPreviewMetadata(
 
   return {
     kind: "ok",
-    title: buildPreviewTitle(post.caption, post.kind, post.publishedAt),
+    title: buildPreviewTitle(post.caption, mediaType, post.publishedAt),
     authorName: post.ownerUsername ?? "",
     authorUrl: ownerUrl,
     occurredAt: post.publishedAt,
