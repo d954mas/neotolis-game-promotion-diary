@@ -115,7 +115,6 @@ export async function reserveSocialCredits(args: {
   origin: SocialQuotaPool;
   units: number;
   now?: Date;
-  tx?: DbCtx;
 }): Promise<SocialCreditPermit | null> {
   if (!Number.isInteger(args.units) || args.units <= 0) {
     throw new Error("Social provider credit units must be a positive integer");
@@ -239,7 +238,11 @@ export async function reserveSocialCredits(args: {
     return { platform, provider, poolKind: origin, units: args.units };
   };
 
-  const permit = args.tx ? await run(args.tx) : await db.transaction(run);
+  // ALWAYS run in our own transaction (no external tx) so the F4 audit below is
+  // unambiguously post-commit — an external tx that later rolled back would
+  // otherwise persist the audit + trip the in-memory once-per-cycle guards while
+  // the spend itself reverted.
+  const permit = await db.transaction(run);
 
   // Operator audit AFTER the spend tx commits (a denied reservation returns null
   // and crosses nothing, so this is a no-op then). The 80% / 95% throttle bands
