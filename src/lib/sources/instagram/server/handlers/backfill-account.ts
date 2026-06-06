@@ -429,8 +429,11 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   //                                  depth; at the cap the deep branch already
   //                                  marks feeds complete (→ accountComplete), but
   //                                  this is the explicit belt-and-suspenders stop.
-  // singletonKey backfill-account-<channelKey> dedupes against a parallel
-  // user/cron trigger — at most one continuation in flight per account.
+  // singletonKey is a best-effort coalescing hint on a standard-policy queue, NOT
+  // a hard single-flight guard. Duplicate EVENTS are prevented by
+  // onConflictDoNothing on the insert (mirrors YouTube); a rare concurrent walk
+  // may double a provider fetch, but total spend is bounded by the prepaid-balance
+  // ceiling (reserveSocialCredits).
   const shouldContinue =
     branch === "deep" && !accountComplete && !pausedByBudget && state.collected < maxPosts;
   await db.transaction(async (tx) => {

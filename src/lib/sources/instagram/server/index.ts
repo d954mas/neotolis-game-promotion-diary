@@ -71,9 +71,10 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.createQueue(QUEUES.INSTAGRAM_POLL_CRON);
   await boss.createQueue(QUEUES.INSTAGRAM_QUOTA_RESET);
 
-  // batchSize=1 keeps the backfill stream single-flight per worker; the
-  // producer-side singletonKey by channelKey dedupes parallel triggers across
-  // users to the same account.
+  // batchSize=1 keeps the backfill stream single-flight per worker. The
+  // producer-side singletonKey by channelKey is a best-effort coalescing hint on
+  // this standard-policy queue, NOT a hard cross-worker guard; duplicate events
+  // are prevented by onConflictDoNothing on the insert.
   await boss.work(QUEUES.INSTAGRAM_BACKFILL_ACCOUNT, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handleBackfillAccount(
@@ -132,10 +133,12 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
 
 /**
  * backfillSource — user-driven "Pull new content" / cron-driven initial-fetch.
- * Enqueues an account-level walk. singletonKey by channelKey dedupes parallel
- * triggers across users; priority puts user-initiated jobs ahead of cron walks.
- * The trigger user pays the per-user cap (origin==="user"); subscribers
- * free-ride on the channel-wide fan-out.
+ * Enqueues an account-level walk. singletonKey by channelKey best-effort
+ * coalesces parallel triggers across users (it is a hint, not a hard guard on a
+ * standard-policy queue — duplicate events are prevented by onConflictDoNothing
+ * on the insert); priority puts user-initiated jobs ahead of cron walks. The
+ * trigger user pays the per-user cap (origin==="user"); subscribers free-ride on
+ * the channel-wide fan-out.
  */
 async function backfillSource(
   source: PollableSource,
