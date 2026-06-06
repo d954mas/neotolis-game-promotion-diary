@@ -40,6 +40,7 @@ import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
 import { ensureChannelState } from "./channel-state.js";
+import { isInstagramConfigured } from "$lib/sources/instagram/server/provider/registry.js";
 
 // Initial-backfill window presets accepted by createSource for
 // kind=youtube_channel + autoImport. The worker handler reads
@@ -50,16 +51,23 @@ export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 
-// Source kinds whose adapters are wired end-to-end. The other four
+// Source kinds whose adapters are wired end-to-end. The other three
 // schema-only kinds get rejected at `createSource` with a clean 422
 // ('kind_not_yet_functional') so a stray POST never plants an orphan
 // row that no worker will ever pick up. Both Reddit kinds share one
 // adapter instance via registry double-binding; the adapter dispatches
 // internally on source.metadata (username vs subreddit).
+//
+// `instagram_account` is functional (Plan 08-06) but its create path is
+// gated on the operator having configured a provider (INSTAGRAM_PROVIDER +
+// SCRAPECREATORS_API_KEY). When unconfigured the create degrades to a clean
+// 422 `kind_not_configured` (SOC-05) — distinct from the schema-only
+// `kind_not_yet_functional` — see the createSource gate below.
 const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
   "youtube_channel",
   "reddit_account",
   "reddit_subreddit",
+  "instagram_account",
 ]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata.
@@ -73,6 +81,7 @@ const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   twitter_account: "out of scope - Twitter API is paid",
   telegram_channel: "coming soon",
   discord_server: "coming soon",
+  instagram_account: "not configured by operator",
 };
 
 // Defense-in-depth mirror of the schema's source_kind pgEnum. The pgEnum is
@@ -86,6 +95,7 @@ const VALID_SOURCE_KINDS: readonly SourceKind[] = [
   "twitter_account",
   "telegram_channel",
   "discord_server",
+  "instagram_account",
 ] as const;
 
 // Cap on per-user POST /api/sources/:id/refresh-content calls in any
@@ -191,6 +201,8 @@ function duplicateSourceMessage(kind: SourceKind): string {
       return "You already track this Telegram channel";
     case "discord_server":
       return "You already track this Discord server";
+    case "instagram_account":
+      return "You already track this Instagram account";
   }
 }
 
@@ -391,6 +403,23 @@ export async function createSource(
     );
   }
 
+  // SOC-05 not-configured degrade. instagram_account is functional but its
+  // create path needs an operator-configured provider (INSTAGRAM_PROVIDER +
+  // SCRAPECREATORS_API_KEY). When unconfigured, surface a clean 422
+  // `kind_not_configured` (NOT a 500, NOT the schema-only
+  // `kind_not_yet_functional`) — mirrors the Reddit REDDIT_USER_AGENT-empty
+  // disabled-chip pattern. No APP_MODE branch: SaaS == self-host, both read
+  // the same env. SOURCE_KINDS_NEEDING_PROVIDER keeps this generic so the
+  // TikTok/X kinds (Phases 9-11) slot in without re-editing the gate.
+  if (input.kind === "instagram_account" && !isInstagramConfigured()) {
+    throw new AppError(
+      "Instagram import is not configured by the operator",
+      "kind_not_configured",
+      422,
+      { kind: input.kind, status: KIND_STATUS[input.kind] },
+    );
+  }
+
   const adapter = getAdapter(input.kind);
 
   // Adapter-owned local normalization BEFORE cheap duplicate/quota checks.
@@ -493,6 +522,17 @@ export async function createSource(
   // normalization already happened above via normalizeSourceOnCreate.
   let canonicalHandleUrl = input.handleUrl;
   let resolvedChannelId = input.channelId ?? null;
+  // Display name resolved by the adapter at create time (e.g. Instagram
+  // resolveAccount → full_name/username). A user-typed displayName ALWAYS
+  // wins; this only fills the gap when the caller left it blank so the row
+  // shows the real account name instead of the bare id.
+  let resolvedDisplayName = input.displayName ?? null;
+  // Metadata the adapter resolves at create time (e.g. Instagram's
+  // URL-intrinsic handle, which the account-scoped walker needs as the provider
+  // query key). Shallow-merged OVER the caller-supplied metadata so adapter-
+  // resolved keys win for keys the adapter owns, while caller keys survive.
+  // Mirrors how normalizeSourceOnCreate's metadata is merged above.
+  let resolvedMetadata: Record<string, unknown> = input.metadata ?? {};
   if (adapter.canonicalizeOnCreate !== undefined) {
     const result = await adapter.canonicalizeOnCreate(
       { kind: input.kind, handleUrl: input.handleUrl, channelId: input.channelId ?? null },
@@ -500,6 +540,12 @@ export async function createSource(
     );
     canonicalHandleUrl = result.canonicalHandleUrl;
     resolvedChannelId = result.resolvedExternalId;
+    if (resolvedDisplayName === null && result.displayName != null && result.displayName !== "") {
+      resolvedDisplayName = result.displayName;
+    }
+    if (result.metadata !== undefined) {
+      resolvedMetadata = { ...resolvedMetadata, ...result.metadata };
+    }
   }
 
   // Race-free, deadlock-safe quota path. withQuotaGuard takes a per-user
@@ -528,10 +574,10 @@ export async function createSource(
           kind: input.kind,
           handleUrl: canonicalHandleUrl,
           channelId: resolvedChannelId,
-          displayName: input.displayName ?? null,
+          displayName: resolvedDisplayName,
           isOwnedByMe: input.isOwnedByMe ?? true,
           autoImport: input.autoImport ?? true,
-          metadata: input.metadata ?? {},
+          metadata: resolvedMetadata,
           // Persist user-selected backfill window as absolute date so
           // catch-up logic (computeSinceForRefresh) has a target boundary
           // to walk back toward. Pre-fix the createSource code threaded

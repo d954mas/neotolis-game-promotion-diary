@@ -26,6 +26,7 @@ import type {
   ServiceAuditEntry,
   AdminRedditBlock,
   AdminYoutubeBlock,
+  AdminInstagramBlock,
 } from "$lib/server/services/admin-quota-read.js";
 
 interface AdminQuotaResponse {
@@ -34,6 +35,7 @@ interface AdminQuotaResponse {
   audit: ServiceAuditEntry[];
   reddit: AdminRedditBlock;
   youtube: AdminYoutubeBlock;
+  instagram: AdminInstagramBlock;
 }
 
 export const load: PageServerLoad = async ({ fetch }) => {

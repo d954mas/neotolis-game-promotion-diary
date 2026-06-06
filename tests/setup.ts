@@ -33,6 +33,18 @@ process.env.DATABASE_URL = dbUrl;
 // vi.stubEnv() locally. CI sets this same value in the workflow env.
 process.env.REDDIT_USER_AGENT ??= "node:com.neotolis.gpd:0.1.0-test (by /u/integration-test)";
 
+// Social-provider budget envelope for the cost-guardrail integration tests
+// (social-budget-throttle). env.ts defaults both to 0 (degrade) for the
+// not-configured production case; tests need a concrete daily cap to exercise
+// the 80/95 throttle (cap=100 → eighty=80, ninetyfive=95, cron pool=80, user
+// pool=20) and a high prepaid balance so the daily-cap gate, not the balance,
+// is what the pool tests hit. Tests that specifically assert the
+// balance-as-hard-ceiling behavior write a small social_provider_balance row
+// directly. env.ts parses these at module load, so they must be set here
+// (setupFiles run before any test imports env.ts).
+process.env.SOCIAL_PROVIDER_DAILY_CAP_CREDITS ??= "100";
+process.env.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS ??= "100000";
+
 export const pool = new pg.Pool({ connectionString: dbUrl, max: 5 });
 
 beforeAll(async () => {

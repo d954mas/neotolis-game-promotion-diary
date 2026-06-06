@@ -145,6 +145,7 @@ type ThumbnailEvent = {
   externalId: string | null;
   metadata: unknown;
   redditEnrichment?: { linkUrl?: string | null } | null;
+  instagramEnrichment?: { thumbnailUrl?: string | null } | null;
 };
 
 export function eventThumbnail(event: ThumbnailEvent): string | null {
@@ -156,6 +157,12 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
     const link = event.redditEnrichment?.linkUrl ?? null;
     if (link && isImageLikeUrl(link)) return link;
     return readMediaUrlFromMetadata(event.metadata);
+  }
+  if (event.kind === "instagram_post") {
+    // The fresh CDN hotlink lives on instagramEnrichment (set by
+    // sources/instagram/server/feed-enrichment.ts) — same source the
+    // FeedCard + deriveThumbnailUrl read. NOT in event.metadata.
+    return event.instagramEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "twitter_post" || event.kind === "telegram_post") {
     return readMediaUrlFromMetadata(event.metadata);
@@ -233,6 +240,7 @@ const KIND_HEX: Record<string, string> = {
   twitter_post: "#6fa0d1",
   telegram_post: "#5baac8",
   discord_drop: "#7a82d6",
+  instagram_post: "#d167a6",
   conference: "#7fb46a",
   talk: "#d8b259",
   press: "#b488d4",

@@ -55,6 +55,33 @@ export const adapterJobsDone24h = new Gauge({
   registers: [register],
 });
 
+// Social-provider seam collectors (OBS-01 / D-24). Every request through the
+// provider HTTP wrapper (instagram/server/http.ts) emits a request counter +
+// latency histogram labeled platform/provider/status, and a credits counter
+// labeled platform/provider. These are the operator's visibility into the
+// prepaid scraper-credit spend and per-platform request health.
+export const socialProviderRequests = new Counter({
+  name: "neotolis_social_provider_requests_total",
+  help: "Social provider HTTP requests",
+  labelNames: ["platform", "provider", "status"] as const,
+  registers: [register],
+});
+
+export const socialProviderRequestDuration = new Histogram({
+  name: "neotolis_social_provider_request_duration_seconds",
+  help: "Social provider request latency",
+  labelNames: ["platform", "provider", "status"] as const,
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+  registers: [register],
+});
+
+export const socialProviderCredits = new Counter({
+  name: "neotolis_social_provider_credits_total",
+  help: "Social provider credits consumed",
+  labelNames: ["platform", "provider"] as const,
+  registers: [register],
+});
+
 export async function collectAdapterStats(pool: Pool): Promise<void> {
   const dau = await pool.query<{ count: string }>(
     `SELECT COUNT(DISTINCT user_id)::int AS count

@@ -318,6 +318,34 @@ describe("schema prop honored", () => {
     expect(out.body).toContain("Author: me");
     expect(out.body).not.toContain("Action:");
   });
+
+  // Phase 08 UAT gap D: FilterChips' kindLabel switch hardcoded a
+  // youtube/reddit/... allowlist and let instagram_post fall through to
+  // "Other". An existing imported IG event's kind chip then read "Kind: Other"
+  // instead of "Kind: Instagram". This asserts the active-kind chip resolves
+  // the IG label.
+  it("FilterChips labels an instagram_post kind chip as 'Instagram', NOT 'Other' (Phase 08 UAT gap D)", async () => {
+    const FilterChips = (await import("../../src/lib/components/FilterChips.svelte")).default;
+    const out = render(FilterChips, {
+      props: {
+        filters: {
+          source: [],
+          kind: ["instagram_post"],
+          show: { kind: "any" as const },
+          defaultDateRange: false,
+          all: false,
+        },
+        sources: [],
+        games: [],
+        schema: ["kind", "source", "show", "authorIsMe"] as const,
+        onDismiss: () => {},
+        onOpenSheet: () => {},
+        onClearAll: () => {},
+      },
+    });
+    expect(out.body).toContain("Kind: Instagram");
+    expect(out.body).not.toContain("Kind: Other");
+  });
 });
 
 /**
@@ -397,7 +425,7 @@ describe("FeedCard restructured layout", () => {
     expect(out.body).not.toMatch(/<span[^>]*class="[^"]*\bauthor-avatar\b[^"]*\bmine\b/);
   });
 
-  it("renders kind label in .card-meta AND Mine thumb-badge when author_is_me=true (Phase 3.4 contract)", async () => {
+  it("renders kind label in .card-meta AND author-avatar mine treatment when author_is_me=true; NO mine thumb-badge", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -407,20 +435,25 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    // Phase 3.4 FeedCard rewrite (Plan 03.4-08) removed the legacy
-    // `data-testid="feed-card-overlay"` block. Labels are split:
-    //   - Kind label lives in .card-meta .kind-icon (aria-label/title).
-    //   - "Mine" sticker lives on the thumb as .thumb-badge--mine for
-    //     media-shape kinds (youtube_video here).
-    // Author avatar (.author-avatar.mine) also renders mine treatment.
+    // Phase 08: the redundant top thumb "Mine" / "Inbox" stickers were
+    // removed. The author is already conveyed by the accent .author-avatar,
+    // and the inbox state by the bottom .inbox-chip — the top
+    // .thumb-badge--mine / .thumb-badge--inbox stickers duplicated those
+    // and collided with the media-type overlay in the corner, so they're
+    // gone. The surviving indicators are:
+    //   - Kind label in .card-meta .kind-icon (aria-label/title).
+    //   - Mine treatment via .author-avatar.mine.
+    //   - Inbox state via the bottom .inbox-chip.
     expect(out.body).toMatch(
       /<span[^>]*class="[^"]*\bkind-icon\b[^"]*"[^>]*aria-label="YouTube video"/,
     );
-    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bthumb-badge--mine\b[^"]*"[^>]*>Mine<\/span>/);
+    // The mine thumb-badge is GONE.
+    expect(out.body).not.toMatch(/thumb-badge--mine/);
+    // Author treatment remains on the avatar.
     expect(out.body).toMatch(/<span[^>]*class="[^"]*\bauthor-avatar\b[^"]*\bmine\b/);
   });
 
-  it("renders the Inbox label inside .thumb-badge--inbox + .inbox-chip when row is in inbox (Phase 3.4 contract)", async () => {
+  it("renders the Inbox label in the bottom .inbox-chip (NOT a top thumb-badge) when row is in inbox", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -434,13 +467,12 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    // Phase 3.4 FeedCard rewrite removed the legacy overlay; the inbox
-    // marker is now split across two surfaces:
-    //   - .thumb-badge--inbox (top-left of the thumb) for media-shape kinds.
-    //   - .inbox-chip in .card-footer-chips (always visible).
-    expect(out.body).toMatch(
-      /<span[^>]*class="[^"]*\bthumb-badge--inbox\b[^"]*"[^>]*>Inbox<\/span>/,
-    );
+    // Phase 08: the top .thumb-badge--inbox sticker was removed as
+    // redundant. The inbox state now lives ONLY in the bottom .inbox-chip
+    // (.card-footer-chips), which is the surviving indicator.
+    // Top thumb badge MUST be absent.
+    expect(out.body).not.toMatch(/thumb-badge--inbox/);
+    // Bottom inbox-chip MUST render for an inbox row.
     expect(out.body).toMatch(/<span[^>]*class="[^"]*\binbox-chip\b[^"]*"[^>]*>Inbox<\/span>/);
   });
 

@@ -505,6 +505,7 @@
     twitter_post: m.feed_axis_kind_twitter_post,
     telegram_post: m.feed_axis_kind_telegram_post,
     discord_drop: m.feed_axis_kind_discord_drop,
+    instagram_post: m.feed_axis_kind_instagram_post,
     post: m.feed_axis_kind_post,
     conference: m.feed_axis_kind_conference,
     talk: m.feed_axis_kind_talk,

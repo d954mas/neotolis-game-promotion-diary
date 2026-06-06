@@ -3,6 +3,7 @@ import { fail, redirect } from "@sveltejs/kit";
 import { allAdapters, getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { createSource } from "$lib/server/services/data-sources.js";
 import { AppError } from "$lib/server/services/errors.js";
+import { env } from "$lib/server/config/env.js";
 
 /**
  * /sources/new loader — full-page form for adding a data source.
@@ -10,6 +11,13 @@ import { AppError } from "$lib/server/services/errors.js";
  * The kindMatrix is computed server-side so the page renders all 6 chips
  * with the correct disabled state + status tooltip. Disabled chips MUST
  * carry `aria-disabled="true"` and `tabindex="-1"`.
+ *
+ * Each entry carries a `disabledReason` so the tooltip is accurate (issue
+ * #64): a kind whose adapter IS built but the operator hasn't configured
+ * the provider env ("not-configured" — Reddit / Instagram unconfigured)
+ * must NOT claim "the polling adapter isn't [ready]". Only "not-built"
+ * kinds (Twitter / Telegram / Discord coming-soon / out-of-scope) carry
+ * the schema-ready-adapter-isn't phrasing. `null` for enabled kinds.
  *
  * Reddit kinds (`reddit_account` + `reddit_subreddit`) are enabled iff
  * the Reddit adapter reports `observability.auth.isOperatorConfigured` (env.REDDIT_USER_AGENT non-empty). When
@@ -32,16 +40,26 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const redditOperatorConfigured = hasAdapter("reddit_account")
     ? getAdapter("reddit_account").observability.auth.isOperatorConfigured
     : false;
+  // SOC-05: instagram_account is functional but gated on the operator's
+  // provider env. Disabled-but-visible chip + env hint when unconfigured
+  // (same shape Reddit uses for empty REDDIT_USER_AGENT).
+  const instagramConfigured = hasAdapter("instagram_account")
+    ? getAdapter("instagram_account").observability.auth.isOperatorConfigured
+    : false;
   return {
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
     redditOperatorConfigured,
+    instagramConfigured,
+    // BACK-01: post-cap ceiling for the BackfillPicker honesty note.
+    socialBackfillMaxPosts: env.SOCIAL_BACKFILL_MAX_POSTS,
     kindMatrix: [
       {
         value: "youtube_channel" as const,
         labelKey: "source_kind_label_youtube_channel" as const,
         statusKey: null,
         disabled: false,
+        disabledReason: null,
       },
       {
         // Single "Reddit" chip — the backend resolves subreddit vs account
@@ -53,24 +71,40 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         labelKey: "common_kind_reddit" as const,
         statusKey: redditOperatorConfigured ? null : "source_kind_status_reddit_account",
         disabled: !redditOperatorConfigured,
+        // Adapter is built; the operator simply hasn't set the env. The
+        // tooltip must say "not configured by operator", NOT "adapter isn't
+        // ready" — the latter misleads a self-host operator (issue #64).
+        disabledReason: redditOperatorConfigured ? null : ("not-configured" as const),
+      },
+      {
+        value: "instagram_account" as const,
+        labelKey: "source_kind_label_instagram_account" as const,
+        statusKey: instagramConfigured ? null : ("source_kind_status_instagram_account" as const),
+        disabled: !instagramConfigured,
+        // Same as Reddit: adapter built, operator env missing.
+        disabledReason: instagramConfigured ? null : ("not-configured" as const),
       },
       {
         value: "twitter_account" as const,
         labelKey: "source_kind_label_twitter_account" as const,
         statusKey: "source_kind_status_twitter_account" as const,
         disabled: true,
+        // No adapter yet — schema-ready / adapter-isn't phrasing is correct.
+        disabledReason: "not-built" as const,
       },
       {
         value: "telegram_channel" as const,
         labelKey: "source_kind_label_telegram_channel" as const,
         statusKey: "source_kind_status_telegram_channel" as const,
         disabled: true,
+        disabledReason: "not-built" as const,
       },
       {
         value: "discord_server" as const,
         labelKey: "source_kind_label_discord_server" as const,
         statusKey: "source_kind_status_discord_server" as const,
         disabled: true,
+        disabledReason: "not-built" as const,
       },
     ],
   };
@@ -138,6 +172,7 @@ export const actions: Actions = {
       | "twitter_account"
       | "telegram_channel"
       | "discord_server"
+      | "instagram_account"
       | null = null;
     let resolvedHandleUrl = handleUrl;
     let resolvedDisplayName = displayName;
@@ -179,7 +214,8 @@ export const actions: Actions = {
         kindRaw !== "reddit_subreddit" &&
         kindRaw !== "twitter_account" &&
         kindRaw !== "telegram_channel" &&
-        kindRaw !== "discord_server"
+        kindRaw !== "discord_server" &&
+        kindRaw !== "instagram_account"
       ) {
         return fail(422, { error: "validation_failed", message: "kind required" });
       } else {

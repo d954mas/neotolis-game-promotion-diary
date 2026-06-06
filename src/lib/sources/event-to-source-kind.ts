@@ -24,6 +24,8 @@ export function eventKindToSourceKind(eventKind: EventKind): SourceKind | null {
       return "telegram_channel";
     case "discord_drop":
       return "discord_server";
+    case "instagram_post":
+      return "instagram_account";
     // Free-form / non-pollable kinds — no source kind to dispatch to.
     case "post":
       return null;
@@ -57,5 +59,7 @@ export function sourceKindToEventKind(sourceKind: SourceKind): EventKind | null 
       return "telegram_post";
     case "discord_server":
       return "discord_drop";
+    case "instagram_account":
+      return "instagram_post";
   }
 }

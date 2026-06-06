@@ -7,6 +7,8 @@
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
   import PollingBadge from "$lib/components/PollingBadge.svelte";
   import { m } from "$lib/paraglide/messages.js";
+  import { eventKindLabel, POLLABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
+  import type { EventKind } from "$lib/sources/adapter.js";
   import type { EventDto } from "$lib/server/dto.js";
 
   let {
@@ -41,32 +43,9 @@
 
   const inTrash = $derived(view === "trash");
 
-  // Pretty kind label (matches FeedCard / EventDetailModal labels).
-  const kindLabel = $derived.by(() => {
-    switch (event.kind) {
-      case "youtube_video":
-        return m.event_kind_label_youtube_video();
-      case "reddit_post":
-        return m.event_kind_label_reddit_post();
-      case "twitter_post":
-        return m.event_kind_label_twitter_post();
-      case "telegram_post":
-        return m.event_kind_label_telegram_post();
-      case "discord_drop":
-        return m.event_kind_label_discord_drop();
-      case "conference":
-        return m.event_kind_label_conference();
-      case "talk":
-        return m.event_kind_label_talk();
-      case "press":
-        return m.event_kind_label_press();
-      case "post":
-        return m.event_kind_label_post();
-      case "other":
-      default:
-        return m.event_kind_label_other();
-    }
-  });
+  // Pretty kind label — single source of truth in kind-display.ts (matches
+  // FeedCard / FilterChips labels; adding a kind = one entry there).
+  const kindLabel = $derived(eventKindLabel(event.kind));
 
   let authorPopoverOpen = $state(false);
   let authorAvatarEl = $state<HTMLButtonElement | null>(null);
@@ -161,7 +140,7 @@
 
   <span class="detail-head-spacer"></span>
 
-  {#if !inTrash && (event.kind === "youtube_video" || event.kind === "reddit_post")}
+  {#if !inTrash && POLLABLE_EVENT_KINDS.has(event.kind as EventKind)}
     <PollingBadge
       event={{
         id: event.id,

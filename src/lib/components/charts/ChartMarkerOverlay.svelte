@@ -51,6 +51,7 @@
     twitter_post: "var(--k-twitter)",
     telegram_post: "var(--k-telegram)",
     discord_drop: "var(--k-discord)",
+    instagram_post: "var(--k-instagram)",
     conference: "var(--k-conference)",
     talk: "var(--k-talk)",
     press: "var(--k-press)",
@@ -89,6 +90,7 @@
     | "twitter_post"
     | "telegram_post"
     | "discord_drop"
+    | "instagram_post"
     | "conference"
     | "talk"
     | "press"
@@ -100,6 +102,7 @@
     "twitter_post",
     "telegram_post",
     "discord_drop",
+    "instagram_post",
     "conference",
     "talk",
     "press",

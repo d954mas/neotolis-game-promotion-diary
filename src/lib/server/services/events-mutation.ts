@@ -521,6 +521,79 @@ export async function enrichFromUrl(
       { kind: parsed.kind },
     );
   }
+
+  // Instagram — LIVE single-post preview (issue #65). Mirrors the Reddit
+  // branch: dispatch to the IG adapter's fetchEventPreviewMetadata, which
+  // issues ONE synchronous by-URL provider request (1 credit), cap-gated
+  // against the per-user 50/day social cap + the operator prepaid budget, and
+  // UPSERTs the instagram_posts cache + a snapshot so the saved event renders
+  // fully in /feed. The "Fetch" button now auto-fills title (caption first
+  // line) + description + thumbnail.
+  //
+  // GRACEFUL DEGRADE is load-bearing: a failed preview (provider not
+  // configured, network error, budget/cap exhaustion, deleted post) must NOT
+  // break manual entry. Every non-ok path falls through to the recognition-only
+  // shape (kind + shortcode + canonical permalink, empty title) — exactly what
+  // the form needs to lock kind=Instagram and let the user type the title (the
+  // required-asterisk field forbids an empty save). For cap-exhaustion we prefer
+  // this soft path over a hard 429 so the Add Event UX never dead-ends on a
+  // rare manual paste — the user simply types the title (the cost guardrail
+  // still held: no credit was burned).
+  if (parsed.kind === "instagram_post") {
+    const recognitionOnly: EnrichmentResult = {
+      kind: "instagram_post",
+      externalId: parsed.externalId,
+      title: "",
+      occurredAt: null,
+      thumbnailUrl: null,
+      authorName: null,
+      authorUrl: null,
+      canonicalUrl: parsed.canonicalUrl,
+      sourceMatch: null,
+    };
+    const adapter = getAdapter("instagram_account");
+    if (adapter.fetchEventPreviewMetadata === undefined) return recognitionOnly;
+
+    let preview;
+    try {
+      preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+        userId,
+        ipAddress,
+      });
+    } catch (err) {
+      // Cap-exhaustion (AppError 429) → soft-degrade to recognition-only rather
+      // than dead-ending the form. Any other adapter throw also degrades.
+      if (err instanceof AppError && err.code === "requests_quota_exhausted") {
+        logger.info(
+          { userId, url: parsed.canonicalUrl },
+          "instagram preview: per-user cap exhausted — degrading to recognition-only",
+        );
+        return recognitionOnly;
+      }
+      logger.warn(
+        { userId, url: parsed.canonicalUrl, err: String((err as Error)?.message ?? err) },
+        "instagram preview threw; degrading to recognition-only manual entry",
+      );
+      return recognitionOnly;
+    }
+
+    // Any non-ok discriminator (unreachable / private / unavailable) →
+    // recognition-only so the user can still save a bare event.
+    if (preview.kind !== "ok") return recognitionOnly;
+
+    return {
+      kind: "instagram_post",
+      externalId: parsed.externalId,
+      title: preview.title,
+      occurredAt: preview.occurredAt ?? null,
+      thumbnailUrl: preview.thumbnailUrl ?? null,
+      authorName: preview.authorName || null,
+      authorUrl: preview.authorUrl || null,
+      canonicalUrl: parsed.canonicalUrl,
+      sourceMatch: null,
+    };
+  }
+
   if (parsed.kind !== "youtube_video") {
     // Exhaustive guard — every ParsedUrl variant handled above.
     const _exhaustive: never = parsed;

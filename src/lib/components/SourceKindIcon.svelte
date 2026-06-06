@@ -16,16 +16,37 @@
   //
   // Decorative — `aria-hidden="true"`. Adjacent text (the source-kind label
   // chip + display_name) carries the accessible name.
+  //
+  // EXHAUSTIVENESS: `kind` is the canonical SourceKind union (adapter.ts). The
+  // `assertSourceKindHasIcon` guard below makes a new SourceKind a COMPILE
+  // ERROR here until a matching {#if} branch is added — mirrors the central
+  // kind-display config's compile-enforcement philosophy.
 
-  type SourceKind =
+  import type { SourceKind } from "$lib/sources/adapter.js";
+
+  let { kind }: { kind: SourceKind } = $props();
+
+  // Compile-time exhaustiveness guard (type-level only — no reactive read).
+  // ICONED_SOURCE_KIND lists every kind the {#if} chain below renders. The
+  // `Exclude` check resolves to `never` ONLY when ICONED covers all of
+  // SourceKind; if adapter.ts adds a SourceKind without a branch here, the
+  // `never` constraint breaks and tsc fails. Keep this union in lockstep with
+  // the {#if} branches.
+  type IconedSourceKind =
     | "youtube_channel"
     | "reddit_account"
     | "reddit_subreddit"
     | "twitter_account"
     | "telegram_channel"
-    | "discord_server";
-
-  let { kind }: { kind: SourceKind } = $props();
+    | "discord_server"
+    | "instagram_account";
+  type _AllSourceKindsHaveIcon =
+    Exclude<SourceKind, IconedSourceKind> extends never
+      ? true
+      : ["SourceKind missing a SourceKindIcon branch:", Exclude<SourceKind, IconedSourceKind>];
+  // Force the type to be evaluated; `true` holds only when the union is covered.
+  const _exhaustive: _AllSourceKindsHaveIcon = true;
+  void _exhaustive;
 </script>
 
 {#if kind === "youtube_channel"}
@@ -122,6 +143,26 @@
     />
     <circle cx="9" cy="13" r="1" />
     <circle cx="15" cy="13" r="1" />
+  </svg>
+{:else if kind === "instagram_account"}
+  <!-- Instagram — camera-frame: rounded square + lens circle + top-corner
+       dot. Geometric primitives only (NO brand glyph); mirrors the
+       instagram_post icon in kind-icon-svg.ts for cross-surface consistency. -->
+  <svg
+    class="icon"
+    viewBox="0 0 24 24"
+    width="16"
+    height="16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <rect x="3" y="3" width="18" height="18" rx="5" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none" />
   </svg>
 {/if}
 

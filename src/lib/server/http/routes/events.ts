@@ -79,6 +79,7 @@ import { mapErr, type RouteVars } from "./_shared.js";
 const eventKindEnum = z.enum([
   "youtube_video",
   "reddit_post",
+  "instagram_post",
   "twitter_post",
   "telegram_post",
   "discord_drop",

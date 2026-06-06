@@ -25,6 +25,9 @@
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "../../KindIcon.svelte";
   import AuthorAvatar from "./AuthorAvatar.svelte";
+  import MediaTypePill from "./MediaTypePill.svelte";
+  import { eventKindLabel } from "$lib/sources/kind-display.js";
+  import type { OverlayPill } from "./media-type-overlay.js";
   import type { CardEventKind, CardEventLite } from "./derive-card-data.js";
   import {
     formatOccurredAt,
@@ -54,6 +57,8 @@
     currentUserName,
     statsSlot,
     extraSlot,
+    thumbnailOverlay = null,
+    onThumbnailError,
   }: {
     event: CardEventLite;
     /** Already-resolved source-of-truth label for the .src element.
@@ -86,33 +91,25 @@
      *  but kept so future per-platform additions don't need another
      *  prop drop. */
     extraSlot?: import("svelte").Snippet;
+    /** Optional media-type pill rendered INSIDE .card-thumb, top-left over the
+     *  <img>. The shared mediaTypeOverlay() helper produces the { type, label,
+     *  inner } shape; BaseFeedCard renders the icon+TEXT pill markup + CSS once
+     *  (ONE treatment for every source — no per-card fork). Used by Instagram
+     *  to mark short / carousel / video and by YouTube to mark video; a bare
+     *  photo passes null → no pill. Rendered only when a thumbnail image is
+     *  shown so it sits on the picture, not on the empty placeholder. */
+    thumbnailOverlay?: OverlayPill | null;
+    /** Optional thumbnail-load-error handler. Used by hotlinked-thumbnail
+     *  cards (Instagram, D-08) whose CDN URL expires — on <img> error the
+     *  wrapper flips its thumbnail to null so the .card-thumb.empty
+     *  KindIcon placeholder shows instead of a broken image. YouTube
+     *  thumbnails (img.youtube.com) don't expire, so they pass nothing. */
+    onThumbnailError?: () => void;
   } = $props();
 
-  const kindLabel = $derived.by(() => {
-    switch (event.kind) {
-      case "youtube_video":
-        return m.event_kind_label_youtube_video();
-      case "reddit_post":
-        return m.event_kind_label_reddit_post();
-      case "twitter_post":
-        return m.event_kind_label_twitter_post();
-      case "telegram_post":
-        return m.event_kind_label_telegram_post();
-      case "discord_drop":
-        return m.event_kind_label_discord_drop();
-      case "conference":
-        return m.event_kind_label_conference();
-      case "talk":
-        return m.event_kind_label_talk();
-      case "press":
-        return m.event_kind_label_press();
-      case "post":
-        return m.event_kind_label_post();
-      case "other":
-      default:
-        return m.event_kind_label_other();
-    }
-  });
+  // Kind label resolves through the central kind-display config
+  // (eventKindLabel) — same source of truth EventDetailHeader / FilterChips use.
+  const kindLabel = $derived(eventKindLabel(event.kind));
 
   const dateLabel = $derived.by(() => formatOccurredAt(event.occurredAt));
   const mediaShape = $derived.by(() => isMediaShape(event.kind as CardEventKind));
@@ -382,15 +379,13 @@
             referrerpolicy="no-referrer"
             crossorigin="anonymous"
             loading="lazy"
+            onerror={onThumbnailError ? () => onThumbnailError() : undefined}
           />
         {:else}
           <KindIcon kind={event.kind} size={36} />
         {/if}
-        {#if inboxRow}
-          <span class="thumb-badge thumb-badge--inbox">{m.inbox_badge()}</span>
-        {/if}
-        {#if event.authorIsMe}
-          <span class="thumb-badge thumb-badge--mine">{m.feed_card_author_is_me_badge()}</span>
+        {#if thumbnailUrl && thumbnailOverlay}
+          <MediaTypePill pill={thumbnailOverlay} />
         {/if}
       </div>
     {/if}
@@ -726,25 +721,6 @@
   .card-thumb.empty :global(svg) {
     color: var(--card-accent, var(--text-4));
     opacity: 0.45;
-  }
-  .thumb-badge {
-    position: absolute;
-    top: 6px;
-    padding: 2px var(--s-2);
-    background: var(--overlay-dark);
-    color: #fff;
-    font-size: var(--t-12);
-    line-height: 1;
-    border-radius: var(--r-pill);
-    pointer-events: none;
-    white-space: nowrap;
-  }
-  .thumb-badge--inbox {
-    left: 6px;
-  }
-  .thumb-badge--mine {
-    right: 6px;
-    background: color-mix(in oklab, var(--accent) 78%, black);
   }
 
   .card-notes {

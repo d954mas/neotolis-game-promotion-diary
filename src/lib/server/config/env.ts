@@ -218,6 +218,66 @@ const RawSchema = z.object({
   // operators who enable monitoring set a random token here and configure
   // Prometheus `bearer_token` to match.
   METRICS_BEARER_TOKEN: z.string().default(""),
+
+  // ---- Phase 8 — Social provider port + Instagram + cost guardrails ----
+
+  // Which provider implementation serves the `instagram` platform. Empty
+  // default => Instagram is NOT configured: the add-source IG chip renders
+  // disabled (SOC-05 graceful degrade), and no scraper credits are ever
+  // spent. Boot succeeds with this unset, preserving self-host parity (no
+  // APP_MODE branch — "not configured" is the empty-env state, not a mode).
+  // Today the only implementation is `scrapecreators`; later platforms add
+  // their own per-platform provider-selection env.
+  INSTAGRAM_PROVIDER: z.enum(["scrapecreators"]).or(z.literal("")).default(""),
+
+  // Operator's prepaid ScrapeCreators API key (the `x-api-key` header).
+  // Plaintext env, NOT envelope-encrypted — per CONTEXT D-03 (REVISED
+  // 2026-06-05): this is operator config like SERVICE_YOUTUBE_API_KEYS /
+  // REDDIT_USER_AGENT, never a per-user DB secret. Envelope encryption
+  // protects per-user secrets keyed by the env KEK; an operator key IS the
+  // operator's env config, so it does not apply. Empty default => provider
+  // not configured (graceful degrade). The Pino redact path `apiKey` already
+  // covers the field-name surface; scrubKekFromEnv strips it from
+  // process.env after parse (see SECRET_KEYS below).
+  SCRAPECREATORS_API_KEY: z.string().default(""),
+
+  // ScrapeCreators API base URL. Production default = the official endpoint;
+  // the smoke-gate / provider-mock harness overrides to a local reverse-proxy
+  // URL (mirrors YOUTUBE_API_BASE_URL). Validated as a URL so a typo fails
+  // fast at boot.
+  SCRAPECREATORS_BASE_URL: z.string().url().default("https://api.scrapecreators.com"),
+
+  // Per-user fair-share cap on social-provider requests (QUOTA-03 / D-19).
+  // ≈ $0.10/day at 50 requests. The per-user pool funds only user-initiated
+  // work (initial backfill on add, manual refresh-now, history expansion);
+  // ongoing background polling is operator-funded (the cron pool), so 50/day
+  // covers bursts and paces history expansion. Exceed => 429 via the existing
+  // graceful per-user-quota path.
+  LIMIT_SOCIAL_REQUESTS_PER_DAY: z.coerce.number().int().positive().default(50),
+
+  // Backfill post-count cap (D-10): the cost-meaningful internal ceiling.
+  // Default 48 = 4 pages of 12. The walker stops at this OR the date window,
+  // whichever first — cost is independent of archive size (BACK-01).
+  SOCIAL_BACKFILL_MAX_POSTS: z.coerce.number().int().positive().default(48),
+
+  // Default backfill date window in days (D-10). The user may self-expand to
+  // any window incl. "everything" via the existing BackfillPicker /
+  // backfill_target_since flow; this is the default boundary on add.
+  SOCIAL_BACKFILL_WINDOW_DAYS: z.coerce.number().int().positive().default(30),
+
+  // Operator daily spend envelope in credits (D-16). Reuses the YouTube
+  // 80/95 throttle + midnight-Pacific daily-reset machinery: the daily cap
+  // RESETS each day. 0 default => no spend allowed until the operator sets it
+  // (safe default; moot while INSTAGRAM_PROVIDER is empty). Operators who
+  // think monthly set daily = monthly / 30.
+  SOCIAL_PROVIDER_DAILY_CAP_CREDITS: z.coerce.number().int().nonnegative().default(0),
+
+  // Operator's funded prepaid balance in credits — the ABSOLUTE hard ceiling
+  // (D-16, Pitfall 3). Unlike the daily cap, this does NOT reset daily: it is
+  // monotonically decremented as credits are spent ("cannot spend what isn't
+  // there"). The quota_reset cron clears only the daily-cap counter, never
+  // this balance. 0 default => degrade.
+  SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS: z.coerce.number().int().nonnegative().default(0),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -285,6 +345,7 @@ export function scrubKekFromEnv(): void {
     "BETTER_AUTH_SECRET",
     "OAUTH_CLIENT_SECRET",
     "SERVICE_YOUTUBE_API_KEYS",
+    "SCRAPECREATORS_API_KEY", // operator's prepaid scraper key (D-03)
     "DATABASE_URL", // contains the postgres password
   ];
   for (const k of SECRET_KEYS) delete process.env[k];
@@ -333,6 +394,14 @@ export const env = {
   WORKER_REPLICA_COUNT: raw.WORKER_REPLICA_COUNT,
   ALERT_WEBHOOK_URL: raw.ALERT_WEBHOOK_URL,
   METRICS_BEARER_TOKEN: raw.METRICS_BEARER_TOKEN,
+  INSTAGRAM_PROVIDER: raw.INSTAGRAM_PROVIDER,
+  SCRAPECREATORS_API_KEY: raw.SCRAPECREATORS_API_KEY,
+  SCRAPECREATORS_BASE_URL: raw.SCRAPECREATORS_BASE_URL,
+  LIMIT_SOCIAL_REQUESTS_PER_DAY: raw.LIMIT_SOCIAL_REQUESTS_PER_DAY,
+  SOCIAL_BACKFILL_MAX_POSTS: raw.SOCIAL_BACKFILL_MAX_POSTS,
+  SOCIAL_BACKFILL_WINDOW_DAYS: raw.SOCIAL_BACKFILL_WINDOW_DAYS,
+  SOCIAL_PROVIDER_DAILY_CAP_CREDITS: raw.SOCIAL_PROVIDER_DAILY_CAP_CREDITS,
+  SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS: raw.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS,
 } as const;
 
 export type Env = typeof env;

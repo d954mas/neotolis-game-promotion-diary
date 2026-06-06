@@ -77,6 +77,22 @@ export const QUEUES = {
   REDDIT_CRON_ENQUEUE_SERVICE_POSTS: "reddit.cron.enqueue-service-posts",
   REDDIT_CRON_BASELINES: "reddit.cron.baselines",
   REDDIT_CRON_DELETION_PROPAGATION: "reddit.cron.deletion-propagation",
+
+  // Per-kind: instagram (Phase 8). Mirrors the YouTube cron topology.
+  /** Account-scoped resumable walker — one page (12 posts) per tick, fans
+   *  out INSERT events to all active subscribers, persists the provider
+   *  cursor (next_max_id / paging_info.max_id) to
+   *  data_source_channel_state.metadata.lastBackfillCursor. Singleton key by
+   *  IG account id dedupes parallel triggers. */
+  INSTAGRAM_BACKFILL_ACCOUNT: "instagram.backfill.account",
+  /** Active + cold ongoing poll collapsed via pg-boss key-based schedules
+   *  ({ tier } payload — active 6h / cold daily). The poll-cron handler
+   *  dispatches on job.data.tier. */
+  INSTAGRAM_POLL_CRON: "instagram.poll.cron",
+  /** Midnight-Pacific daily-cap counter reset. Clears ONLY the daily-cap
+   *  spend counter / audit-transition Set — NEVER the prepaid balance, which
+   *  is a monotonic hard ceiling (D-16 / Pitfall 3). */
+  INSTAGRAM_QUOTA_RESET: "instagram.quota_reset",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

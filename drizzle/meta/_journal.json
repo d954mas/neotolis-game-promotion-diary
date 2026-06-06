@@ -386,6 +386,20 @@
       "when": 1780500000003,
       "tag": "0054_condemned_viper",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1780688264776,
+      "tag": "0055_handy_william_stryker",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1780690896206,
+      "tag": "0056_legal_beyonder",
+      "breakpoints": true
     }
   ]
 }

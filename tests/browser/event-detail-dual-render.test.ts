@@ -386,3 +386,143 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
     unmount(modal.component);
   });
 });
+
+describe("EventDetail renders instagram_post like the other pollable kinds (Phase 08 UAT gap)", () => {
+  // Regression for the UAT gap: Phase 08 added instagram_post to the
+  // server/data layer + the feed card, but the event-detail DISPLAY surface
+  // (EventDetailHeader's kind-label switch + PollingBadge render gate, and
+  // EventDetailContent's CHARTABLE_KINDS) still hardcoded a
+  // youtube_video || reddit_post allowlist — so an imported IG event rendered
+  // as "Other", with no live-state badge and no metric chart. These tests
+  // mount the REAL detail surface with an instagram_post event; each WOULD
+  // FAIL against the pre-fix allowlists.
+
+  const igEvent = {
+    ...baseEvent,
+    id: "ev_ig_detail",
+    kind: "instagram_post" as const,
+    title: "IG reel test event",
+    externalId: "Cabc123XYZ",
+    // BUDGET-01: the IG enrichment overlays metadata.operator_paused when the
+    // account's prepaid social budget is spent and the walker paused polling.
+    metadata: { operator_paused: true },
+    // publishedAt drives the PollingBadge tier; operator_paused outranks it but
+    // a concrete value keeps the badge out of the 'pending' branch.
+    publishedAt: new Date("2026-05-14T08:00:00Z"),
+    lastPolledAt: new Date("2026-05-14T09:00:00Z"),
+    lastPollStatus: "ok",
+    // IG photos/carousels carry no YouTube-shaped `stats` triple.
+    stats: null,
+    channelTitle: "My IG Account",
+  };
+
+  it("B: kind label resolves to 'Instagram', NOT 'Other'", () => {
+    const bare = mountBare({ event: igEvent });
+    const label = bare.root.querySelector(".detail-kind-label")?.textContent?.trim();
+    expect(label).toBe("Instagram");
+    unmount(bare.component);
+  });
+
+  it("A: PollingBadge renders on the IG detail surface, with the operator-paused variant + copy (BUDGET-01)", () => {
+    const bare = mountBare({ event: igEvent });
+    // The badge is gated in EventDetailHeader; pre-fix the IG kind was excluded
+    // so this element never mounted.
+    const badge = bare.root.querySelector(".polling-badge");
+    expect(badge).not.toBeNull();
+    expect(badge?.className).toMatch(/polling-badge--operator-paused/);
+    expect(badge?.textContent).toContain("Paused · operator budget reached");
+    unmount(bare.component);
+  });
+
+  it("C: the metric chart container renders for an IG event with snapshot series", () => {
+    // metricSeries threaded (the /events/[id] SSR path) — the chart mounts only
+    // when instagram_post is in CHARTABLE_KINDS.
+    const bare = mountBare({ event: igEvent, metricSeries: historySeries });
+    const chart = bare.root.querySelector('[data-testid="event-history-chart"]');
+    expect(chart).not.toBeNull();
+    expect(chart?.getAttribute("data-low-data")).toBe("false");
+    unmount(bare.component);
+  });
+});
+
+describe("EventDetailContent media-type pill (Phase 08 detail-view parity)", () => {
+  // The Short / Carousel / Video pill — previously feed-card only — must also
+  // ride the EVENT DETAIL thumbnail (same shared MediaTypePill + the
+  // deriveMediaTypeOverlay kind→pill helper). One mount in EventDetailContent
+  // covers BOTH the modal and the /events/[id] full page (the shared
+  // dual-render body), so asserting on the bare + modal mount proves both
+  // surfaces. The pill is gated on a present thumbnail <img> + a non-null
+  // derived pill; an IG photo (media_type=image) → null → no pill.
+
+  // An IG event with a CDN thumbnail so the .detail-thumb <img> renders (the
+  // pill rides the picture, not the empty KindIcon placeholder). media_type is
+  // overridden per-case below.
+  function makeIgEvent(mediaType: string | null) {
+    return {
+      ...baseEvent,
+      id: "ev_ig_pill",
+      kind: "instagram_post" as const,
+      title: "IG media-type pill event",
+      externalId: "Cabc123XYZ",
+      stats: null,
+      // deriveThumbnailUrl(instagram_post) reads instagramEnrichment.thumbnailUrl,
+      // and deriveMediaTypeOverlay reads instagramEnrichment.mediaType.
+      instagramEnrichment: {
+        stats: null,
+        thumbnailUrl: "https://scontent.cdninstagram.com/v/detail-thumb.jpg",
+        mediaType,
+      },
+    };
+  }
+
+  function pillOf(root: HTMLElement): HTMLElement | null {
+    return root.querySelector(".detail-thumb .media-type-pill");
+  }
+
+  it("instagram_post media_type=short → 'Short' pill on the detail thumbnail (bare + modal)", () => {
+    const bare = mountBare({ event: makeIgEvent("short") });
+    const modal = mountInModal({ event: makeIgEvent("short") });
+    const barePill = pillOf(bare.root);
+    const modalPill = pillOf(modal.root);
+    expect(barePill, "short pill should render on the bare detail mount").not.toBeNull();
+    expect(modalPill, "short pill should render on the modal detail mount").not.toBeNull();
+    expect(barePill!.getAttribute("aria-label")).toBe("Short");
+    expect(barePill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Short");
+    expect(barePill!.getAttribute("data-media-type")).toBe("short");
+    expect(modalPill!.getAttribute("aria-label")).toBe("Short");
+    unmount(bare.component);
+    unmount(modal.component);
+  });
+
+  it("instagram_post media_type=carousel → 'Carousel' pill", () => {
+    const bare = mountBare({ event: makeIgEvent("carousel") });
+    const pill = pillOf(bare.root);
+    expect(pill).not.toBeNull();
+    expect(pill!.getAttribute("aria-label")).toBe("Carousel");
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Carousel");
+    expect(pill!.getAttribute("data-media-type")).toBe("carousel");
+    unmount(bare.component);
+  });
+
+  it("instagram_post media_type=image → NO pill (a bare photo needs no marker)", () => {
+    const bare = mountBare({ event: makeIgEvent("image") });
+    // The thumbnail <img> still renders (image post has a thumbnail), but the
+    // pill is gated off — image maps to null in deriveMediaTypeOverlay.
+    expect(bare.root.querySelector(".detail-thumb img")).not.toBeNull();
+    expect(pillOf(bare.root)).toBeNull();
+    unmount(bare.component);
+  });
+
+  it("youtube_video → 'Video' pill on the detail thumbnail (over the play facade)", () => {
+    // baseEvent is youtube_video with externalId="abc123" → deriveThumbnailUrl
+    // yields the YouTube mqdefault URL, so the facade <img> renders and the pill
+    // rides it.
+    const bare = mountBare();
+    const pill = pillOf(bare.root);
+    expect(pill, "YouTube detail should render the Video pill").not.toBeNull();
+    expect(pill!.getAttribute("aria-label")).toBe("Video");
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Video");
+    expect(pill!.getAttribute("data-media-type")).toBe("video");
+    unmount(bare.component);
+  });
+});

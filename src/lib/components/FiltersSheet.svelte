@@ -38,6 +38,7 @@
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
   import { auditActionLabel, AUDIT_ACTION_LIST } from "$lib/audit-labels.js";
+  import { eventKindLabel } from "$lib/sources/kind-display.js";
   // Source list shows a kind glyph + short kind label adjacent to
   // displayName. Reuses SourceKindIcon and the shared sourceKindLabel
   // helper.
@@ -160,7 +161,9 @@
     "press",
     "other",
   ];
-  const KIND_OPTIONS = $derived(sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => kindLabel(k)));
+  // Kind label resolves through the central kind-display config
+  // (eventKindLabel) — same source of truth FilterChips / FeedCard use.
+  const KIND_OPTIONS = $derived(sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => eventKindLabel(k)));
 
   // auditActionLabel + AUDIT_ACTIONS imported directly. The shared
   // $lib/audit-labels.ts is the single source of truth
@@ -168,31 +171,6 @@
   // const itself is the roster.
 
   const ACTION_OPTIONS = $derived(sortByLabel(AUDIT_ACTION_LIST, (a) => auditActionLabel(a)));
-
-  function kindLabel(k: string): string {
-    switch (k) {
-      case "youtube_video":
-        return m.event_kind_label_youtube_video();
-      case "reddit_post":
-        return m.event_kind_label_reddit_post();
-      case "twitter_post":
-        return m.event_kind_label_twitter_post();
-      case "telegram_post":
-        return m.event_kind_label_telegram_post();
-      case "discord_drop":
-        return m.event_kind_label_discord_drop();
-      case "conference":
-        return m.event_kind_label_conference();
-      case "talk":
-        return m.event_kind_label_talk();
-      case "press":
-        return m.event_kind_label_press();
-      case "post":
-        return m.event_kind_label_post();
-      default:
-        return m.event_kind_label_other();
-    }
-  }
 
   // Typeahead also matches against the
   // localized kind label so a search for "youtube" / "ютуб" surfaces every
@@ -371,7 +349,7 @@
                 checked={kindSelected.has(k)}
                 onchange={() => (kindSelected = toggle(kindSelected, k))}
               />
-              {kindLabel(k)}
+              {eventKindLabel(k)}
             </label>
           {/each}
         </div>

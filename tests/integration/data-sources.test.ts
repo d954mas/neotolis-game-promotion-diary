@@ -169,6 +169,34 @@ describe("register data sources via POST /api/sources", () => {
     expect(rows).toHaveLength(0);
   });
 
+  // SOC-05 / SOC-03 not-configured degrade. The integration test process boots
+  // with INSTAGRAM_PROVIDER="" (env.ts default — the safe self-host default), so
+  // isInstagramConfigured() is false. createSource for instagram_account must
+  // surface a clean 422 `kind_not_configured` (distinct from the schema-only
+  // `kind_not_yet_functional`) — NOT a 500 — and persist no row. Body must never
+  // carry "forbidden"/"permission" (cross-tenant carrier discipline; this is a
+  // config gate, not an ownership gate, but the literal-string ban is global).
+  it("kind=instagram_account with provider unconfigured rejects with 'kind_not_configured' (422), no row, no 500", async () => {
+    const userA = await seedUserDirectly({ email: "ds-ig-notcfg@test.local" });
+    try {
+      await createSource(
+        userA.id,
+        { kind: "instagram_account", handleUrl: "https://www.instagram.com/natgeo/" },
+        "127.0.0.1",
+      );
+      throw new Error("expected createSource to throw kind_not_configured");
+    } catch (e) {
+      const err = e as AppError;
+      expect(err.code).toBe("kind_not_configured");
+      expect(err.status).toBe(422);
+      expect(err.metadata.kind).toBe("instagram_account");
+      expect(err.metadata.status).toBe("not configured by operator");
+      expect(err.message).not.toMatch(/forbidden|permission/i);
+    }
+    const rows = await db.select().from(dataSources).where(eq(dataSources.userId, userA.id));
+    expect(rows).toHaveLength(0);
+  });
+
   it("empty handle_url rejects with AppError 'validation_failed' (422)", async () => {
     const userA = await seedUserDirectly({ email: "ds4@test.local" });
     await expect(

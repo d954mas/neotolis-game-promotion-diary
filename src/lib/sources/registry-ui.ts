@@ -9,6 +9,7 @@ import type { SourceKind } from "./adapter.js";
 import type { CardProps } from "./card-props.js";
 import * as youtubeUiServer from "./youtube/ui/server.js";
 import * as redditUiServer from "./reddit/ui/server.js";
+import * as instagramUiServer from "./instagram/ui/server.js";
 
 export interface AdapterUiServer {
   /** Pure-function mapper safe to call from +page.server.ts (no Svelte
@@ -31,6 +32,7 @@ const uiRegistry = new Map<SourceKind, AdapterUiServer>([
   ["youtube_channel", youtubeUiServer as unknown as AdapterUiServer],
   ["reddit_account", redditUiServer as unknown as AdapterUiServer],
   ["reddit_subreddit", redditUiServer as unknown as AdapterUiServer],
+  ["instagram_account", instagramUiServer as unknown as AdapterUiServer],
 ]);
 
 export function getAdapterUI(kind: SourceKind): AdapterUiServer {

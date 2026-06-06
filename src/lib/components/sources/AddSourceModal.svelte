@@ -28,6 +28,7 @@
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
+  import { inferSourceKindFromUrl } from "$lib/components/sources/infer-source-kind.js";
 
   // Mirror the synthetic UI kind picker from /sources/new — "reddit" is
   // resolved server-side to reddit_account / reddit_subreddit by URL
@@ -35,6 +36,7 @@
   type SourceKind =
     | "youtube_channel"
     | "reddit"
+    | "instagram_account"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
@@ -44,25 +46,36 @@
     | "source_kind_label_twitter_account"
     | "source_kind_label_telegram_channel"
     | "source_kind_label_discord_server"
+    | "source_kind_label_instagram_account"
     | "common_kind_reddit";
 
   type KindStatusKey =
     | "source_kind_status_reddit_account"
     | "source_kind_status_twitter_account"
     | "source_kind_status_telegram_channel"
-    | "source_kind_status_discord_server";
+    | "source_kind_status_discord_server"
+    | "source_kind_status_instagram_account";
+
+  // disabledReason distinguishes "adapter built, operator env unset"
+  // (Reddit / Instagram unconfigured) from "not built yet" (Twitter /
+  // Telegram / Discord) so the tooltip is accurate (issue #64). null when
+  // the chip is enabled. Sourced from the /sources loader's kindMatrix.
+  type DisabledReason = "not-configured" | "not-built";
 
   type KindEntry = {
     value: SourceKind;
     labelKey: KindLabelKey;
     statusKey: KindStatusKey | null;
     disabled: boolean;
+    disabledReason: DisabledReason | null;
   };
 
   let {
     open,
     kindMatrix,
     redditOperatorConfigured = false,
+    instagramConfigured = false,
+    socialBackfillMaxPosts = 48,
     defaultIsOwnedByMe = true,
     defaultAutoImport = true,
     onClose,
@@ -71,6 +84,8 @@
     open: boolean;
     kindMatrix: KindEntry[];
     redditOperatorConfigured?: boolean;
+    instagramConfigured?: boolean;
+    socialBackfillMaxPosts?: number;
     defaultIsOwnedByMe?: boolean;
     defaultAutoImport?: boolean;
     onClose: () => void;
@@ -109,6 +124,52 @@
     return handleUrl.toLowerCase().includes("reddit");
   });
 
+  // SOC-05: surface the env-var hint when Instagram is not configured and
+  // the user is looking at it (selected the disabled chip OR typed an IG
+  // URL). Mirror showRedditHint exactly. The disabled-chip + this hint is
+  // the COMPLETE key-related UI — no operator-key form (CONTEXT D-03).
+  const showInstagramHint = $derived.by(() => {
+    if (instagramConfigured) return false;
+    if (selectedKind === "instagram_account") return true;
+    return handleUrl.toLowerCase().includes("instagram");
+  });
+
+  // "Paste a link → we figure out the kind." Same client-side heuristic +
+  // auto-select behaviour as /sources/new (the shared helper keeps the
+  // host table single-sourced). The server's parseSourceUrl iterator stays
+  // the source of truth on submit.
+  const inferredKind = $derived(inferSourceKindFromUrl(handleUrl));
+  const inferredEntry = $derived(
+    inferredKind ? (kindMatrix.find((k) => k.value === inferredKind) ?? null) : null,
+  );
+
+  // Auto-select the matched chip when ENABLED; never select a disabled
+  // chip (those surface a hint instead). untrack(selectedKind) avoids a
+  // self-dependency thrash loop.
+  $effect(() => {
+    const entry = inferredEntry;
+    if (entry && !entry.disabled && untrack(() => selectedKind) !== entry.value) {
+      selectedKind = entry.value;
+    }
+  });
+
+  // Generic coming-soon / out-of-scope hint for a matched-but-disabled
+  // kind that doesn't already own dedicated copy (Reddit / Instagram do).
+  const showComingSoonHint = $derived.by(() => {
+    const entry = inferredEntry;
+    if (!entry || !entry.disabled) return false;
+    if (entry.value === "reddit" || entry.value === "instagram_account") return false;
+    return true;
+  });
+  const comingSoonHintText = $derived.by(() => {
+    const entry = inferredEntry;
+    if (!entry) return "";
+    return m.sources_kind_disabled_tooltip({
+      kind: labelFor(entry.labelKey),
+      status: statusFor(entry.statusKey) ?? "",
+    });
+  });
+
   function labelFor(key: KindLabelKey): string {
     switch (key) {
       case "source_kind_label_youtube_channel":
@@ -119,6 +180,8 @@
         return m.source_kind_label_telegram_channel();
       case "source_kind_label_discord_server":
         return m.source_kind_label_discord_server();
+      case "source_kind_label_instagram_account":
+        return m.source_kind_label_instagram_account();
       case "common_kind_reddit":
         return m.common_kind_reddit();
     }
@@ -140,11 +203,19 @@
         return m.source_kind_status_telegram_channel();
       case "source_kind_status_discord_server":
         return m.source_kind_status_discord_server();
+      case "source_kind_status_instagram_account":
+        return m.source_kind_status_instagram_account();
     }
   }
 
   function disabledTooltip(entry: KindEntry): string {
     const kindLabel = labelFor(entry.labelKey);
+    // not-configured: adapter IS built, operator hasn't set the env. The
+    // generic "schema ready, adapter isn't" tail would mislead a self-host
+    // operator (issue #64) — use the configuration-focused copy instead.
+    if (entry.disabledReason === "not-configured") {
+      return m.sources_kind_disabled_tooltip_not_configured({ kind: kindLabel });
+    }
     const status = statusFor(entry.statusKey) ?? "";
     return m.sources_kind_disabled_tooltip({ kind: kindLabel, status });
   }
@@ -215,6 +286,14 @@
         const kindLabel = body.metadata?.kind ?? selectedKind;
         const status = body.metadata?.status ?? "";
         formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, status });
+        return;
+      }
+      // SOC-05: createSource gates instagram_account on the operator's
+      // provider env and degrades to 422 kind_not_configured when unset.
+      // The chip is already disabled in the UI, so this only fires on a
+      // direct/bypass submit — surface the same env-var hint inline.
+      if (res.status === 422 && body.error === "kind_not_configured") {
+        formError = m.sources_new_instagram_disabled_hint();
         return;
       }
       if (
@@ -345,6 +424,14 @@
         {/if}
       {/if}
 
+      {#if showInstagramHint}
+        <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
+      {/if}
+
+      {#if showComingSoonHint}
+        <p class="hint">{comingSoonHintText}</p>
+      {/if}
+
       <label class="toggle">
         <input type="checkbox" bind:checked={isOwnedByMe} />
         <span>{m.sources_owned_by_me()} (this is my own channel/account)</span>
@@ -370,7 +457,12 @@
 
       {#if showPicker}
         <hr class="picker-separator" />
-        <BackfillPicker bind:value={backfillWindow} bind:customDate={backfillCustomDate} />
+        <BackfillPicker
+          bind:value={backfillWindow}
+          bind:customDate={backfillCustomDate}
+          kind={selectedKind}
+          postCap={socialBackfillMaxPosts}
+        />
       {/if}
 
       {#if formError}

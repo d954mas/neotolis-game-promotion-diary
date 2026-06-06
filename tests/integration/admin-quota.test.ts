@@ -17,7 +17,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { writeAudit } from "../../src/lib/server/audit.js";
 import { db } from "../../src/lib/server/db/client.js";
-import { youtubeServiceQuotaUsage } from "../../src/lib/server/db/schema/index.js";
+import {
+  youtubeServiceQuotaUsage,
+  socialProviderSpend,
+} from "../../src/lib/server/db/schema/index.js";
 import { todayPacific } from "../../src/lib/sources/youtube/server/quota.js";
 import { seedUserDirectly } from "./helpers.js";
 
@@ -37,6 +40,25 @@ async function withAllowlist<T>(value: string, fn: () => Promise<T>): Promise<T>
     if (saved === undefined) delete process.env.ADMIN_EMAIL_ALLOWLIST;
     else process.env.ADMIN_EMAIL_ALLOWLIST = saved;
     vi.resetModules();
+  }
+}
+
+/** Run `fn` with the operator's Instagram provider configured AND the email
+ *  allowlisted. env.ts re-parses INSTAGRAM_PROVIDER / SCRAPECREATORS_API_KEY at
+ *  module load, so the env mutation must precede the vi.resetModules() that
+ *  withAllowlist triggers before re-importing createApp. */
+async function withInstagramConfigured<T>(adminEmail: string, fn: () => Promise<T>): Promise<T> {
+  const savedProvider = process.env.INSTAGRAM_PROVIDER;
+  const savedKey = process.env.SCRAPECREATORS_API_KEY;
+  process.env.INSTAGRAM_PROVIDER = "scrapecreators";
+  process.env.SCRAPECREATORS_API_KEY = "test-key-admin-quota";
+  try {
+    return await withAllowlist(adminEmail, fn);
+  } finally {
+    if (savedProvider === undefined) delete process.env.INSTAGRAM_PROVIDER;
+    else process.env.INSTAGRAM_PROVIDER = savedProvider;
+    if (savedKey === undefined) delete process.env.SCRAPECREATORS_API_KEY;
+    else process.env.SCRAPECREATORS_API_KEY = savedKey;
   }
 }
 
@@ -152,6 +174,113 @@ describe("admin /quota route", () => {
       expect(nRow!.estimatedUnits).toBe(9700);
       expect(nRow!.pctOfDaily).toBeCloseTo(97.0, 1);
       expect(nRow!.status).toBe("95_throttle");
+    });
+  });
+
+  // OBS-02 — the per-platform/provider Instagram block.
+  it("instagram block collapses to { isConfigured: false } when the provider is unconfigured (env default)", async () => {
+    // The integration process boots with INSTAGRAM_PROVIDER="" (env.ts default),
+    // so the loader surfaces the not-configured collapse, not an empty spend
+    // table (mirrors the reddit REDDIT_USER_AGENT-empty block).
+    const adminEmail = `p08-ig-notcfg-${uniq()}@test.local`;
+    await withAllowlist(adminEmail, async () => {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const u = await seedUserDirectly({ email: adminEmail });
+      const res = await app.request("/api/admin/quota", {
+        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { instagram: { isConfigured: boolean } };
+      expect(body.instagram).toEqual({ isConfigured: false });
+    });
+  });
+
+  it("instagram block surfaces requestsToday + spend/cap + remaining balance when configured (OBS-02)", async () => {
+    const adminEmail = `p08-ig-cfg-${uniq()}@test.local`;
+    const today = todayPacific();
+    // Seed today's social spend (user pool) so creditsUsed/requestsToday > 0.
+    // dailyCap defaults to 100 in the test env (tests/setup.ts); prepaid balance
+    // defaults high (100000) with no balance row, so remainingBalance == that.
+    await db.insert(socialProviderSpend).values({
+      datePacific: today,
+      platform: "instagram",
+      provider: "scrapecreators",
+      poolKind: "user",
+      creditsUsed: 12,
+    });
+
+    await withInstagramConfigured(adminEmail, async () => {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const u = await seedUserDirectly({ email: adminEmail });
+      const res = await app.request("/api/admin/quota", {
+        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        instagram:
+          | {
+              isConfigured: true;
+              requestsToday: number;
+              creditsUsed: number;
+              dailyCap: number;
+              remainingBalance: number;
+              prepaidBalance: number;
+              throttleState: string;
+            }
+          | { isConfigured: false };
+      };
+      expect(body.instagram.isConfigured).toBe(true);
+      if (!body.instagram.isConfigured) throw new Error("expected configured block");
+      // 1 credit/request (D-18) ⇒ requestsToday == creditsUsed == seeded spend.
+      expect(body.instagram.requestsToday).toBe(12);
+      expect(body.instagram.creditsUsed).toBe(12);
+      expect(body.instagram.dailyCap).toBe(100);
+      // remainingBalance is the prepaid funded balance (the D-16 hard ceiling).
+      expect(body.instagram.remainingBalance).toBe(100000);
+      expect(body.instagram.prepaidBalance).toBe(100000);
+      // 12/100 daily-cap usage is below the 80 threshold → 'ok'.
+      expect(body.instagram.throttleState).toBe("ok");
+    });
+  });
+
+  it("instagram block surfaces social.provider_throttled + social.budget_exhausted in the audit tail (OBS-02)", async () => {
+    const adminEmail = `p08-ig-aud-${uniq()}@test.local`;
+    const userA = await seedUserDirectly({ email: `p08-ig-aud-u-${uniq()}@test.local` });
+    // The social budget verbs are system-emitted under the operator's resolved
+    // user_id; seed them on a normal user here (the cross-tenant aggregation is
+    // the operator pane — allowlist is the gate).
+    await writeAudit({
+      userId: userA.id,
+      action: "social.provider_throttled",
+      ipAddress: "127.0.0.1",
+      metadata: { marker: "IG-throttle", platform: "instagram", provider: "scrapecreators" },
+    });
+    await writeAudit({
+      userId: userA.id,
+      action: "social.budget_exhausted",
+      ipAddress: "127.0.0.1",
+      metadata: { marker: "IG-exhausted", platform: "instagram", provider: "scrapecreators" },
+    });
+
+    await withAllowlist(adminEmail, async () => {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const admin = await seedUserDirectly({ email: adminEmail });
+      const res = await app.request("/api/admin/quota", {
+        headers: { cookie: `neotolis.session_token=${admin.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        audit: Array<{ action: string; metadata: Record<string, unknown> }>;
+      };
+      const actions = body.audit.map((a) => a.action);
+      expect(actions).toContain("social.provider_throttled");
+      expect(actions).toContain("social.budget_exhausted");
+      const markers = body.audit.map((a) => a.metadata?.marker).filter(Boolean);
+      expect(markers).toContain("IG-throttle");
+      expect(markers).toContain("IG-exhausted");
     });
   });
 

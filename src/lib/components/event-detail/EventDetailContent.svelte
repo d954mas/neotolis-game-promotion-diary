@@ -35,7 +35,10 @@
   import EventDetailStats from "./EventDetailStats.svelte";
   import EventDetailGames from "./EventDetailGames.svelte";
   import EventHistoryChart from "$lib/components/charts/EventHistoryChart.svelte";
-  import type { EventMetricSeries } from "$lib/sources/adapter.js";
+  import MediaTypePill from "$lib/components/feed/parts/MediaTypePill.svelte";
+  import { deriveMediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
+  import type { EventKind, EventMetricSeries } from "$lib/sources/adapter.js";
+  import { CHARTABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
   import { m } from "$lib/paraglide/messages.js";
   import {
     deriveThumbnailUrl,
@@ -97,12 +100,12 @@
   // empty []) → prop !== undefined → no client fetch (no double load, and no
   // redundant fetch when the route already knows the series is empty).
   //
-  // CHARTABLE_KINDS = the kinds an adapter implements fetchEventMetricSeries
-  // for (youtube_video, reddit_post). Mounting EventHistoryChart for these
-  // kinds — even with 0 snapshots — makes the D-07 low-data caption reachable
-  // (the empty/sparse case the chart already handles).
-  const CHARTABLE_KINDS = new Set(["youtube_video", "reddit_post"]);
-  const isChartable = $derived(CHARTABLE_KINDS.has(event.kind));
+  // CHARTABLE_EVENT_KINDS = the kinds an adapter implements
+  // fetchEventMetricSeries for (youtube_video, reddit_post, instagram_post) —
+  // derived from the central kind-display config so it can't drift. Mounting
+  // EventHistoryChart for these kinds — even with 0 snapshots — makes the D-07
+  // low-data caption reachable (the empty/sparse case the chart already handles).
+  const isChartable = $derived(CHARTABLE_EVENT_KINDS.has(event.kind as EventKind));
 
   // Client-fetched series for the modal path. null = not yet fetched / not
   // applicable; [] is a valid fetched result (chartable event, 0 snapshots →
@@ -287,6 +290,20 @@
   const mediaShape = $derived(deriveIsMediaShape(event.kind as CardEventLite["kind"]));
   const thumbnailUrl = $derived(deriveThumbnailUrl(event as unknown as CardEventLite));
   const showDetailThumb = $derived(mediaShape || thumbnailUrl !== null);
+
+  // Media-type pill (short / carousel / video) over the detail thumbnail —
+  // SAME shared pill the feed card uses (deriveMediaTypeOverlay + MediaTypePill),
+  // so the detail reads as a zoomed-in version of the clicked card. The IG
+  // media_type rides on instagramEnrichment, attached to the DTO by the loader's
+  // enrichFeedDtos (read via cast, exactly like redditEnrichment above); for
+  // youtube_video the derivation yields the "Video" pill. image / non-media
+  // kinds → null → no pill. Rendered only over a present thumbnail <img> so it
+  // sits on the picture, never on the empty KindIcon placeholder.
+  const detailMediaOverlay = $derived.by(() =>
+    deriveMediaTypeOverlay(
+      event as { kind: string; instagramEnrichment?: { mediaType?: string | null } | null },
+    ),
+  );
   // YouTube click-to-play facade — flips to embedded iframe on user
   // click. Reset whenever the event changes (modal pagination).
   let iframeLoaded = $state(false);
@@ -542,6 +559,9 @@
           {:else}
             <KindIcon kind={event.kind} size={48} />
           {/if}
+          {#if thumbnailUrl && detailMediaOverlay}
+            <MediaTypePill pill={detailMediaOverlay} />
+          {/if}
           <span class="detail-thumb-play" aria-hidden="true">
             <svg width="56" height="56" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M8 5v14l11-7z" />
@@ -565,6 +585,9 @@
             <img src={thumbnailUrl} alt="" referrerpolicy="no-referrer" />
           {:else}
             <KindIcon kind={event.kind} size={48} />
+          {/if}
+          {#if thumbnailUrl && detailMediaOverlay}
+            <MediaTypePill pill={detailMediaOverlay} />
           {/if}
         </div>
       {/if}
@@ -618,8 +641,8 @@
     <!-- VIZ-01 per-event snapshot-history chart (D-14, adapter-driven).
          One mount here covers BOTH the modal and the /events/[id] route
          (this is the shared dual-render body). Gated on `isChartable`, NOT
-         on series length, so a chartable event (youtube_video / reddit_post)
-         with 0 snapshots still mounts EventHistoryChart and shows the D-07
+         on series length, so a chartable event (youtube_video / reddit_post /
+         instagram_post) with 0 snapshots still mounts EventHistoryChart and shows the D-07
          low-data caption. `chartSeries` is the SSR prop (when threaded, e.g.
          /events/[id]) or the modal-path client fetch (Plan 04-24). -->
     {#if isChartable}

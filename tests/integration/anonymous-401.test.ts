@@ -211,6 +211,27 @@ describe("anonymous-401 sweep", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
+  // Phase 8 Instagram — the IG create + refresh flow introduces NO new /api/*
+  // route: instagram_account createSource lands on the existing POST /api/sources
+  // and the per-source pull lands on POST /api/sources/:id/refresh-content (both
+  // already in MUST_BE_PROTECTED + dispatched via getAdapter("instagram_account")).
+  // These explicit IG-bodied probes are the load-bearing per-route checks: an
+  // anonymous IG create / refresh is refused by tenantScope BEFORE any provider
+  // resolve / ScrapeCreators credit reservation ever fires (cost-guardrail: an
+  // anonymous probe never burns an operator credit).
+  it("anonymous POST /api/sources with an instagram_account body returns 401 (no provider resolve)", async () => {
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "instagram_account",
+        handleUrl: "https://www.instagram.com/natgeo/",
+      }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
   it("anonymous GET /api/events (feed) returns 401 unauthorized", async () => {
     const res = await app.request("/api/events");
     expect(res.status).toBe(401);

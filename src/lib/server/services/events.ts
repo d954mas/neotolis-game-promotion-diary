@@ -211,6 +211,7 @@ export interface FeedFacets {
 export const VALID_EVENT_KINDS = [
   "youtube_video",
   "reddit_post",
+  "instagram_post",
   "twitter_post",
   "telegram_post",
   "discord_drop",

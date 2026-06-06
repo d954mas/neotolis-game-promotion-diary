@@ -109,6 +109,7 @@
     twitter_account: "--k-twitter",
     telegram_channel: "--k-telegram",
     discord_server: "--k-discord",
+    instagram_account: "--k-instagram",
   };
 
   // Relative-time formatter for "synced X ago".
