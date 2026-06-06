@@ -429,11 +429,11 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   //                                  depth; at the cap the deep branch already
   //                                  marks feeds complete (→ accountComplete), but
   //                                  this is the explicit belt-and-suspenders stop.
-  // singletonKey is a best-effort coalescing hint on a standard-policy queue, NOT
-  // a hard single-flight guard. Duplicate EVENTS are prevented by
-  // onConflictDoNothing on the insert (mirrors YouTube); a rare concurrent walk
-  // may double a provider fetch, but total spend is bounded by the prepaid-balance
-  // ceiling (reserveSocialCredits).
+  // singletonKey is a no-op for dedup on this standard-policy queue (no
+  // singletonSeconds). Duplicate EVENTS are prevented by onConflictDoNothing on
+  // the insert; a concurrent double-fetch's spend is bounded by the prepaid
+  // ceiling (reserveSocialCredits). Kept harmless + future-proof if the policy
+  // ever gains singletonSeconds.
   const shouldContinue =
     branch === "deep" && !accountComplete && !pausedByBudget && state.collected < maxPosts;
   await db.transaction(async (tx) => {
