@@ -530,19 +530,16 @@ export async function enrichFromUrl(
   // fully in /feed. The "Fetch" button now auto-fills title (caption first
   // line) + description + thumbnail.
   //
-  // GRACEFUL DEGRADE is load-bearing: a failed preview (provider not
-  // configured, network error, budget/cap exhaustion, deleted post) must NOT
-  // break manual entry. Every non-ok path falls through to the recognition-only
-  // shape (kind + shortcode + canonical permalink, empty title) — exactly what
-  // the form needs to lock kind=Instagram and let the user type the title (the
-  // required-asterisk field forbids an empty save). For cap-exhaustion we prefer
-  // this soft path over a hard 429 so the Add Event UX never dead-ends on a
-  // rare manual paste — the user simply types the title (the cost guardrail
-  // still held: no credit was burned).
+  // GRACEFUL DEGRADE is load-bearing: every non-ok path (provider unconfigured,
+  // network error, budget/cap exhaustion, deleted post) falls through to the
+  // recognition-only shape so manual entry never dead-ends. Cap-exhaustion takes
+  // the soft path over a hard 429 — no credit was burned, so the cost guardrail
+  // still held.
   if (parsed.kind === "instagram_post") {
-    // Recognition-only keeps the URL-parsed SHORTCODE (no live fetch → the media
-    // id is unknown). Such an event won't enrich until a real fetch / the next
-    // account-level poll resolves the canonical media id.
+    // Recognition-only carries the URL SHORTCODE, not the media id the cache keys
+    // on (no live fetch). It won't enrich, and a later account poll won't re-bind
+    // it (that poll creates a SEPARATE media-id-keyed event) — re-paste once the
+    // provider recovers to get an enriched event.
     const recognitionOnly: EnrichmentResult = {
       kind: "instagram_post",
       externalId: parsed.externalId,
@@ -565,7 +562,7 @@ export async function enrichFromUrl(
       });
     } catch (err) {
       // Cap-exhaustion (AppError 429) → soft-degrade to recognition-only rather
-      // than dead-ending the form. Any other adapter throw also degrades.
+      // than dead-ending the form.
       if (err instanceof AppError && err.code === "requests_quota_exhausted") {
         logger.info(
           { userId, url: parsed.canonicalUrl },
