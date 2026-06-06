@@ -35,7 +35,8 @@
   import EventDetailStats from "./EventDetailStats.svelte";
   import EventDetailGames from "./EventDetailGames.svelte";
   import EventHistoryChart from "$lib/components/charts/EventHistoryChart.svelte";
-  import type { EventMetricSeries } from "$lib/sources/adapter.js";
+  import type { EventKind, EventMetricSeries } from "$lib/sources/adapter.js";
+  import { CHARTABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
   import { m } from "$lib/paraglide/messages.js";
   import {
     deriveThumbnailUrl,
@@ -97,12 +98,12 @@
   // empty []) → prop !== undefined → no client fetch (no double load, and no
   // redundant fetch when the route already knows the series is empty).
   //
-  // CHARTABLE_KINDS = the kinds an adapter implements fetchEventMetricSeries
-  // for (youtube_video, reddit_post, instagram_post). Mounting EventHistoryChart
-  // for these kinds — even with 0 snapshots — makes the D-07 low-data caption
-  // reachable (the empty/sparse case the chart already handles).
-  const CHARTABLE_KINDS = new Set(["youtube_video", "reddit_post", "instagram_post"]);
-  const isChartable = $derived(CHARTABLE_KINDS.has(event.kind));
+  // CHARTABLE_EVENT_KINDS = the kinds an adapter implements
+  // fetchEventMetricSeries for (youtube_video, reddit_post, instagram_post) —
+  // derived from the central kind-display config so it can't drift. Mounting
+  // EventHistoryChart for these kinds — even with 0 snapshots — makes the D-07
+  // low-data caption reachable (the empty/sparse case the chart already handles).
+  const isChartable = $derived(CHARTABLE_EVENT_KINDS.has(event.kind as EventKind));
 
   // Client-fetched series for the modal path. null = not yet fetched / not
   // applicable; [] is a valid fetched result (chartable event, 0 snapshots →

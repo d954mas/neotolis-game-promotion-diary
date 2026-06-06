@@ -25,6 +25,7 @@
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "../../KindIcon.svelte";
   import AuthorAvatar from "./AuthorAvatar.svelte";
+  import { eventKindLabel } from "$lib/sources/kind-display.js";
   import type { CardEventKind, CardEventLite } from "./derive-card-data.js";
   import {
     formatOccurredAt,
@@ -95,33 +96,9 @@
     onThumbnailError?: () => void;
   } = $props();
 
-  const kindLabel = $derived.by(() => {
-    switch (event.kind) {
-      case "youtube_video":
-        return m.event_kind_label_youtube_video();
-      case "reddit_post":
-        return m.event_kind_label_reddit_post();
-      case "twitter_post":
-        return m.event_kind_label_twitter_post();
-      case "telegram_post":
-        return m.event_kind_label_telegram_post();
-      case "discord_drop":
-        return m.event_kind_label_discord_drop();
-      case "instagram_post":
-        return m.event_kind_label_instagram_post();
-      case "conference":
-        return m.event_kind_label_conference();
-      case "talk":
-        return m.event_kind_label_talk();
-      case "press":
-        return m.event_kind_label_press();
-      case "post":
-        return m.event_kind_label_post();
-      case "other":
-      default:
-        return m.event_kind_label_other();
-    }
-  });
+  // Kind label resolves through the central kind-display config
+  // (eventKindLabel) — same source of truth EventDetailHeader / FilterChips use.
+  const kindLabel = $derived(eventKindLabel(event.kind));
 
   const dateLabel = $derived.by(() => formatOccurredAt(event.occurredAt));
   const mediaShape = $derived.by(() => isMediaShape(event.kind as CardEventKind));

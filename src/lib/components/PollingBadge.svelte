@@ -47,6 +47,8 @@
   // Accessibility: role="status" + aria-live="polite".
 
   import { m } from "$lib/paraglide/messages.js";
+  import { POLLABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
+  import type { EventKind } from "$lib/sources/adapter.js";
   import RefreshNowButton from "./RefreshNowButton.svelte";
 
   // MIRRORS services/tier-resolver.ts — keep in sync.
@@ -99,9 +101,10 @@
 
   let { event }: { event: EventForBadge } = $props();
 
-  // Source kinds that surface the live-state badge. YouTube + Reddit +
-  // Instagram (BUDGET-01: IG posts can enter the operator-budget-paused state).
-  const POLLABLE_KINDS = ["youtube_video", "reddit_post", "instagram_post"];
+  // Event kinds that surface the live-state badge — read from the central
+  // kind-display config (pollable: youtube_video / reddit_post / instagram_post).
+  // event.kind is widened to `string` here; isPollable narrows via the Set.
+  const isPollable = $derived(POLLABLE_EVENT_KINDS.has(event.kind as EventKind));
 
   // Defensive Date coercion — props may arrive as ISO strings.
   const publishedAt = $derived(
@@ -204,7 +207,7 @@
   // swallow), the user has an explicit refresh button to rescue.
   // 'pending' tier still hides refresh — backfill is in flight, manual
   // poll would race it. Refresh-poll service rejects 'pending' with 422.
-  const refreshVisible = $derived(POLLABLE_KINDS.includes(event.kind) && tier !== "pending");
+  const refreshVisible = $derived(isPollable && tier !== "pending");
 
   // Copy resolution. The visible text uses "Updated X ago" relative time
   // (user-meaningful) rather than tier vocabulary ("Cold", "Frozen").
@@ -243,7 +246,7 @@
   });
 </script>
 
-{#if POLLABLE_KINDS.includes(event.kind)}
+{#if isPollable}
   <span class="polling-badge polling-badge--{variant}" role="status" aria-live="polite">
     <span class="polling-badge__icon" aria-hidden="true">
       <svg

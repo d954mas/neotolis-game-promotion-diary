@@ -17,6 +17,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import { auditActionLabel } from "$lib/audit-labels.js";
+  import { eventKindLabel } from "$lib/sources/kind-display.js";
 
   type ShowFilter =
     | { kind: "any" }
@@ -70,34 +71,9 @@
     onClearAll: () => void;
   } = $props();
 
-  function kindLabel(k: string): string {
-    switch (k) {
-      case "youtube_video":
-        return m.event_kind_label_youtube_video();
-      case "reddit_post":
-        return m.event_kind_label_reddit_post();
-      case "twitter_post":
-        return m.event_kind_label_twitter_post();
-      case "telegram_post":
-        return m.event_kind_label_telegram_post();
-      case "discord_drop":
-        return m.event_kind_label_discord_drop();
-      case "instagram_post":
-        return m.event_kind_label_instagram_post();
-      case "conference":
-        return m.event_kind_label_conference();
-      case "talk":
-        return m.event_kind_label_talk();
-      case "press":
-        return m.event_kind_label_press();
-      case "other":
-        return m.event_kind_label_other();
-      case "post":
-        return m.event_kind_label_post();
-      default:
-        return k;
-    }
-  }
+  // Kind label resolves through the central kind-display config
+  // (eventKindLabel). Single source of truth across FeedCard / FilterChips /
+  // FiltersSheet / EventDetailHeader.
 
   // auditActionLabel comes from the shared $lib/audit-labels.js helper.
   // Single source of truth across AuditRow / FilterChips /
@@ -115,7 +91,7 @@
 
     // Kind axis — one chip with comma-joined value labels.
     if (schema.includes("kind") && filters.kind.length > 0) {
-      const labels = filters.kind.map(kindLabel).join(", ");
+      const labels = filters.kind.map(eventKindLabel).join(", ");
       const label = `${m.feed_chip_axis_kind()}: ${labels}`;
       out.push({ axis: "kind", label, ariaName: label, key: "axis:kind" });
     }
