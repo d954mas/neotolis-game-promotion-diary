@@ -16,6 +16,7 @@ import {
   SOURCE_KIND_DISPLAY,
   POLLABLE_EVENT_KINDS,
   CHARTABLE_EVENT_KINDS,
+  MANUAL_EVENT_KINDS,
   SOURCE_PLATFORM_GROUPS,
   eventKindLabel,
   sourceKindDisplayLabel,
@@ -66,6 +67,7 @@ describe("kind-display config — EVENT_KIND_DISPLAY", () => {
       expect(label.length, `${k} label must be non-empty`).toBeGreaterThan(0);
       expect(typeof d.pollable).toBe("boolean");
       expect(typeof d.chartable).toBe("boolean");
+      expect(typeof d.manualCreatable).toBe("boolean");
     }
   });
 
@@ -132,5 +134,50 @@ describe("kind-display config — derived helper sets stay in lockstep", () => {
     expect([...CHARTABLE_EVENT_KINDS].sort()).toEqual([...expected].sort());
     expect(CHARTABLE_EVENT_KINDS.has("instagram_post")).toBe(true);
     expect(CHARTABLE_EVENT_KINDS.has("other")).toBe(false);
+  });
+});
+
+describe("kind-display config — Add Event manual picker is config-driven + in sync", () => {
+  // The Add Event kind picker (AddEventForm.svelte) renders MANUAL_EVENT_KINDS
+  // verbatim. MANUAL_EVENT_KINDS is an EXPLICIT ordered list (chip order is a
+  // UX choice the boolean flag can't express); this test is the guard that the
+  // ORDER list can never drift from the MEMBERSHIP flags — its kind SET must
+  // equal exactly the set of `manualCreatable: true` entries in
+  // EVENT_KIND_DISPLAY. So a future kind added with manualCreatable:true but
+  // forgotten in the picker list (or vice versa) fails HERE.
+  //
+  // The `satisfies Record<EventKind, EventKindDisplay>` on EVENT_KIND_DISPLAY
+  // is the COMPILE-TIME complement: a new EventKind MUST declare manualCreatable
+  // or `pnpm typecheck` fails — it can't be silently omitted from the decision.
+  // Together: compile-time forces the flag to exist; this runtime test forces
+  // the ordered picker list to agree with it.
+
+  it("MANUAL_EVENT_KINDS equals exactly the manualCreatable=true entries", () => {
+    const flagged = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_DISPLAY[k].manualCreatable);
+    expect([...MANUAL_EVENT_KINDS].sort()).toEqual([...flagged].sort());
+  });
+
+  it("every kind in MANUAL_EVENT_KINDS has manualCreatable:true", () => {
+    for (const k of MANUAL_EVENT_KINDS) {
+      expect(EVENT_KIND_DISPLAY[k].manualCreatable, `${k} must be manualCreatable`).toBe(true);
+    }
+  });
+
+  it("includes instagram_post (Phase 08) and excludes the not-yet-functional kinds", () => {
+    const set = new Set<string>(MANUAL_EVENT_KINDS);
+    expect(set.has("instagram_post")).toBe(true);
+    // The deferred kinds (no adapter, no paste flow, filtered from /feed) must
+    // NOT be manually creatable — letting a user create un-filterable events
+    // is the footgun manualCreatable:false prevents.
+    expect(set.has("twitter_post")).toBe(false);
+    expect(set.has("telegram_post")).toBe(false);
+    expect(set.has("discord_drop")).toBe(false);
+  });
+
+  it("preserves the picker order (instagram_post right after reddit_post)", () => {
+    const ri = MANUAL_EVENT_KINDS.indexOf("reddit_post");
+    const ii = MANUAL_EVENT_KINDS.indexOf("instagram_post");
+    expect(ri).toBeGreaterThanOrEqual(0);
+    expect(ii).toBe(ri + 1);
   });
 });

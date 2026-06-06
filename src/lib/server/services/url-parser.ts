@@ -48,6 +48,13 @@ export type ParsedUrl =
       canonicalUrl: string;
       metadata: Record<string, unknown>;
     }
+  // Instagram permalink (`/p/<code>`, `/reel/<code>`). The shortcode is the
+  // URL-intrinsic externalId (08-SPIKE `code`); canonicalUrl is the
+  // `/p/` | `/reel/` permalink the IG adapter's parseUrl already
+  // canonicalized. There is NO single-post preview fetch today, so the
+  // paste flow recognizes the kind + URL but the user types the title —
+  // see enrichFromUrl's instagram_post branch (no network call).
+  | { kind: "instagram_post"; externalId: string; canonicalUrl: string }
   | { kind: "twitter_post"; canonicalUrl: string }
   | { kind: "telegram_post"; canonicalUrl: string }
   | { kind: "unsupported" };
@@ -113,6 +120,23 @@ export function parseIngestUrl(input: string): ParsedUrl {
       externalId,
       canonicalUrl,
       metadata: { subreddit },
+    };
+  }
+  if (routed.kind === "instagram_post") {
+    // The IG adapter's parseUrl already canonicalized the permalink into
+    // metadata.permalink (`https://www.instagram.com/p/<code>/` or
+    // `/reel/<code>/`). externalId is the shortcode. No live single-post
+    // fetch exists — enrichFromUrl's instagram_post branch returns this
+    // kind + URL with an empty title so the user types it manually.
+    const meta = (routed.metadata ?? {}) as { permalink?: unknown };
+    const canonicalUrl =
+      typeof meta.permalink === "string"
+        ? meta.permalink
+        : `https://www.instagram.com/p/${routed.externalId}/`;
+    return {
+      kind: "instagram_post",
+      externalId: routed.externalId,
+      canonicalUrl,
     };
   }
 

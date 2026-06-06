@@ -36,6 +36,20 @@ export interface EventKindDisplay {
   /** Mounts the per-event metric-history chart (and game-chart markers).
    *  Matches the kinds whose adapter implements fetchEventMetricSeries. */
   chartable: boolean;
+  /** Appears as a chip in the Add Event manual kind picker
+   *  (AddEventForm). true for the kinds a user can manually log today —
+   *  the API-polled kinds with a paste flow (youtube_video / reddit_post /
+   *  instagram_post) PLUS the free-form kinds (press / post / conference /
+   *  talk / other). false for the not-yet-functional kinds (twitter_post /
+   *  telegram_post / discord_drop), which have no adapter, no paste flow,
+   *  and are filtered out of the /feed KIND axis — letting a user create
+   *  events they can't then filter to would be a footgun.
+   *
+   *  This flag (via the `satisfies Record<EventKind, …>` below) is the
+   *  COMPILE-TIME guard that a future new kind can't be silently omitted
+   *  from the picker: the new key must declare manualCreatable, forcing an
+   *  explicit yes/no decision. Order is carried by MANUAL_EVENT_KINDS. */
+  manualCreatable: boolean;
 }
 
 export interface SourceKindDisplay {
@@ -53,56 +67,67 @@ export const EVENT_KIND_DISPLAY = {
     label: () => m.event_kind_label_youtube_video(),
     pollable: true,
     chartable: true,
+    manualCreatable: true,
   },
   reddit_post: {
     label: () => m.event_kind_label_reddit_post(),
     pollable: true,
     chartable: true,
+    manualCreatable: true,
   },
   instagram_post: {
     label: () => m.event_kind_label_instagram_post(),
     pollable: true,
     chartable: true,
+    manualCreatable: true,
   },
   twitter_post: {
     label: () => m.event_kind_label_twitter_post(),
     pollable: false,
     chartable: false,
+    manualCreatable: false,
   },
   telegram_post: {
     label: () => m.event_kind_label_telegram_post(),
     pollable: false,
     chartable: false,
+    manualCreatable: false,
   },
   discord_drop: {
     label: () => m.event_kind_label_discord_drop(),
     pollable: false,
     chartable: false,
+    manualCreatable: false,
   },
   conference: {
     label: () => m.event_kind_label_conference(),
     pollable: false,
     chartable: false,
+    manualCreatable: true,
   },
   talk: {
     label: () => m.event_kind_label_talk(),
     pollable: false,
     chartable: false,
+    manualCreatable: true,
   },
   press: {
     label: () => m.event_kind_label_press(),
     pollable: false,
     chartable: false,
+    manualCreatable: true,
   },
   post: {
     label: () => m.event_kind_label_post(),
     pollable: false,
     chartable: false,
+    manualCreatable: true,
   },
   other: {
     label: () => m.event_kind_label_other(),
     pollable: false,
     chartable: false,
+    manualCreatable: true,
   },
 } satisfies Record<EventKind, EventKindDisplay>;
 
@@ -148,6 +173,30 @@ export const POLLABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
 export const CHARTABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
   (Object.keys(EVENT_KIND_DISPLAY) as EventKind[]).filter((k) => EVENT_KIND_DISPLAY[k].chartable),
 );
+
+/** The Add Event manual kind picker (AddEventForm) chip list, in render
+ *  order. EXPLICIT order list because chip order is a deliberate UX choice
+ *  (platform-with-paste-flow kinds first, then free-form) that the boolean
+ *  flag alone can't express. The flag stays the source of MEMBERSHIP; this
+ *  list is the source of ORDER, and `tests/unit/kind-display.test.ts` asserts
+ *  the two never drift — the set of kinds here MUST equal exactly the set of
+ *  `manualCreatable: true` entries in EVENT_KIND_DISPLAY. So adding a kind is
+ *  still a single decision (set its manualCreatable flag): the test fails
+ *  loudly until the kind is either placed here or marked manualCreatable:false.
+ *
+ *  instagram_post sits right after reddit_post (Phase 08 — Instagram joins the
+ *  paste-flow kinds). twitter_post / telegram_post / discord_drop are excluded
+ *  (manualCreatable:false) — no adapter, no paste flow, filtered from /feed. */
+export const MANUAL_EVENT_KINDS = [
+  "youtube_video",
+  "reddit_post",
+  "instagram_post",
+  "press",
+  "post",
+  "conference",
+  "talk",
+  "other",
+] as const satisfies readonly EventKind[];
 
 /** Human label for any EventKind. The string union arg keeps callers that hold
  *  a widened `string` (DTO `kind` columns) honest — an unknown kind falls back

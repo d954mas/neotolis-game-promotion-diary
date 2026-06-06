@@ -96,6 +96,33 @@ describe("URL parser canonicalization", () => {
     }
   });
 
+  it("parseIngestUrl returns instagram_post for IG post/reel permalinks (Phase 08)", () => {
+    // Recognition-only: the IG adapter's parseUrl matches /p/<code> and
+    // /reel/<code> and canonicalizes the permalink; url-parser surfaces
+    // `instagram_post` + the shortcode. There is NO single-post preview
+    // fetch — enrichFromUrl returns this kind + URL with an empty title so
+    // the user types it manually. The bare profile URL is a SOURCE, not an
+    // event, so it must NOT be recognized here.
+    const p = parseIngestUrl("https://www.instagram.com/p/CabcDEF123/");
+    expect(p.kind).toBe("instagram_post");
+    if (p.kind === "instagram_post") {
+      expect(p.externalId).toBe("CabcDEF123");
+      expect(p.canonicalUrl).toBe("https://www.instagram.com/p/CabcDEF123/");
+    }
+
+    // `/reels/<code>` (plural app route) canonicalizes to the singular
+    // `/reel/<code>/` Instagram shares.
+    const r = parseIngestUrl("https://instagram.com/reels/XyZ_-789/");
+    expect(r.kind).toBe("instagram_post");
+    if (r.kind === "instagram_post") {
+      expect(r.externalId).toBe("XyZ_-789");
+      expect(r.canonicalUrl).toBe("https://www.instagram.com/reel/XyZ_-789/");
+    }
+
+    // A bare profile URL is a SOURCE, not an event — not recognized here.
+    expect(parseIngestUrl("https://www.instagram.com/natgeo/").kind).toBe("unsupported");
+  });
+
   it("parseIngestUrl returns unsupported for reddit SOURCE URLs (sub/user, not posts)", () => {
     // `/r/IndieDev` (subreddit landing) and `/user/anna` (account page)
     // are SOURCE-shape URLs — they belong to /sources/new flow, not the

@@ -783,6 +783,62 @@ describe("createEvent kind-aware enrichment", () => {
       status: 422,
     });
   });
+
+  it("enrichFromUrl RECOGNIZES an Instagram permalink (kind+URL, empty title, no fetch, no DB write)", async () => {
+    // Phase 08 recognition-only: there is no IG single-post metadata/stats
+    // API, so enrichFromUrl must NOT throw 'unsupported_url' / 'kind_not_yet_
+    // functional' for a valid IG URL. It returns kind=instagram_post + the
+    // shortcode externalId + the canonical permalink with an EMPTY title (the
+    // user types the title manually). No network call, no event row written.
+    const u = await seedUserDirectly({ email: `ev17ig-${uniq()}@test.local` });
+
+    const result = await enrichFromUrl(
+      u.id,
+      "https://www.instagram.com/reel/XyZ_-789/",
+      "127.0.0.1",
+    );
+    expect(result.kind).toBe("instagram_post");
+    expect(result.externalId).toBe("XyZ_-789");
+    expect(result.canonicalUrl).toBe("https://www.instagram.com/reel/XyZ_-789/");
+    expect(result.title).toBe(""); // No live preview — user supplies the title.
+    expect(result.thumbnailUrl).toBeNull();
+    expect(result.occurredAt).toBeNull();
+
+    // No event row written (preview is read-only).
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("createEvent saves a bare instagram_post event (externalId derived from the pasted URL)", async () => {
+    // The accepted manual-entry result: a user pastes an IG link (recognized
+    // above), types a Title, and saves. createEvent derives the externalId
+    // (shortcode) from the URL via parseAnyUrl and persists a bare event —
+    // no stats, no thumbnail. It renders in /feed with the central "Instagram"
+    // label and a plain card (no media_type pill, no enrichment row).
+    const u = await seedUserDirectly({ email: `ev17igsave-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        kind: "instagram_post",
+        title: "My launch reel",
+        url: "https://www.instagram.com/p/CabcDEF123/",
+        occurredAt: new Date().toISOString(),
+        gameIds: [],
+      },
+      "127.0.0.1",
+    );
+    expect(ev.kind).toBe("instagram_post");
+    expect(ev.title).toBe("My launch reel");
+    expect(ev.url).toBe("https://www.instagram.com/p/CabcDEF123/");
+    // externalId derived from the pasted permalink shortcode by createEvent's
+    // parseAnyUrl enrichment (kind matches → externalId used).
+    expect(ev.externalId).toBe("CabcDEF123");
+
+    // It appears in the user's feed.
+    const feed = await listFeedPage(u.id, {}, null);
+    expect(feed.rows.map((r) => r.id)).toContain(ev.id);
+  });
 });
 
 // Feed UX: discriminated 'show' axis URL contract. Backend FeedFilters

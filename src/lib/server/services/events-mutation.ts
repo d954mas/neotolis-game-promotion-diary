@@ -521,6 +521,30 @@ export async function enrichFromUrl(
       { kind: parsed.kind },
     );
   }
+
+  // Instagram — RECOGNITION ONLY (Phase 08). There is no single-post
+  // metadata/stats API today (no `/p/<code>` provider call), so we do NOT
+  // dispatch to an adapter preview hook (it would throw
+  // kind_not_yet_functional). Instead we return the URL-parsed kind +
+  // shortcode + canonical permalink with an EMPTY title — exactly the
+  // graceful-fallback shape YouTube uses when oEmbed is unreachable. The
+  // Add Event form then locks kind=Instagram + fills the link, and the user
+  // types the Title manually (the title field carries the required asterisk,
+  // so an empty save is impossible). NO network call happens here.
+  if (parsed.kind === "instagram_post") {
+    return {
+      kind: "instagram_post",
+      externalId: parsed.externalId,
+      title: "",
+      occurredAt: null,
+      thumbnailUrl: null,
+      authorName: null,
+      authorUrl: null,
+      canonicalUrl: parsed.canonicalUrl,
+      sourceMatch: null,
+    };
+  }
+
   if (parsed.kind !== "youtube_video") {
     // Exhaustive guard — every ParsedUrl variant handled above.
     const _exhaustive: never = parsed;

@@ -22,11 +22,13 @@
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import { gameColor } from "$lib/util/game-color.js";
+  import { MANUAL_EVENT_KINDS } from "$lib/sources/kind-display.js";
   import type { GameDto } from "$lib/server/dto.js";
 
   type EventKind =
     | "youtube_video"
     | "reddit_post"
+    | "instagram_post"
     | "twitter_post"
     | "telegram_post"
     | "discord_drop"
@@ -116,23 +118,21 @@
   let urlError = $state<string | null>(null);
   let errorText = $state<string | null>(null);
 
-  // Kind picker — kinds that have either an adapter (YouTube / Reddit)
-  // OR a manual-paste flow (press / post / talk / conference / other).
-  // Twitter / Telegram / Discord are declared in the DB enum (forward-
-  // compat) but have no adapter or manual entry today — PROJECT.md flags
-  // them as out-of-scope for v1, and the /feed KIND axis filters them
-  // out for the same reason. Keeping the AddEvent picker aligned with
-  // the filter axis avoids the awkward state where a user can create
-  // events that don't show up in their own filter list.
-  const KIND_FLOW: EventKind[] = [
-    "youtube_video",
-    "reddit_post",
-    "press",
-    "post",
-    "conference",
-    "talk",
-    "other",
-  ];
+  // Kind picker — DERIVED from the central kind-display config
+  // (MANUAL_EVENT_KINDS), no longer a hardcoded list. A kind appears here
+  // iff its EVENT_KIND_DISPLAY entry sets `manualCreatable: true`, and the
+  // `satisfies Record<EventKind, …>` on that config makes a NEW kind a
+  // COMPILE ERROR until it declares the flag — so a future kind can't be
+  // silently omitted from this picker (the exact gap this replaces).
+  //
+  // The set today: the paste-flow kinds (youtube_video / reddit_post /
+  // instagram_post) + the free-form kinds (press / post / conference /
+  // talk / other). Twitter / Telegram / Discord are declared in the DB
+  // enum (forward-compat) but have no adapter or manual entry, are filtered
+  // out of the /feed KIND axis, and so carry manualCreatable:false — keeping
+  // the picker aligned with the filter axis avoids the awkward state where a
+  // user can create events that don't show up in their own filter list.
+  const KIND_FLOW: readonly EventKind[] = MANUAL_EVENT_KINDS;
 
   function kindShort(k: EventKind): string {
     switch (k) {
@@ -140,6 +140,8 @@
         return "YouTube";
       case "reddit_post":
         return "Reddit";
+      case "instagram_post":
+        return "Instagram";
       case "twitter_post":
         return "Twitter";
       case "telegram_post":
@@ -165,6 +167,8 @@
         return m.event_kind_label_youtube_video();
       case "reddit_post":
         return m.event_kind_label_reddit_post();
+      case "instagram_post":
+        return m.event_kind_label_instagram_post();
       case "post":
         return m.event_kind_label_post();
       case "conference":
@@ -230,6 +234,11 @@
           host === "new.reddit.com"
         );
       }
+      if (k === "instagram_post") {
+        return (
+          host === "instagram.com" || host === "www.instagram.com" || host === "m.instagram.com"
+        );
+      }
       return true;
     } catch {
       return false;
@@ -280,6 +289,7 @@
       const allowed: EventKind[] = [
         "youtube_video",
         "reddit_post",
+        "instagram_post",
         "twitter_post",
         "telegram_post",
         "discord_drop",
@@ -408,6 +418,8 @@
         return "var(--k-youtube)";
       case "reddit_post":
         return "var(--k-reddit)";
+      case "instagram_post":
+        return "var(--k-instagram)";
       case "twitter_post":
         return "var(--k-twitter)";
       case "telegram_post":
