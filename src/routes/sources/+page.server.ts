@@ -29,11 +29,19 @@ type AddSourceUiKind =
   | "discord_server"
   | "instagram_account";
 
+// disabledReason distinguishes "adapter built, operator env unset" (Reddit
+// / Instagram unconfigured → "not-configured") from "not built yet" (Twitter
+// / Telegram / Discord → "not-built") so the disabled-chip tooltip is
+// accurate (issue #64). null for enabled chips. MUST stay in sync with the
+// /sources/new loader's kindMatrix — both feed the same AddSource UI.
+type DisabledReason = "not-configured" | "not-built";
+
 export type KindMatrixEntry = {
   value: AddSourceUiKind;
   labelKey: KindLabelKey;
   statusKey: KindStatusKey | null;
   disabled: boolean;
+  disabledReason: DisabledReason | null;
 };
 
 export interface SourcesPageLoadData extends SourcesPageData {
@@ -77,36 +85,42 @@ export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPage
       labelKey: "source_kind_label_youtube_channel",
       statusKey: null,
       disabled: false,
+      disabledReason: null,
     },
     {
       value: "reddit",
       labelKey: "common_kind_reddit",
       statusKey: redditOperatorConfigured ? null : "source_kind_status_reddit_account",
       disabled: !redditOperatorConfigured,
+      disabledReason: redditOperatorConfigured ? null : "not-configured",
     },
     {
       value: "instagram_account",
       labelKey: "source_kind_label_instagram_account",
       statusKey: instagramConfigured ? null : "source_kind_status_instagram_account",
       disabled: !instagramConfigured,
+      disabledReason: instagramConfigured ? null : "not-configured",
     },
     {
       value: "twitter_account",
       labelKey: "source_kind_label_twitter_account",
       statusKey: "source_kind_status_twitter_account",
       disabled: true,
+      disabledReason: "not-built",
     },
     {
       value: "telegram_channel",
       labelKey: "source_kind_label_telegram_channel",
       statusKey: "source_kind_status_telegram_channel",
       disabled: true,
+      disabledReason: "not-built",
     },
     {
       value: "discord_server",
       labelKey: "source_kind_label_discord_server",
       statusKey: "source_kind_status_discord_server",
       disabled: true,
+      disabledReason: "not-built",
     },
   ];
 

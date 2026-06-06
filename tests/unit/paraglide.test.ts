@@ -679,6 +679,7 @@ describe("paraglide i18n", () => {
       "sources_error_video_not_found",
       "sources_error_youtube_unreachable",
       "sources_kind_disabled_tooltip",
+      "sources_kind_disabled_tooltip_not_configured",
       "sources_new_instagram_disabled_hint",
       "sources_new_reddit_disabled",
       "sources_new_reddit_input_hint",

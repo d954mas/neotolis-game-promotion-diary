@@ -55,11 +55,18 @@
     | "source_kind_status_discord_server"
     | "source_kind_status_instagram_account";
 
+  // disabledReason distinguishes "adapter built, operator env unset"
+  // (Reddit / Instagram unconfigured) from "not built yet" (Twitter /
+  // Telegram / Discord) so the tooltip is accurate (issue #64). null when
+  // the chip is enabled. Sourced from the /sources loader's kindMatrix.
+  type DisabledReason = "not-configured" | "not-built";
+
   type KindEntry = {
     value: SourceKind;
     labelKey: KindLabelKey;
     statusKey: KindStatusKey | null;
     disabled: boolean;
+    disabledReason: DisabledReason | null;
   };
 
   let {
@@ -166,6 +173,12 @@
 
   function disabledTooltip(entry: KindEntry): string {
     const kindLabel = labelFor(entry.labelKey);
+    // not-configured: adapter IS built, operator hasn't set the env. The
+    // generic "schema ready, adapter isn't" tail would mislead a self-host
+    // operator (issue #64) — use the configuration-focused copy instead.
+    if (entry.disabledReason === "not-configured") {
+      return m.sources_kind_disabled_tooltip_not_configured({ kind: kindLabel });
+    }
     const status = statusFor(entry.statusKey) ?? "";
     return m.sources_kind_disabled_tooltip({ kind: kindLabel, status });
   }
