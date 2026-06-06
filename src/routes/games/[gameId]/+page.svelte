@@ -80,6 +80,7 @@
     | "twitter_post"
     | "telegram_post"
     | "discord_drop"
+    | "instagram_post"
     | "press"
     | "other"
     | "post";
