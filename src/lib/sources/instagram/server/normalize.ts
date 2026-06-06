@@ -15,7 +15,11 @@
 // or a photo with no play_count parses cleanly and maps to null.
 
 import { z } from "zod";
-import type { NormalizedPost, ProviderPage } from "$lib/sources/social-provider.js";
+import type {
+  NormalizedPost,
+  NormalizedSinglePost,
+  ProviderPage,
+} from "$lib/sources/social-provider.js";
 
 // ---- LIVE-CONFIRMED media_type integers (08-SPIKE.md) ----
 // 1 = image, 2 = video/short, 8 = carousel. The integer alone CANNOT tell a
@@ -179,4 +183,129 @@ export function normalizeReelsResponse(json: unknown): ProviderPage {
     endOfFeed: parsed.paging_info?.more_available === false,
     creditsUsed: 1,
   };
+}
+
+// ---- SINGLE-POST endpoint response (/v1/instagram/post?url=) ----
+//
+// LIVE-CONFIRMED shape (08-issue-65, 2026-06-06). The single-post GraphQL
+// surface DIFFERS from the feed-item shape used above:
+//   - content form is `__typename` (XDTGraphImage | XDTGraphVideo |
+//     XDTGraphSidecar), NOT the integer media_type the feed endpoints use, and
+//     there is NO product_type — so short-vs-video is decided by the URL shape
+//     (a `/reel/` permalink → "short") in mapSinglePostToNormalized, NOT here.
+//   - caption is nested under edge_media_to_caption.edges[0].node.text.
+//   - counts are nested edge `.count`s (likes/comments) + top-level
+//     video_play_count / video_view_count (videos only).
+//   - taken_at_timestamp is unix SECONDS; thumbnail_src is the poster frame.
+const XDT_SHORTCODE_MEDIA = z.object({
+  __typename: z.string().nullable().optional(),
+  id: z.string(),
+  shortcode: z.string().nullable().optional(),
+  is_video: z.boolean().nullable().optional(),
+  taken_at_timestamp: z.number(),
+  thumbnail_src: z.string().nullable().optional(),
+  video_play_count: z.number().nullable().optional(),
+  video_view_count: z.number().nullable().optional(),
+  edge_media_preview_like: z
+    .object({ count: z.number().nullable().optional() })
+    .nullable()
+    .optional(),
+  edge_media_to_parent_comment: z
+    .object({ count: z.number().nullable().optional() })
+    .nullable()
+    .optional(),
+  edge_media_to_caption: z
+    .object({
+      edges: z
+        .array(z.object({ node: z.object({ text: z.string().nullable().optional() }) }))
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
+  owner: z
+    .object({
+      id: z.string().nullable().optional(),
+      username: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+const SINGLE_POST_RESPONSE = z.object({
+  data: z
+    .object({
+      xdt_shortcode_media: XDT_SHORTCODE_MEDIA.nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+type XdtMedia = z.infer<typeof XDT_SHORTCODE_MEDIA>;
+
+/** Resolve the cross-platform content form from the single-post `__typename`
+ *  combined with the permalink. The single-post API has no product_type, so a
+ *  `/reel/` permalink is the ONLY short-vs-video discriminator (08-issue-65):
+ *  a `/reel/` URL → "short"; an `/p/` XDTGraphVideo → "video"; XDTGraphImage →
+ *  "image"; XDTGraphSidecar → "carousel". */
+function typenameToKind(
+  typename: string | null | undefined,
+  isReelUrl: boolean,
+): NormalizedSinglePost["kind"] {
+  switch (typename) {
+    case "XDTGraphImage":
+      return "image";
+    case "XDTGraphSidecar":
+      return "carousel";
+    case "XDTGraphVideo":
+      return isReelUrl ? "short" : "video";
+    default:
+      // Unknown future typename — fall back on the URL shape, else "image".
+      return isReelUrl ? "short" : "image";
+  }
+}
+
+/**
+ * Map one `data.xdt_shortcode_media` object → NormalizedSinglePost. Exported
+ * pure so the unit test asserts the mapping (and the reel-vs-`/p/`
+ * media_type rule) directly without spinning up the provider.
+ *
+ * `isReelUrl` is derived by the caller from the pasted permalink (a `/reel/`
+ * path). Metrics-by-presence (D-05): a photo/carousel has no play/view count →
+ * views null; likes/comments fall back to null when the edge count is absent.
+ */
+export function mapSinglePostToNormalized(
+  media: XdtMedia,
+  isReelUrl: boolean,
+): NormalizedSinglePost {
+  const caption = media.edge_media_to_caption?.edges?.[0]?.node?.text ?? null;
+  return {
+    id: media.id,
+    shortcode: media.shortcode ?? null,
+    kind: typenameToKind(media.__typename, isReelUrl),
+    publishedAt: new Date(media.taken_at_timestamp * 1000), // unix SECONDS
+    metrics: {
+      views: media.video_play_count ?? media.video_view_count ?? null,
+      likes: media.edge_media_preview_like?.count ?? null,
+      comments: media.edge_media_to_parent_comment?.count ?? null,
+    },
+    caption,
+    thumbnailUrl: media.thumbnail_src ?? null,
+    ownerId: media.owner?.id ?? null,
+    ownerUsername: media.owner?.username ?? null,
+  };
+}
+
+/** Validate + map a single-post response → NormalizedSinglePost, or `null`
+ *  when the body carries no media object (deleted/private post returns the
+ *  envelope with a null `xdt_shortcode_media`; HTTP errors surface upstream as
+ *  AdapterError from the HTTP seam, never here). */
+export function normalizeSinglePostResponse(
+  json: unknown,
+  isReelUrl: boolean,
+): NormalizedSinglePost | null {
+  const parsed = SINGLE_POST_RESPONSE.parse(json);
+  const media = parsed.data?.xdt_shortcode_media ?? null;
+  if (media === null) return null;
+  return mapSinglePostToNormalized(media, isReelUrl);
 }

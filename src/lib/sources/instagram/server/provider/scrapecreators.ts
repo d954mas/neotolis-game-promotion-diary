@@ -17,8 +17,13 @@
 
 import { env } from "$lib/server/config/env.js";
 import { instagramFetch } from "../http.js";
-import { normalizePostsResponse, normalizeReelsResponse } from "../normalize.js";
+import {
+  normalizePostsResponse,
+  normalizeReelsResponse,
+  normalizeSinglePostResponse,
+} from "../normalize.js";
 import type {
+  NormalizedSinglePost,
   ProviderOrigin,
   ProviderPage,
   SocialPlatform,
@@ -29,11 +34,18 @@ import type {
 //   posts: /v2/instagram/user/posts?handle=&next_max_id=  (cursor top-level)
 //   reels: /v1/instagram/user/reels?handle=&max_id=        (cursor nested)
 //   profile: /v1/instagram/profile?handle=                 (resolveAccount)
+//   post:   /v1/instagram/post?url=<permalink>             (single-post preview)
 //   balance: /v1/account/credit-balance                    (D-23 additive)
 const POSTS_PATH = "/v2/instagram/user/posts";
 const REELS_PATH = "/v1/instagram/user/reels";
 const PROFILE_PATH = "/v1/instagram/profile";
+const POST_PATH = "/v1/instagram/post";
 const CREDIT_BALANCE_PATH = "/v1/account/credit-balance";
+
+// A `/reel/` permalink is the ONLY short-vs-video discriminator on the
+// single-post API (it exposes no product_type — 08-issue-65). Detected on the
+// raw pasted URL so the normalizer can map XDTGraphVideo → "short" vs "video".
+const REEL_PERMALINK_RE = /\/reels?\//i;
 
 // resolveAccount profile response — kept narrow + tolerant; only the user-id +
 // display-name fields are load-bearing. LIVE-CONFIRMED shape (real key, `nasa`,
@@ -87,6 +99,26 @@ export const scrapeCreatorsProvider: SocialProvider = {
     });
     const json: unknown = await resp.json();
     return wantReels ? normalizeReelsResponse(json) : normalizePostsResponse(json);
+  },
+
+  async fetchPostByUrl(
+    platform: SocialPlatform,
+    url: string,
+    opts: { origin?: ProviderOrigin },
+  ): Promise<NormalizedSinglePost | null> {
+    const reqUrl = new URL(`${env.SCRAPECREATORS_BASE_URL}${POST_PATH}`);
+    reqUrl.searchParams.set("url", url);
+
+    const resp = await instagramFetch(reqUrl, {
+      platform,
+      provider: this.name,
+      logTag: "ig.post",
+      // Reserve one prepaid credit BEFORE the request (BUDGET-02). The
+      // paste-preview is user-initiated → the "user" pool.
+      origin: opts.origin,
+    });
+    const json: unknown = await resp.json();
+    return normalizeSinglePostResponse(json, REEL_PERMALINK_RE.test(url));
   },
 
   async resolveAccount(

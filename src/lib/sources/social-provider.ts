@@ -62,6 +62,37 @@ export interface ProviderPage {
  *  seam so EVERY page counts against the operator budget. */
 export type ProviderOrigin = "cron" | "user";
 
+/**
+ * Single-post lookup result (paste-preview path). The provider issues ONE
+ * by-URL request (1 credit) and maps the vendor's single-media shape into this
+ * cross-platform type — nothing above the provider seam sees a ScrapeCreators
+ * field name (SOC-04). Optional-by-presence metrics are `null` when the source
+ * field is absent on this content type (mirrors NormalizedPost.metrics), never
+ * `0`.
+ */
+export interface NormalizedSinglePost {
+  /** Platform-native post/reel id → events.external_id. */
+  id: string;
+  /** URL-intrinsic shortcode (the `/p/<code>` | `/reel/<code>` slug). */
+  shortcode: string | null;
+  /** Same cross-platform content-form vocabulary as NormalizedPost.kind. */
+  kind: "video" | "short" | "image" | "carousel" | "text";
+  publishedAt: Date;
+  metrics: {
+    views: number | null;
+    likes: number | null;
+    comments: number | null;
+  };
+  /** `null` when the post is caption-less. */
+  caption: string | null;
+  /** `null` when no thumbnail is exposed. The CDN URL expires (D-08). */
+  thumbnailUrl: string | null;
+  /** Stable platform-native owner/account id (the channel key). */
+  ownerId: string | null;
+  /** Owner handle/username — display value, read from source-of-truth, not cached. */
+  ownerUsername: string | null;
+}
+
 export interface SocialProvider {
   /** "scrapecreators" — the `provider` OBS label. */
   readonly name: string;
@@ -75,6 +106,20 @@ export interface SocialProvider {
     platform: SocialPlatform,
     handle: string,
   ): Promise<{ accountId: string; displayName: string | null } | null>;
+  /**
+   * Fetch ONE post/reel by its public permalink (paste-preview path). The
+   * `mediaType` is resolved from the response media kind combined with the URL
+   * shape (a `/reel/` permalink → "short"; the single-post API exposes no
+   * product_type, so the permalink IS the short-vs-video discriminator). 1
+   * credit per call — the HTTP seam meters it via the threaded `origin` pool.
+   * The provider returns `null` only when the response body carries no media
+   * object (HTTP errors surface as AdapterError from the HTTP seam).
+   */
+  fetchPostByUrl(
+    platform: SocialPlatform,
+    url: string,
+    opts: { origin?: ProviderOrigin },
+  ): Promise<NormalizedSinglePost | null>;
   /** D-23 additive-only; NEVER depended on. */
   getCreditBalance?(): Promise<number | null>;
 }

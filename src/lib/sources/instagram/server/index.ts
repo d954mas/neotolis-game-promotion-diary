@@ -24,6 +24,7 @@ import type {
   CanonicalizeResult,
   CreateContext,
   EventKind,
+  EventPreviewMetadata,
   MinimalBoss,
   PollableSource,
   SourceAdapter,
@@ -37,11 +38,15 @@ import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { getChannelState } from "$lib/server/services/channel-state.js";
 import { getUserQuotaUsedToday, nextPacificMidnight } from "$lib/server/services/quota.js";
 import { AppError } from "$lib/server/services/errors.js";
+import { AdapterError } from "$lib/sources/errors.js";
+import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import { instagramAccountAdapterCore } from "./adapter.js";
-import { instagramParseSourceUrl } from "./url.js";
+import { instagramParseUrl, instagramParseSourceUrl } from "./url.js";
 import { resetInstagramBackfillState } from "./backfill-state.js";
 import { getSocialThrottleState } from "./quota.js";
+import { getSocialProvider } from "./provider/registry.js";
+import { writeSnapshot } from "./snapshots.js";
 import { handleBackfillAccount } from "./handlers/backfill-account.js";
 import { handleInstagramPollCron } from "./handlers/poll-cron.js";
 import { handleInstagramQuotaReset } from "./handlers/quota-reset.js";
@@ -352,12 +357,151 @@ async function enqueueRefreshNow(input: {
   return { queue: QUEUES.INSTAGRAM_BACKFILL_ACCOUNT, jobId };
 }
 
+/**
+ * fetchEventPreviewMetadata — adapter wrapper for the Add Event "Fetch" button
+ * (POST /api/events/preview-url). Mirrors Reddit's synchronous single-post
+ * preview (sources/reddit/server/index.ts): ONE by-URL provider request (1
+ * credit), cap-gated against the per-user 50/day social cap, then UPSERTs the
+ * instagram_posts cache + a snapshot row so the saved event renders fully in
+ * /feed (thumbnail + stats + media-type pill) without a second fetch.
+ *
+ * Why synchronous (NOT a queue): a one-off manual paste is rare; queues are for
+ * bulk backfill/polling. 1 credit per preview gated by the daily cap is fine
+ * (matches the architecture decision in issue #65).
+ *
+ * Cap + budget order (mirrors the refresh path):
+ *   1. enforceAdapterUserQuota — the per-user 50/day social cap (counter is the
+ *      audit_log SUM of event.poll_refreshed/stats_refresh rows; the row is
+ *      written below AFTER a successful fetch so the count reflects real spend).
+ *   2. reserveSocialCredits (origin="user") runs INSIDE instagramFetch when the
+ *      "user" origin is threaded through — the operator prepaid budget gate.
+ * On cap exhaustion the AppError 429 propagates so the caller (enrichFromUrl)
+ * decides whether to surface it or soft-degrade to recognition-only. On budget
+ * exhaustion the provider's instagramFetch throws AdapterError(operator-issue /
+ * rate-limited), mapped below to the "unreachable" discriminator so the form
+ * degrades to a manual title rather than hard-crashing.
+ *
+ * Provider not configured (SOC-05) → unreachable, mirroring Reddit's
+ * empty-REDDIT_USER_AGENT preview behavior.
+ */
+async function fetchEventPreviewMetadata(
+  canonicalUrl: string,
+  ctx: { userId: string; ipAddress: string },
+): Promise<EventPreviewMetadata> {
+  const provider = getSocialProvider("instagram");
+  if (provider === null) {
+    return { kind: "unreachable", cause: "instagram_not_configured" };
+  }
+  const parsed = instagramParseUrl(canonicalUrl);
+  if (parsed === null) {
+    return { kind: "unreachable", cause: "url_not_instagram_post" };
+  }
+
+  // Per-user fair-share cap (50/day) — runs BEFORE the fetch so a cap-exhausted
+  // user never burns a credit they aren't allowed to consume. Throws AppError
+  // 429 (requests_quota_exhausted) which enrichFromUrl soft-handles.
+  const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
+  await enforceAdapterUserQuota(db, instagramAdapter, ctx.userId, ctx.ipAddress, "post-refresh", {
+    platform: "instagram_account",
+  });
+
+  let post;
+  try {
+    // origin="user" → reserveSocialCredits charges the user pool inside the HTTP
+    // seam. A null permit → AdapterError(operator-issue / rate-limited).
+    // canonicalUrl is the `/p/` | `/reel/` permalink parseIngestUrl already
+    // canonicalized — feed it to the provider (the reel-vs-`/p/` shape is the
+    // single-post media_type discriminator).
+    post = await provider.fetchPostByUrl("instagram", canonicalUrl, { origin: "user" });
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    if (err instanceof AdapterError) {
+      if (err.category === "not-found") return { kind: "unavailable" };
+      if (err.category === "rate-limited") return { kind: "unreachable", cause: "rate_limited" };
+      if (err.category === "operator-issue") {
+        return { kind: "unreachable", cause: "instagram_not_configured" };
+      }
+      return { kind: "unreachable", cause: err.message };
+    }
+    return { kind: "unreachable", cause: String((err as Error)?.message ?? err) };
+  }
+
+  // A null body (deleted/private post — the envelope had no media object).
+  if (post === null) {
+    return { kind: "unavailable" };
+  }
+
+  // UPSERT the public-data cache + snapshot so the saved event renders fully in
+  // /feed (thumbnail + stats + media-type pill) — exactly like the walker does
+  // per post. Failure here is fatal to the preview (the caller catches the
+  // throw and degrades), but a successful fetch should not be silently dropped.
+  await writeSnapshot({
+    postId: post.id,
+    accountId: post.ownerId,
+    mediaType: post.kind,
+    caption: post.caption,
+    permalink: canonicalUrl,
+    thumbnailUrl: post.thumbnailUrl,
+    publishedAt: post.publishedAt,
+    metrics: {
+      views: post.metrics.views,
+      likes: post.metrics.likes,
+      comments: post.metrics.comments,
+    },
+    status: "ok",
+  });
+
+  // Cap-counter audit row (mirrors Reddit's syncStats.fetch / YouTube's
+  // stats_refresh). This is what getUserQuotaUsedToday(userId,
+  // "instagram_account") SUMs — without it the per-user cap reads 0 forever and
+  // the enforceAdapterUserQuota gate above never fires on the SECOND paste.
+  await writeAudit({
+    userId: ctx.userId,
+    action: "event.poll_refreshed",
+    ipAddress: ctx.ipAddress,
+    metadata: {
+      external_id: post.id,
+      kind: "instagram_post",
+      platform: "instagram_account",
+      flow: "stats_refresh",
+      requests_used: 1,
+      events_inserted: 0,
+    },
+  });
+
+  const ownerUrl =
+    post.ownerUsername !== null ? `https://www.instagram.com/${post.ownerUsername}/` : "";
+
+  return {
+    kind: "ok",
+    title: buildPreviewTitle(post.caption, post.kind, post.publishedAt),
+    authorName: post.ownerUsername ?? "",
+    authorUrl: ownerUrl,
+    occurredAt: post.publishedAt,
+    thumbnailUrl: post.thumbnailUrl ?? undefined,
+  };
+}
+
+/** Title = caption's FIRST line (D-09), falling back to the
+ *  "Instagram <mediaType> · <date>" shape the walker's buildTitle uses so a
+ *  caption-less paste still produces a meaningful, non-empty title (which the
+ *  Add Event form requires). */
+function buildPreviewTitle(caption: string | null, mediaType: string, publishedAt: Date): string {
+  const trimmed = caption?.trim();
+  if (trimmed !== undefined && trimmed !== "") {
+    const firstLine = trimmed.split("\n", 1)[0]!.trim();
+    if (firstLine !== "") return firstLine;
+  }
+  return `Instagram ${mediaType} · ${publishedAt.toISOString().slice(0, 10)}`;
+}
+
 // instagramAdapter — composes the polling core (./adapter.ts) with the
 // infrastructure-touching methods (registerQueues / scheduleCronTicks /
 // backfillSource) and the create-time hooks (canonicalizeOnCreate /
-// onSourceCreated / resetWalkerStateOnWidening / refreshQueue). The
-// `SourceAdapter & typeof core` annotation fails the build if any required
-// contract method is missing from the spread — completeness check by construction.
+// onSourceCreated / resetWalkerStateOnWidening / refreshQueue /
+// fetchEventPreviewMetadata). The `SourceAdapter & typeof core` annotation
+// fails the build if any required contract method is missing from the spread —
+// completeness check by construction.
 export const instagramAdapter: SourceAdapter & typeof instagramAccountAdapterCore = {
   ...instagramAccountAdapterCore,
   registerQueues,
@@ -366,6 +510,7 @@ export const instagramAdapter: SourceAdapter & typeof instagramAccountAdapterCor
   canonicalizeOnCreate,
   onSourceCreated,
   resetWalkerStateOnWidening,
+  fetchEventPreviewMetadata,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "instagram_post",
     canRun: async () => {

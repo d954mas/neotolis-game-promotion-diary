@@ -11,8 +11,10 @@
 import { describe, it, expect } from "vitest";
 import {
   mapItemToNormalizedPost,
+  mapSinglePostToNormalized,
   normalizePostsResponse,
   normalizeReelsResponse,
+  normalizeSinglePostResponse,
 } from "$lib/sources/instagram/server/normalize.js";
 
 // A media_type=2 + product_type "clips" item — a REEL (the spike-confirmed
@@ -186,5 +188,105 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
     });
     expect(page.endOfFeed).toBe(true);
     expect(page.nextCursor).toBeNull();
+  });
+});
+
+// ---- Single-post (/v1/instagram/post?url=) shape (issue #65) ----
+// The single-post GraphQL surface uses __typename (NOT integer media_type) and
+// has NO product_type, so a `/reel/` permalink is the ONLY short-vs-video
+// discriminator. LIVE-CONFIRMED fields: edge_media_to_caption.edges[0].node.text,
+// edge_media_preview_like.count, edge_media_to_parent_comment.count,
+// video_play_count, thumbnail_src, taken_at_timestamp (unix seconds), owner.
+const XDT_IMAGE = {
+  __typename: "XDTGraphImage",
+  id: "111_222",
+  shortcode: "DPhotoCode",
+  is_video: false,
+  taken_at_timestamp: 1780300000,
+  thumbnail_src: "https://cdn.example/single-photo.jpg",
+  edge_media_preview_like: { count: 4200 },
+  edge_media_to_parent_comment: { count: 33 },
+  edge_media_to_caption: {
+    edges: [{ node: { text: "First line of the caption\nSecond line dropped" } }],
+  },
+  owner: { id: "owner-1", username: "neonicle_dev" },
+};
+
+const XDT_VIDEO = {
+  __typename: "XDTGraphVideo",
+  id: "333_444",
+  shortcode: "DVideoCode",
+  is_video: true,
+  taken_at_timestamp: 1780400000,
+  thumbnail_src: "https://cdn.example/single-video.jpg",
+  video_play_count: 99000,
+  video_view_count: 99000,
+  edge_media_preview_like: { count: 500 },
+  edge_media_to_parent_comment: { count: 12 },
+  edge_media_to_caption: { edges: [{ node: { text: "A video caption." } }] },
+  owner: { id: "owner-2", username: "video_owner" },
+};
+
+const XDT_SIDECAR = {
+  __typename: "XDTGraphSidecar",
+  id: "555_666",
+  shortcode: "DCarouselCode",
+  is_video: false,
+  taken_at_timestamp: 1780200000,
+  thumbnail_src: "https://cdn.example/single-carousel.jpg",
+  edge_media_preview_like: { count: 700 },
+  edge_media_to_parent_comment: { count: 5 },
+  edge_media_to_caption: { edges: [] }, // caption-less → null
+  owner: { id: "owner-3", username: "carousel_owner" },
+};
+
+describe("instagram single-post normalizer (xdt_shortcode_media -> NormalizedSinglePost)", () => {
+  it("XDTGraphImage maps to kind 'image' and reads the nested caption/like/comment counts", () => {
+    const post = mapSinglePostToNormalized(XDT_IMAGE, false);
+    expect(post.kind).toBe("image");
+    expect(post.id).toBe("111_222");
+    expect(post.shortcode).toBe("DPhotoCode");
+    // Caption is the FULL multi-line text (the first-line split happens at the
+    // title-build layer, NOT in the normalizer).
+    expect(post.caption).toBe("First line of the caption\nSecond line dropped");
+    expect(post.metrics.likes).toBe(4200);
+    expect(post.metrics.comments).toBe(33);
+    expect(post.metrics.views).toBeNull(); // photo → no play_count (D-05)
+    expect(post.thumbnailUrl).toBe("https://cdn.example/single-photo.jpg");
+    expect(post.ownerId).toBe("owner-1");
+    expect(post.ownerUsername).toBe("neonicle_dev");
+    // taken_at_timestamp is unix SECONDS.
+    expect(post.publishedAt.toISOString()).toBe(new Date(1780300000 * 1000).toISOString());
+  });
+
+  it("XDTGraphVideo on a /p/ URL (isReelUrl=false) maps to 'video' and reads video_play_count", () => {
+    const post = mapSinglePostToNormalized(XDT_VIDEO, false);
+    expect(post.kind).toBe("video");
+    expect(post.metrics.views).toBe(99000);
+  });
+
+  it("XDTGraphVideo on a /reel/ URL (isReelUrl=true) maps to 'short' (the URL is the discriminator)", () => {
+    const post = mapSinglePostToNormalized(XDT_VIDEO, true);
+    expect(post.kind).toBe("short");
+  });
+
+  it("XDTGraphSidecar maps to 'carousel'; an empty caption edges array → null caption", () => {
+    const post = mapSinglePostToNormalized(XDT_SIDECAR, false);
+    expect(post.kind).toBe("carousel");
+    expect(post.caption).toBeNull();
+  });
+
+  it("normalizeSinglePostResponse: parses data.xdt_shortcode_media + applies the reel-URL rule", () => {
+    const reel = normalizeSinglePostResponse({ data: { xdt_shortcode_media: XDT_VIDEO } }, true);
+    expect(reel?.kind).toBe("short");
+
+    const photo = normalizeSinglePostResponse({ data: { xdt_shortcode_media: XDT_IMAGE } }, false);
+    expect(photo?.kind).toBe("image");
+  });
+
+  it("normalizeSinglePostResponse: a null media object (deleted/private) returns null", () => {
+    expect(normalizeSinglePostResponse({ data: { xdt_shortcode_media: null } }, false)).toBeNull();
+    expect(normalizeSinglePostResponse({ data: {} }, false)).toBeNull();
+    expect(normalizeSinglePostResponse({}, false)).toBeNull();
   });
 });
