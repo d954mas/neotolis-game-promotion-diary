@@ -182,7 +182,52 @@ async function canonicalizeOnCreate(
       { handle_url: input.handleUrl },
     );
   }
-  const resolved = await instagramAccountAdapterCore.resolveHandleToAccountId(parsed.handle);
+  // resolveHandleToAccountId issues a provider request that can throw
+  // AdapterError on 401/402/429/5xx (bad key, rate-limit, upstream outage). The
+  // route mapper (_shared.ts mapErr) only knows AppError / NotFoundError, so an
+  // unmapped AdapterError here becomes an opaque 500. Map it to a typed AppError
+  // by category (SOURCE-REFERENCE §4.5 taxonomy; same category→code shape as the
+  // refresh-content path + fetchEventPreviewMetadata). The unconfigured case is
+  // already gated earlier in createSource (kind_not_configured); don't regress it.
+  let resolved: { accountId: string; displayName: string | null } | null;
+  try {
+    resolved = await instagramAccountAdapterCore.resolveHandleToAccountId(parsed.handle);
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    if (err instanceof AdapterError) {
+      if (err.category === "not-found") {
+        // Treated identically to the null-resolve below — the handle is
+        // missing/private/misspelled (422, no phantom source).
+        resolved = null;
+      } else if (err.category === "rate-limited") {
+        throw new AppError(
+          "Instagram is rate-limited right now — try adding this account again shortly.",
+          "instagram_rate_limited",
+          429,
+          { handle: parsed.handle },
+        );
+      } else if (err.category === "operator-issue" || err.category === "permanent") {
+        // Provider misconfigured / disabled / ToS-blocked from the operator's
+        // side — the user can't fix it; surface a clean 503, not a 500.
+        throw new AppError(
+          "Instagram import is temporarily unavailable.",
+          "instagram_provider_unavailable",
+          503,
+          { handle: parsed.handle },
+        );
+      } else {
+        // transient — upstream 5xx / network blip. 502 so the UI offers a retry.
+        throw new AppError(
+          "Could not reach Instagram to resolve that handle — try again.",
+          "instagram_unreachable",
+          502,
+          { handle: parsed.handle },
+        );
+      }
+    } else {
+      throw err;
+    }
+  }
   if (resolved === null) {
     throw new AppError(
       "Could not resolve that Instagram handle — it may be private, misspelled, or the provider is not configured.",
