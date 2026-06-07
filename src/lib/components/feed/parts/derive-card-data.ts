@@ -215,7 +215,13 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     // media id (#69) — only when a thumbnail actually exists in the cache (the
     // enrichment URL is present) and we have the post id to key on.
     if (event.instagramEnrichment?.thumbnailUrl == null || !event.externalId) return null;
-    return `/api/instagram/thumbnail/${encodeURIComponent(event.externalId)}`;
+    const base = `/api/instagram/thumbnail/${encodeURIComponent(event.externalId)}`;
+    // Cache-buster: version the stable proxy URL by the latest poll timestamp.
+    // A re-poll (Refresh-Now or a scheduled tick) writes a new snapshot → new
+    // polledAt → new URL → the browser refetches the fresh cover; between polls
+    // it serves from the 1h cache. The proxy ignores the query param.
+    const polledAt = event.instagramEnrichment.stats?.polledAt;
+    return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
   }
   return null;
 }

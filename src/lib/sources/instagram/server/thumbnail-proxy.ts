@@ -78,14 +78,17 @@ instagramThumbnailRoutes.get("/instagram/thumbnail/:postId", async (c) => {
     return c.body(null, 502);
   }
 
-  // Re-served same-origin → IG's CORP no longer blocks it. Cache briefly: the
-  // proxy URL is stable per post, but the underlying CDN URL rotates on each
-  // poll, so keep the window short enough to pick up a refreshed thumbnail.
+  // Re-served same-origin → IG's CORP no longer blocks it. Cache 1h in the
+  // browser: the cover image is effectively immutable, so the upper bound can be
+  // long. Freshness does NOT rely on this expiring — the card versions the proxy
+  // URL by the last poll timestamp (?v=), so a re-poll (incl. Refresh-Now) yields
+  // a NEW URL that bypasses the cache immediately. `private` keeps it out of
+  // shared caches (the route is auth-gated).
   return new Response(upstream.body, {
     status: 200,
     headers: {
       "content-type": upstream.headers.get("content-type") ?? "image/jpeg",
-      "cache-control": "private, max-age=600",
+      "cache-control": "private, max-age=3600",
     },
   });
 });
