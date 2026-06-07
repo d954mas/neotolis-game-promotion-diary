@@ -278,6 +278,13 @@ const RawSchema = z.object({
   // there"). The quota_reset cron clears only the daily-cap counter, never
   // this balance. 0 default => degrade.
   SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS: z.coerce.number().int().nonnegative().default(0),
+
+  // Concurrency of the social-provider per-post Refresh lane (#69 follow-on).
+  // The single-post endpoint can't batch (1 request = 1 post), so the lane
+  // worker claims up to N rows per tick and fetches them CONCURRENTLY — this is
+  // the parallelism knob, NOT a batch-in-one-request size like YouTube's 50.
+  // Keep conservative to respect ScrapeCreators rate limits; raise per plan.
+  SOCIAL_REFRESH_LANE_CONCURRENCY: z.coerce.number().int().positive().default(10),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -402,6 +409,7 @@ export const env = {
   SOCIAL_BACKFILL_WINDOW_DAYS: raw.SOCIAL_BACKFILL_WINDOW_DAYS,
   SOCIAL_PROVIDER_DAILY_CAP_CREDITS: raw.SOCIAL_PROVIDER_DAILY_CAP_CREDITS,
   SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS: raw.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS,
+  SOCIAL_REFRESH_LANE_CONCURRENCY: raw.SOCIAL_REFRESH_LANE_CONCURRENCY,
 } as const;
 
 export type Env = typeof env;

@@ -42,7 +42,6 @@ import { getUserQuotaUsedToday, nextPacificMidnight } from "$lib/server/services
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
-import { logger } from "$lib/server/logger.js";
 import { instagramAccountAdapterCore } from "./adapter.js";
 import { instagramParseUrl, instagramParseSourceUrl } from "./url.js";
 import { resetInstagramBackfillState } from "./backfill-state.js";
@@ -50,9 +49,15 @@ import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import { writeSnapshot } from "./snapshots.js";
 import { instagramThumbnailRoutes } from "./thumbnail-proxy.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
+import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
 import { handleBackfillAccount } from "./handlers/backfill-account.js";
 import { handleInstagramPollCron } from "./handlers/poll-cron.js";
 import { handleInstagramQuotaReset } from "./handlers/quota-reset.js";
+import {
+  instagramRefreshQueueTick,
+  INSTAGRAM_REFRESH_SLOTS,
+} from "./handlers/refresh-queue-tick.js";
 
 const KIND = "instagram_account" as const;
 const EPOCH_ISO = "1970-01-01T00:00:00Z";
@@ -361,10 +366,17 @@ async function resetWalkerStateOnWidening(
 }
 
 /**
- * enqueueRefreshNow — the per-event Refresh-Now path. An IG post's fresh metrics
- * come from an account-level page-1 incremental walk (the walker re-polls every
- * post on the page via writeSnapshot). triggerUserId set → the user pays the
- * per-user cap.
+ * enqueueRefreshNow — the per-event Refresh-Now path. PER-POST (#69): inserts ONE
+ * row into the shared adapter_refresh_queue (queue_name "user_post"); the IG lane
+ * worker (handlers/refresh-queue-tick.ts) fetches exactly that post via the
+ * single-post endpoint + writeSnapshot. This replaces the old account-level walk
+ * (which re-snapshotted every page-1 neighbour and couldn't reach old posts).
+ *
+ * INSERT via the passed `tx` (requestRefreshPoll calls this inside its tx) — no
+ * boss.send outside the mutating transaction. No skip-if-pending dedup (D1): the
+ * 5-min cooldown in requestRefreshPoll is the dedup; a conscious Refresh always
+ * fetches fresh (mirrors Reddit's deliberate choice). The per-user cap is already
+ * enforced by requestRefreshPoll before this runs.
  */
 async function enqueueRefreshNow(input: {
   eventId: string;
@@ -373,38 +385,23 @@ async function enqueueRefreshNow(input: {
   eventKind: EventKind;
   tx?: DbOrTx;
 }): Promise<{ queue: string; jobId: string | null }> {
-  // Resolve the post's account_id from the public-data cache so the walk targets
-  // the right account. The post may not be cached yet (paste before first poll);
-  // in that case the refresh is a no-op (the next cron tick picks it up).
-  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
-  const { eq } = await import("drizzle-orm");
   const dbCtx = input.tx ?? db;
-  const [row] = await dbCtx
-    .select({ account: instagramPosts.accountId })
-    .from(instagramPosts)
-    .where(eq(instagramPosts.postId, input.externalId))
-    .limit(1);
-  const channelKey = row?.account ?? null;
-  if (channelKey === null) {
-    logger.info(
-      { eventId: input.eventId, externalId: input.externalId },
-      "instagram.enqueueRefreshNow: post not cached yet — refresh deferred to next cron tick",
-    );
-    return { queue: QUEUES.INSTAGRAM_BACKFILL_ACCOUNT, jobId: null };
-  }
-  const boss = await getBoss();
-  const jobId = await boss.send(
-    QUEUES.INSTAGRAM_BACKFILL_ACCOUNT,
-    {
-      kind: KIND,
-      channelKey,
-      triggerUserId: input.userId,
-      depthBoundIso: EPOCH_ISO,
-      flow: "incremental",
-    },
-    { singletonKey: `refresh-now-${channelKey}-${input.userId}`, priority: 1 },
-  );
-  return { queue: QUEUES.INSTAGRAM_BACKFILL_ACCOUNT, jobId };
+  const [inserted] = await dbCtx
+    .insert(adapterRefreshQueue)
+    .values({
+      adapterKind: KIND,
+      queueName: "user_post",
+      type: "post_stats",
+      payload: { event_id: input.eventId, post_id: input.externalId },
+      userId: input.userId,
+      priority: -10,
+      status: "pending",
+    })
+    .returning({ id: adapterRefreshQueue.id });
+  return {
+    queue: adapterRefreshQueueLabel(KIND, "user_post"),
+    jobId: inserted ? String(inserted.id) : null,
+  };
 }
 
 /**
@@ -597,5 +594,28 @@ export const instagramAdapter: SourceAdapter & typeof instagramAccountAdapterCor
         : { action: "run" };
     },
     enqueue: enqueueRefreshNow,
+  },
+  // Per-post Refresh lane (#69). The generic worker bootstrap auto-starts each
+  // declared scheduledWorker; isEnabled gates it off when the provider is
+  // unconfigured (self-host without IG) so the lane never ticks/throws.
+  workQueue: {
+    scheduledWorkers: [
+      {
+        name: "instagram.refresh",
+        intervalMs: 1000,
+        replicaPolicy: "parallel",
+        readyMessage: "instagram refresh queue worker ready",
+        disabledMessage: "instagram refresh queue worker disabled (provider unconfigured)",
+        laneQueue: {
+          strategy: "fixed-slot-round-robin",
+          adapterKind: KIND,
+          slots: INSTAGRAM_REFRESH_SLOTS,
+          fallthrough: INSTAGRAM_REFRESH_SLOTS,
+          batchScope: "global",
+        },
+        isEnabled: () => getSocialProvider("instagram") !== null,
+        tick: instagramRefreshQueueTick,
+      },
+    ],
   },
 };
