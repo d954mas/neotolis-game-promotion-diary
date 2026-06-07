@@ -150,6 +150,10 @@
         lastPolledAt: event.lastPolledAt ?? null,
         lastPollStatus: event.lastPollStatus ?? null,
         metadata: (event.metadata ?? null) as Record<string, unknown> | null,
+        // Explicit null (not undefined) so PollingBadge renders "Manual" — not a
+        // never-resolving "Pending" — for a pollable-kind event with no upstream
+        // id (e.g. an IG post pasted without the preview "Fetch", #69).
+        externalId: event.externalId ?? null,
       }}
     />
   {/if}

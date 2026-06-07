@@ -97,6 +97,13 @@
     lastPolledAt: Date | string | null;
     lastPollStatus: string | null;
     metadata: Record<string, unknown> | null;
+    // The upstream media id. An EXPLICIT null on a pollable kind means a manual
+    // entry with no id to poll (e.g. an Instagram post pasted without the
+    // preview "Fetch") → render the "Manual" variant, not "Pending" (#69 — a
+    // pending badge that would never resolve). Optional + strict `=== null`
+    // below: an UNSET externalId (older callers / fixtures not plumbing it)
+    // keeps the prior tier-driven behavior.
+    externalId?: string | null;
   };
 
   let { event }: { event: EventForBadge } = $props();
@@ -105,6 +112,12 @@
   // kind-display config (pollable: youtube_video / reddit_post / instagram_post).
   // event.kind is widened to `string` here; isPollable narrows via the Set.
   const isPollable = $derived(POLLABLE_EVENT_KINDS.has(event.kind as EventKind));
+
+  // A pollable-kind event whose externalId is EXPLICITLY null is a manual entry
+  // with no upstream id — nothing will ever poll it, so a NULL publishedAt here
+  // is "manual", NOT "pending" (#69). Strict `=== null` so callers that haven't
+  // plumbed externalId (undefined) keep the prior tier-driven behavior.
+  const isManualEntry = $derived(event.externalId === null);
 
   // Defensive Date coercion — props may arrive as ISO strings.
   const publishedAt = $derived(
@@ -179,6 +192,9 @@
   });
 
   const variant: Variant = $derived.by((): Variant => {
+    // Manual entry (no upstream id) outranks the pending tier: there is no
+    // backfill in flight, so "Pending · fetching…" would never resolve (#69).
+    if (isManualEntry) return "manual";
     if (tier === "pending") return "pending";
     if (refreshQueued) return "refreshing";
     // Operator-budget pause outranks tier/unavailable: the source isn't being
@@ -207,7 +223,7 @@
   // swallow), the user has an explicit refresh button to rescue.
   // 'pending' tier still hides refresh — backfill is in flight, manual
   // poll would race it. Refresh-poll service rejects 'pending' with 422.
-  const refreshVisible = $derived(isPollable && tier !== "pending");
+  const refreshVisible = $derived(isPollable && tier !== "pending" && !isManualEntry);
 
   // Copy resolution. The visible text uses "Updated X ago" relative time
   // (user-meaningful) rather than tier vocabulary ("Cold", "Frozen").
