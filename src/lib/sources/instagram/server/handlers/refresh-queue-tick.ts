@@ -149,21 +149,28 @@ async function processOne(row: AdapterLaneWorkerRow): Promise<void> {
       status: "ok",
     });
   } catch (err) {
-    if (err instanceof AdapterError) {
-      // Per-row failure → non-ok snapshot (stamps last_polled_at so the button
-      // stop-loop settles); the row is still marked done (no batch-wide retry).
-      await writeSnapshot({
-        postId,
-        permalink,
-        metrics: null,
-        status: categoryToSnapshotStatus(err.category),
-      });
-      return;
+    // Per-row failure → write a non-ok snapshot so last_polled_at is stamped (the
+    // button stop-loop settles) and the failure is VISIBLE — never a silent drop
+    // (P2-A). The row is still marked done (no batch-wide retry that would
+    // re-fetch the successes); recovery is a re-click after cooldown or the next
+    // scheduled source poll. An AdapterError maps to its category; an unexpected
+    // throw (e.g. a programmer bug) degrades to "auth_error" and is logged.
+    const status =
+      err instanceof AdapterError ? categoryToSnapshotStatus(err.category) : "auth_error";
+    if (!(err instanceof AdapterError)) {
+      logger.warn(
+        { eventId, postId, err: String((err as Error)?.message ?? err) },
+        "instagram refresh: unexpected error",
+      );
     }
-    logger.warn(
-      { eventId, postId, err: String((err as Error)?.message ?? err) },
-      "instagram refresh: unexpected error",
-    );
+    // Best-effort: if the original failure WAS the snapshot write (DB down), this
+    // re-write also fails — swallow so the row still completes, don't re-throw.
+    await writeSnapshot({ postId, permalink, metrics: null, status }).catch((e) => {
+      logger.warn(
+        { postId, err: String((e as Error)?.message ?? e) },
+        "instagram refresh: snapshot write failed",
+      );
+    });
   }
 }
 

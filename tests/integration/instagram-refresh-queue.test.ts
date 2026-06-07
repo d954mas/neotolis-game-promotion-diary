@@ -13,13 +13,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
+import { AdapterError } from "../../src/lib/sources/errors.js";
 import type { NormalizedSinglePost } from "../../src/lib/sources/social-provider.js";
 
 interface ScriptedSinglePost {
   next: NormalizedSinglePost | null;
+  throwErr: Error | null;
   calls: Array<{ url: string; origin?: string }>;
 }
-const single: ScriptedSinglePost = { next: null, calls: [] };
+const single: ScriptedSinglePost = { next: null, throwErr: null, calls: [] };
 let throttleState: "ok" | "eighty" | "ninetyfive" = "ok";
 
 vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (importOriginal) => {
@@ -37,6 +39,7 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
           opts: { origin?: string },
         ): Promise<NormalizedSinglePost | null> {
           single.calls.push({ url, origin: opts.origin });
+          if (single.throwErr) throw single.throwErr;
           return single.next;
         },
         async fetchPosts() {
@@ -56,7 +59,7 @@ vi.mock("../../src/lib/sources/instagram/server/quota.js", async (importOriginal
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
-const { events, instagramPosts, instagramPostSnapshots, adapterRefreshQueue } =
+const { instagramPosts, instagramPostSnapshots, adapterRefreshQueue } =
   await import("../../src/lib/server/db/schema/index.js");
 const { createEvent } = await import("../../src/lib/server/services/events-mutation.js");
 const { instagramAdapter } = await import("../../src/lib/sources/instagram/server/index.js");
@@ -128,6 +131,7 @@ async function enqueue(eventId: string, userId: string, postId: string): Promise
 
 beforeEach(() => {
   single.next = post();
+  single.throwErr = null;
   single.calls = [];
   throttleState = "ok";
   __resetInstagramRefreshQueueWorkerForTest();
@@ -240,5 +244,29 @@ describe("instagram per-post refresh lane (#69)", () => {
       .where(eq(instagramPosts.postId, tgt.postId))
       .limit(1);
     expect(postRow!.status).toBe("not_found");
+  });
+
+  it("provider error writes a VISIBLE non-ok snapshot (no silent drop), row done (P2-A)", async () => {
+    const u = await seedUserDirectly({ email: `igrq-err-${uniq()}@t.io` });
+    const tgt = await seedIgEvent(u.id, `3601_${uniq()}`);
+    await enqueue(tgt.eventId, u.id, tgt.postId);
+    single.throwErr = new AdapterError("rate limited", { category: "rate-limited" });
+
+    await instagramRefreshQueueTick();
+
+    expect(single.calls).toHaveLength(1);
+    expect(await snapshotCount(tgt.postId)).toBe(0); // non-ok → no metrics row…
+    const [postRow] = await db
+      .select({ status: instagramPosts.lastPollStatus })
+      .from(instagramPosts)
+      .where(eq(instagramPosts.postId, tgt.postId))
+      .limit(1);
+    expect(postRow!.status).toBe("rate_limited"); // …but the failure IS recorded (stamps last_polled_at)
+    const [row] = await db
+      .select({ status: adapterRefreshQueue.status })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id))
+      .limit(1);
+    expect(row!.status).toBe("done"); // per-row: marked done, not a batch-wide retry
   });
 });
