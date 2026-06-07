@@ -427,6 +427,10 @@ eventsRoutes.post(
         authorUrl: enriched.authorUrl,
         // ISO string when set; null when oEmbed has no published_at.
         occurredAt: enriched.occurredAt ? enriched.occurredAt.toISOString() : null,
+        // The adapter's canonical permalink (IG: query stripped; YouTube: keeps
+        // ?v, drops ?t). The form swaps the pasted URL for this on a successful
+        // Fetch so the saved event stores a clean link, not a tracking-tailed one.
+        canonicalUrl: enriched.canonicalUrl,
       });
     } catch (err) {
       return mapErr(c, err, "POST /api/events/preview-url");

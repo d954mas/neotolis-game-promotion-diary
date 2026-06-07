@@ -43,4 +43,18 @@ describe("Add-Event externalId wiring (issue #69)", () => {
       );
     }
   });
+
+  it("the preview-url route returns the adapter canonicalUrl, and the form adopts it", () => {
+    // Canonicalize the saved link on Fetch: the route surfaces the adapter's
+    // canonical permalink and the form swaps it into the url field (IG: query
+    // stripped; YouTube: keeps ?v, drops ?t).
+    const route = read("src/lib/server/http/routes/events.ts");
+    expect(route, "preview-url response includes canonicalUrl").toMatch(
+      /canonicalUrl:\s*enriched\.canonicalUrl/,
+    );
+    const form = read("src/lib/components/add-event/AddEventForm.svelte");
+    expect(form, "form adopts the preview canonicalUrl into the url field").toMatch(
+      /url\s*=\s*data\.canonicalUrl/,
+    );
+  });
 });

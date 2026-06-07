@@ -291,11 +291,20 @@
         authorName?: string | null;
         authorUrl?: string | null;
         externalId?: string | null;
+        canonicalUrl?: string | null;
       };
       // The resolved media id — forwarded on save so the event keys on the
       // snapshot/enrichment cache id (issue #69). Null for kinds/URLs the
       // adapter couldn't resolve a stable id for.
       fetchedExternalId = data.externalId ?? null;
+      // Adopt the adapter's canonical permalink (IG: query/tracking stripped;
+      // YouTube: keeps ?v, drops ?t) so the saved link is clean + identical for
+      // the same post. The URL field locks on `fetched` below, so the user sees
+      // and saves this value. A programmatic assignment does NOT fire the input's
+      // oninput handler (which would clear the just-set fetch state).
+      if (data.canonicalUrl) {
+        url = data.canonicalUrl;
+      }
       if (data.title && title.trim().length === 0) {
         title = data.title;
       }
