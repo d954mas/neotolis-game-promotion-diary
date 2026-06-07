@@ -22,7 +22,8 @@ interface ScriptedSinglePost {
   calls: Array<{ url: string; origin?: string }>;
 }
 const single: ScriptedSinglePost = { next: null, throwErr: null, calls: [] };
-let throttleState: "ok" | "eighty" | "ninetyfive" = "ok";
+// Controls the claimGate (getSocialSpendToday): default = funded + under cap → run.
+let spend = { creditsUsed: 0, dailyCap: 1000, prepaidBalance: 5000 };
 
 vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -55,7 +56,7 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
 
 vi.mock("../../src/lib/sources/instagram/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, getSocialThrottleState: async () => throttleState };
+  return { ...actual, getSocialSpendToday: async () => spend };
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
@@ -133,7 +134,7 @@ beforeEach(() => {
   single.next = post();
   single.throwErr = null;
   single.calls = [];
-  throttleState = "ok";
+  spend = { creditsUsed: 0, dailyCap: 1000, prepaidBalance: 5000 };
   __resetInstagramRefreshQueueWorkerForTest();
 });
 
@@ -182,11 +183,11 @@ describe("instagram per-post refresh lane (#69)", () => {
     expect(row!.status).toBe("done");
   });
 
-  it("claimGate defers the tick when the operator budget is at 95%", async () => {
+  it("claimGate DEFERS at daily-cap 95% (balance funded → recovers at reset)", async () => {
     const u = await seedUserDirectly({ email: `igrq-throttle-${uniq()}@t.io` });
     const tgt = await seedIgEvent(u.id, `3201_${uniq()}`);
     await enqueue(tgt.eventId, u.id, tgt.postId);
-    throttleState = "ninetyfive";
+    spend = { creditsUsed: 950, dailyCap: 1000, prepaidBalance: 5000 }; // 95% of cap, funded
 
     await instagramRefreshQueueTick();
 
@@ -197,7 +198,50 @@ describe("instagram per-post refresh lane (#69)", () => {
       .from(adapterRefreshQueue)
       .where(eq(adapterRefreshQueue.userId, u.id))
       .limit(1);
-    expect(row!.status).toBe("pending"); // still pending, retried later
+    expect(row!.status).toBe("pending"); // deferred → still pending, retries after reset
+  });
+
+  it("claimGate RUNS at balance-exhausted (no defer-forever; row completes, button settles) (P1-B)", async () => {
+    const u = await seedUserDirectly({ email: `igrq-bal0-${uniq()}@t.io` });
+    const tgt = await seedIgEvent(u.id, `3251_${uniq()}`);
+    await enqueue(tgt.eventId, u.id, tgt.postId);
+    // Prepaid balance is the MONOTONIC hard ceiling — it never resets, so the
+    // claimGate must NOT defer-forever here. It RUNS; in prod the in-fetch reserve
+    // would then fail → non-ok snapshot. (Provider mocked here, so the row simply
+    // completes — the point is it is NOT left pending indefinitely.)
+    spend = { creditsUsed: 0, dailyCap: 1000, prepaidBalance: 0 };
+
+    await instagramRefreshQueueTick();
+
+    expect(single.calls.length).toBeGreaterThan(0); // ran, did not defer
+    const [row] = await db
+      .select({ status: adapterRefreshQueue.status })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id))
+      .limit(1);
+    expect(row!.status).toBe("done"); // completed — NOT stuck pending forever
+  });
+
+  it("a failed refresh PRESERVES the prior thumbnail (no blanking) (P1-A)", async () => {
+    const u = await seedUserDirectly({ email: `igrq-thumb-${uniq()}@t.io` });
+    const tgt = await seedIgEvent(u.id, `3271_${uniq()}`);
+    // Give it a known-good thumbnail (simulating a prior successful poll).
+    await db
+      .update(instagramPosts)
+      .set({ thumbnailUrl: "https://scontent.cdninstagram.com/good.jpg" })
+      .where(eq(instagramPosts.postId, tgt.postId));
+    await enqueue(tgt.eventId, u.id, tgt.postId);
+    single.throwErr = new AdapterError("rate limited", { category: "rate-limited" });
+
+    await instagramRefreshQueueTick();
+
+    const [postRow] = await db
+      .select({ thumb: instagramPosts.thumbnailUrl, status: instagramPosts.lastPollStatus })
+      .from(instagramPosts)
+      .where(eq(instagramPosts.postId, tgt.postId))
+      .limit(1);
+    expect(postRow!.status).toBe("rate_limited"); // failure recorded…
+    expect(postRow!.thumb).toBe("https://scontent.cdninstagram.com/good.jpg"); // …but cover preserved
   });
 
   it("is tenant-scoped: a row whose event belongs to another user is skipped (no snapshot)", async () => {

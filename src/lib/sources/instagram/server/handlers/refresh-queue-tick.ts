@@ -34,7 +34,7 @@ import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
 import { AdapterError, categoryToSnapshotStatus } from "$lib/sources/errors.js";
 import { getSocialProvider } from "../provider/registry.js";
-import { getSocialThrottleState } from "../quota.js";
+import { getSocialSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
 
 export const INSTAGRAM_REFRESH_SLOTS = ["user_post"] as const;
@@ -64,16 +64,29 @@ export async function instagramRefreshQueueTick(): Promise<AdapterBatchLaneWorke
   return instagramRefreshWorker.tick();
 }
 
-// Throttle gate (D2): defer the tick when the operator budget pool is at 95% —
-// consistent with the IG adapter's refreshQueue.canRun. NOT a reserve (the single
-// reserve happens inside fetchPostByUrl), so no double-charge. Deferring (vs a
-// non-ok snapshot) keeps the rows pending so they refresh once the pool frees.
+// Throttle gate (D2): NOT a reserve (the single reserve happens inside
+// fetchPostByUrl), so no double-charge. It distinguishes the two "exhausted"
+// states that getSocialThrottleState would both report as "ninetyfive" (#69 P1-B):
+//   - Prepaid balance ≤ 0 is the MONOTONIC hard ceiling — it never resets, so a
+//     defer would loop forever and the RefreshNowButton would spin indefinitely.
+//     RUN instead: dispatch's in-fetch reserve fails → a non-ok snapshot → the
+//     row completes and the button settles (post shows unavailable).
+//   - Daily cap ≥ 95% (balance still funded) resets at midnight Pacific — DEFER;
+//     it recovers on its own (mirrors the YouTube/Reddit "wait for reset" defer).
 async function claimInstagramThrottleSlot(
   _ctx: AdapterLaneClaimGateContext<InstagramRefreshQueueName>,
 ): Promise<AdapterLaneClaimGateResult> {
-  const throttle = await getSocialThrottleState("instagram", "scrapecreators");
-  if (throttle === "ninetyfive") {
-    return { action: "defer", retryAfterMs: THROTTLE_DEFER_MS, reason: "instagram budget at 95%" };
+  const { creditsUsed, dailyCap, prepaidBalance } = await getSocialSpendToday(
+    "instagram",
+    "scrapecreators",
+  );
+  if (prepaidBalance <= 0) return { action: "run" };
+  if (dailyCap > 0 && creditsUsed >= Math.floor(dailyCap * 0.95)) {
+    return {
+      action: "defer",
+      retryAfterMs: THROTTLE_DEFER_MS,
+      reason: "instagram daily cap at 95%",
+    };
   }
   return { action: "run" };
 }

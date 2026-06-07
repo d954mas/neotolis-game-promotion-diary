@@ -288,6 +288,12 @@ export function mapSinglePostToNormalized(
     // it is a divergent, never-refreshed orphan: different stats and an expiring
     // (never re-fetched) thumbnail. #69 follow-up. Skip if owner is absent or
     // the id already carries the suffix.
+    //
+    // ASSUMPTION: media.owner.id == the `<owner_id>` the feed/reels endpoints use.
+    // True for own-account tracking (the diary use case). For a reshare/collab the
+    // single-post owner could differ → the paste would key on a different id than
+    // the source import (the orphan we guard against). Acceptable risk for the use
+    // case; revisit (key on `<pk>` everywhere) if cross-account posts become common.
     id: ownerId !== null && !media.id.includes("_") ? `${media.id}_${ownerId}` : media.id,
     shortcode: media.shortcode ?? null,
     kind: typenameToKind(media.__typename, isReelUrl),
