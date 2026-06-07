@@ -209,9 +209,13 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     return readMediaUrlFromMetadata(event.metadata);
   }
   if (event.kind === "instagram_post") {
-    // The fresh CDN hotlink lives on instagramEnrichment (set by
-    // sources/instagram/server/feed-enrichment.ts), NOT in event.metadata.
-    return event.instagramEnrichment?.thumbnailUrl ?? null;
+    // IG's CDN serves thumbnails with Cross-Origin-Resource-Policy: same-origin,
+    // so the raw hotlink (instagramEnrichment.thumbnailUrl) is BLOCKED by the
+    // browser cross-origin. Route through the same-origin proxy keyed by the
+    // media id (#69) — only when a thumbnail actually exists in the cache (the
+    // enrichment URL is present) and we have the post id to key on.
+    if (event.instagramEnrichment?.thumbnailUrl == null || !event.externalId) return null;
+    return `/api/instagram/thumbnail/${encodeURIComponent(event.externalId)}`;
   }
   return null;
 }

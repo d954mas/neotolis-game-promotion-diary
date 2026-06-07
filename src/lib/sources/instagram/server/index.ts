@@ -22,6 +22,7 @@ import type {
   BackfillWindow,
   CanonicalizeInput,
   CanonicalizeResult,
+  AdapterAppContext,
   CreateContext,
   EventKind,
   EventPreviewMetadata,
@@ -30,6 +31,7 @@ import type {
   SourceAdapter,
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
+import type { Hono } from "hono";
 import type { DbOrTx, Tx } from "$lib/server/db/client.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { getBoss } from "$lib/server/queue-client.js";
@@ -47,6 +49,7 @@ import { resetInstagramBackfillState } from "./backfill-state.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import { writeSnapshot } from "./snapshots.js";
+import { instagramThumbnailRoutes } from "./thumbnail-proxy.js";
 import { handleBackfillAccount } from "./handlers/backfill-account.js";
 import { handleInstagramPollCron } from "./handlers/poll-cron.js";
 import { handleInstagramQuotaReset } from "./handlers/quota-reset.js";
@@ -557,6 +560,17 @@ function buildPreviewTitle(caption: string | null, mediaType: string, publishedA
   return `Instagram ${mediaType} · ${publishedAt.toISOString().slice(0, 10)}`;
 }
 
+/**
+ * registerRoutes — mounts the per-source HTTP routes on the shared Hono app
+ * (createApp iterates allAdapters; mirrors youtube/reddit). Instagram mounts the
+ * same-origin thumbnail proxy: IG's CDN sends Cross-Origin-Resource-Policy:
+ * same-origin, so a raw <img> hotlink is blocked browser-side — the proxy
+ * re-serves the bytes from our origin (#69).
+ */
+function registerRoutes(app: Hono<AdapterAppContext>): void {
+  app.route("/api", instagramThumbnailRoutes);
+}
+
 // instagramAdapter — composes the polling core (./adapter.ts) with the
 // infrastructure-touching methods (registerQueues / scheduleCronTicks /
 // backfillSource) and the create-time hooks (canonicalizeOnCreate /
@@ -573,6 +587,7 @@ export const instagramAdapter: SourceAdapter & typeof instagramAccountAdapterCor
   onSourceCreated,
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
+  registerRoutes,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "instagram_post",
     canRun: async () => {
