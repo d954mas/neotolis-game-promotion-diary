@@ -67,7 +67,17 @@ instagramThumbnailRoutes.get("/instagram/thumbnail/:postId", async (c) => {
   // No Referer to the CDN (the original <img> used referrerpolicy=no-referrer).
   // An expired/failed CDN URL → 502 → the <img> onerror falls back to the
   // KindIcon placeholder. The next account poll refreshes the stored URL.
-  const upstream = await fetch(url, { redirect: "follow" }).catch((err: unknown) => {
+  //
+  // redirect:"manual" — the host allow-list validates only the INITIAL URL, so
+  // FOLLOWING a redirect would re-open SSRF (a 3xx → internal host). IG/FB CDNs
+  // serve image bytes directly and never legitimately redirect, so a 3xx comes
+  // back as a non-ok opaque-redirect response and falls through to the 502
+  // below — we never fetch the redirect target. The timeout bounds a slow/hung
+  // CDN (the route is auth-gated, but cheap insurance against a held request).
+  const upstream = await fetch(url, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(8000),
+  }).catch((err: unknown) => {
     logger.warn(
       { err: String((err as Error)?.message ?? err) },
       "instagram thumbnail proxy: upstream fetch failed",
