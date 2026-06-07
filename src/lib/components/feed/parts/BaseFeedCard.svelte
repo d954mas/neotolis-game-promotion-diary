@@ -373,11 +373,17 @@
     {#if showThumb}
       <div class="card-thumb" class:empty={!thumbnailUrl}>
         {#if thumbnailUrl}
+          <!-- NO crossorigin: these thumbnails are display-only (never read into
+               a canvas), and Instagram's cdninstagram.com serves the bytes
+               WITHOUT Access-Control-Allow-Origin headers. With
+               crossorigin="anonymous" the browser fetches 200 but DISCARDS the
+               image on the failed CORS check → broken thumbnail (#69). YouTube /
+               Reddit CDNs send CORS headers so they were unaffected, which
+               masked this. referrerpolicy stays (CDN hotlink hygiene). -->
           <img
             src={thumbnailUrl}
             alt={m.feed_card_thumbnail_alt({ title: event.title })}
             referrerpolicy="no-referrer"
-            crossorigin="anonymous"
             loading="lazy"
             onerror={onThumbnailError ? () => onThumbnailError() : undefined}
           />
