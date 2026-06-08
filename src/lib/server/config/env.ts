@@ -294,10 +294,14 @@ const RawSchema = z.object({
   // to ≤ window credits/post.
   INSTAGRAM_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
   // Staleness gate: a warm post is re-refreshed only when its last_polled_at is
-  // older than this. < 24h so a post that rolled off page-1 (no longer covered by
-  // the daily free account poll) gets exactly one paid refresh/day; the slightly-
-  // under-24h value avoids racing the once-daily free poll into a double-charge.
-  INSTAGRAM_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(22),
+  // older than this. Must be JUST OVER the 24h free account-poll interval: the
+  // daily account poll re-stamps last_polled_at on EVERY page-1 post, so a value
+  // >24h keeps page-1 posts UNDER the gate (the free poll covers them — we never
+  // pay) and only OFF-page-1 posts (the free poll no longer reaches them) go stale
+  // enough to earn a paid warm refresh ~1×/day. A value <24h would pay daily for
+  // page-1 posts the free poll already covers — the exact opposite of the cost
+  // goal. 26h = 24h interval + 2h margin for free-poll scheduling jitter.
+  INSTAGRAM_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
   // Bound on consecutive non-ok polls before a post drops OUT of warm
   // auto-refresh (IG's HTTP seam collapses transient + budget-exhaustion into
   // last_poll_status='auth_error'; a single blip must NOT freeze a post forever,

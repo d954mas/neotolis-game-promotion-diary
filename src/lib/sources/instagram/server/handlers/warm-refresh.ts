@@ -9,7 +9,7 @@
 // walk, so handleInstagramPollCron branches here BEFORE its account-picker runs.
 //
 // Throttle skip-gate: warm is NON-ESSENTIAL background spend (like the cold tier)
-// — skip at >= "eighty". The hourly cadence + 22h staleness gate + skip-if-pending
+// — skip at >= "eighty". The hourly cadence + the >24h staleness gate + skip-if-pending
 // dedup mean a post gets at most ~1 paid refresh/day.
 
 import { logger } from "$lib/server/logger.js";

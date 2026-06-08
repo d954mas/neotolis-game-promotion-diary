@@ -141,9 +141,10 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
     { tier: "cold" },
     { key: "cold", tz: "America/Los_Angeles" },
   );
-  // Warm per-post auto-refresh (#70) — hourly. The 22h staleness gate means a post
-  // gets at most ~1 paid refresh/day; hourly just picks it up promptly after it
-  // crosses the gate (skip-if-pending dedup prevents pile-up).
+  // Warm per-post auto-refresh (#70) — hourly. The staleness gate (>24h, just over
+  // the daily free-poll interval) means a post gets at most ~1 paid refresh/day;
+  // hourly just picks it up promptly after it crosses the gate (skip-if-pending
+  // dedup prevents pile-up).
   await boss.schedule(QUEUES.INSTAGRAM_POLL_CRON, "0 * * * *", { tier: "warm" }, { key: "warm" });
   // Daily-cap reset — midnight Pacific (the social-provider daily-cap boundary;
   // the prepaid balance is never touched).

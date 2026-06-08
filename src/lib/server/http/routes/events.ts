@@ -152,10 +152,11 @@ const createEventSchema = z
     authorIsMe: z.boolean().optional(),
     // The MEDIA id resolved by the preview flow (POST /api/events/preview-url
     // returns it). Round-trips through the save body so the saved event keys on
-    // the same id the snapshot/enrichment caches use. Load-bearing for
-    // instagram_post: its URL carries only the shortcode, which is NOT the
-    // media-id cache key — so it must come from the preview, not be re-derived
-    // from the URL. createEvent prefers this caller-supplied value.
+    // the same id the snapshot/enrichment caches use. createEvent prefers it for
+    // URL-derivable kinds (youtube_video / reddit_post). For instagram_post the
+    // body is UNTRUSTED and IGNORED: createEvent re-derives the media id from our
+    // own cache by canonical permalink (an adapter resolveCachedExternalId hook),
+    // so a client cannot pair post A's URL with post B's media id (#70 P1).
     externalId: z.string().min(1).nullable().optional(),
   })
   .superRefine(urlRequiredForPollableKinds)
