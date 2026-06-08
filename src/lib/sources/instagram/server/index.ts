@@ -106,7 +106,10 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.work(QUEUES.INSTAGRAM_POLL_CRON, { batchSize: 2 }, async (jobs) => {
     for (const job of jobs) {
       await handleInstagramPollCron(
-        job as { id?: string; data: { tier: "active" | "cold" } & Record<string, unknown> },
+        job as {
+          id?: string;
+          data: { tier: "active" | "cold" | "warm" } & Record<string, unknown>;
+        },
         boss,
       );
     }
@@ -120,10 +123,14 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
 }
 
 async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
-  // Active tier — every 6 hours UTC (matches YouTube's active cadence).
+  // Active tier — daily 06:00 UTC (#70). The account page-1 walk amortizes one
+  // feed credit across the newest ~12 posts; daily (was every 6h) cuts the
+  // dominant recurring spend ~4× and matches the daily wishlist-correlation
+  // cadence. Individual posts that roll off page-1 are topped up by the warm
+  // per-post lane below (1×/day while < INSTAGRAM_WARM_WINDOW_DAYS old).
   await boss.schedule(
     QUEUES.INSTAGRAM_POLL_CRON,
-    "0 */6 * * *",
+    "0 6 * * *",
     { tier: "active" },
     { key: "active" },
   );
@@ -134,6 +141,10 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
     { tier: "cold" },
     { key: "cold", tz: "America/Los_Angeles" },
   );
+  // Warm per-post auto-refresh (#70) — hourly. The 22h staleness gate means a post
+  // gets at most ~1 paid refresh/day; hourly just picks it up promptly after it
+  // crosses the gate (skip-if-pending dedup prevents pile-up).
+  await boss.schedule(QUEUES.INSTAGRAM_POLL_CRON, "0 * * * *", { tier: "warm" }, { key: "warm" });
   // Daily-cap reset — midnight Pacific (the social-provider daily-cap boundary;
   // the prepaid balance is never touched).
   await boss.schedule(QUEUES.INSTAGRAM_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
@@ -558,6 +569,32 @@ function buildPreviewTitle(caption: string | null, mediaType: string, publishedA
 }
 
 /**
+ * resolveCachedExternalId — re-derive an instagram_post event's media id from
+ * OUR cache, given the (canonical or raw) event URL. The single-post PREVIEW
+ * (fetchEventPreviewMetadata) UPSERTed instagram_posts with
+ * permalink = the canonical `/p/`|`/reel/` URL and post_id = the media id, so the
+ * create boundary looks the media id up by permalink instead of trusting the
+ * request body (#70 review P1 — a client could pair post A's URL with post B's
+ * media id; the body is untrusted). instagramParseUrl canonicalizes the URL the
+ * SAME way the preview did (`/reels/`→`/reel/`), so the permalink match is exact.
+ * null when no cache row exists (create without a prior preview) → an honest
+ * stats-less card, identical to the recognition-only paste path.
+ */
+async function resolveCachedExternalId(url: string): Promise<string | null> {
+  const parsed = instagramParseUrl(url);
+  const permalink = parsed?.metadata?.permalink;
+  if (typeof permalink !== "string") return null;
+  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
+  const { eq } = await import("drizzle-orm");
+  const [row] = await db
+    .select({ postId: instagramPosts.postId })
+    .from(instagramPosts)
+    .where(eq(instagramPosts.permalink, permalink))
+    .limit(1);
+  return row?.postId ?? null;
+}
+
+/**
  * registerRoutes — mounts the per-source HTTP routes on the shared Hono app
  * (createApp iterates allAdapters; mirrors youtube/reddit). Instagram mounts the
  * same-origin thumbnail proxy: IG's CDN sends Cross-Origin-Resource-Policy:
@@ -584,6 +621,7 @@ export const instagramAdapter: SourceAdapter & typeof instagramAccountAdapterCor
   onSourceCreated,
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
+  resolveCachedExternalId,
   registerRoutes,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "instagram_post",

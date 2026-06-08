@@ -11,7 +11,7 @@
 // instead of depending on the operator-budget env). NEVER mocks the DB.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import { AdapterError } from "../../src/lib/sources/errors.js";
 import type { NormalizedSinglePost } from "../../src/lib/sources/social-provider.js";
@@ -66,6 +66,8 @@ const { createEvent } = await import("../../src/lib/server/services/events-mutat
 const { instagramAdapter } = await import("../../src/lib/sources/instagram/server/index.js");
 const { instagramRefreshQueueTick, __resetInstagramRefreshQueueWorkerForTest } =
   await import("../../src/lib/sources/instagram/server/handlers/refresh-queue-tick.js");
+const { enqueueServiceInstagramPostStats } =
+  await import("../../src/lib/sources/instagram/server/handlers/enqueue-service-post-stats.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -312,5 +314,47 @@ describe("instagram per-post refresh lane (#69)", () => {
       .where(eq(adapterRefreshQueue.userId, u.id))
       .limit(1);
     expect(row!.status).toBe("done"); // per-row: marked done, not a batch-wide retry
+  });
+
+  it("a service_post (cron warm) row refreshes by post_id with origin=cron — no event, no userId (#70)", async () => {
+    const u = await seedUserDirectly({ email: `igrq-svc-${uniq()}@t.io` });
+    // seedIgEvent populates the public-data instagram_posts cache (the warm lane
+    // needs the permalink) + an event; the service_post row keys off post_id ONLY.
+    const tgt = await seedIgEvent(u.id, `3701_${uniq()}`);
+    const enqueued = await enqueueServiceInstagramPostStats([tgt.postId]);
+    expect(enqueued).toBe(1);
+
+    await instagramRefreshQueueTick();
+
+    expect(single.calls).toHaveLength(1);
+    expect(single.calls[0]!.origin).toBe("cron"); // operator pool, NOT the user's cap
+    expect(await snapshotCount(tgt.postId)).toBe(1);
+    const [row] = await db
+      .select({ status: adapterRefreshQueue.status, userId: adapterRefreshQueue.userId })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.queueName, "service_post"))
+      .limit(1);
+    expect(row!.status).toBe("done");
+    expect(row!.userId).toBeNull(); // cross-tenant public-data lane
+  });
+
+  it("enqueueServiceInstagramPostStats DEDUPS against a pending/processing service_post row (#70)", async () => {
+    await seedUserDirectly({ email: `igrq-svcdedup-${uniq()}@t.io` });
+    const postId = `3801_${uniq()}`;
+    const first = await enqueueServiceInstagramPostStats([postId]);
+    const second = await enqueueServiceInstagramPostStats([postId]); // still pending
+    expect(first).toBe(1);
+    expect(second).toBe(0); // skip-if-pending — no duplicate row
+    const rows = await db
+      .select({ id: adapterRefreshQueue.id })
+      .from(adapterRefreshQueue)
+      .where(
+        and(
+          eq(adapterRefreshQueue.adapterKind, "instagram_account"),
+          eq(adapterRefreshQueue.queueName, "service_post"),
+          eq(sql`${adapterRefreshQueue.payload}->>'post_id'`, postId),
+        ),
+      );
+    expect(rows).toHaveLength(1);
   });
 });

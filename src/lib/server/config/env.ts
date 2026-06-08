@@ -285,6 +285,25 @@ const RawSchema = z.object({
   // the parallelism knob, NOT a batch-in-one-request size like YouTube's 50.
   // Keep conservative to respect ScrapeCreators rate limits; raise per plan.
   SOCIAL_REFRESH_LANE_CONCURRENCY: z.coerce.number().int().positive().default(10),
+
+  // Warm auto-refresh (#69 follow-on). A post is "warm" (gets a PAID single-post
+  // refresh via the service_post lane) while it is YOUNGER than this many days
+  // AND has gone stale (not refreshed within INSTAGRAM_WARM_STALENESS_HOURS).
+  // Older than the window → frozen (manual Refresh only). The first week is where
+  // metrics move + wishlist correlation matters; bounding the window caps spend
+  // to ≤ window credits/post.
+  INSTAGRAM_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
+  // Staleness gate: a warm post is re-refreshed only when its last_polled_at is
+  // older than this. < 24h so a post that rolled off page-1 (no longer covered by
+  // the daily free account poll) gets exactly one paid refresh/day; the slightly-
+  // under-24h value avoids racing the once-daily free poll into a double-charge.
+  INSTAGRAM_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(22),
+  // Bound on consecutive non-ok polls before a post drops OUT of warm
+  // auto-refresh (IG's HTTP seam collapses transient + budget-exhaustion into
+  // last_poll_status='auth_error'; a single blip must NOT freeze a post forever,
+  // and a PERSISTENT failure must NOT churn credits forever — poll_failure_count
+  // bounds both). Resets to 0 on the next ok poll.
+  INSTAGRAM_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -410,6 +429,9 @@ export const env = {
   SOCIAL_PROVIDER_DAILY_CAP_CREDITS: raw.SOCIAL_PROVIDER_DAILY_CAP_CREDITS,
   SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS: raw.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS,
   SOCIAL_REFRESH_LANE_CONCURRENCY: raw.SOCIAL_REFRESH_LANE_CONCURRENCY,
+  INSTAGRAM_WARM_WINDOW_DAYS: raw.INSTAGRAM_WARM_WINDOW_DAYS,
+  INSTAGRAM_WARM_STALENESS_HOURS: raw.INSTAGRAM_WARM_STALENESS_HOURS,
+  INSTAGRAM_WARM_MAX_FAILURES: raw.INSTAGRAM_WARM_MAX_FAILURES,
 } as const;
 
 export type Env = typeof env;

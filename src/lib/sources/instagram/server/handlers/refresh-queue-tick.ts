@@ -1,11 +1,18 @@
-// Instagram per-post stats refresh — SQL lane worker (#69 follow-on).
+// Instagram per-post stats refresh — SQL lane worker (#69 + #70 warm follow-on).
 //
-// Manual "Refresh now" enqueues ONE adapter_refresh_queue row per post
-// (enqueueRefreshNow, queue_name "user_post"). This worker claims up to N rows
-// per tick (N = env.SOCIAL_REFRESH_LANE_CONCURRENCY; batchScope "global" — across
-// users) and refreshes them CONCURRENTLY: Instagram's single-post endpoint can't
-// batch (1 request = 1 post), so scale comes from concurrency, not a multi-id
-// call like YouTube's videos.list.
+// Two slots over adapter_refresh_queue, mirroring YouTube's user_video/service_video:
+//   - "user_post"    — MANUAL "Refresh now" (enqueueRefreshNow). Payload
+//                      {event_id, post_id}, user_id SET. Resolved TENANT-SCOPED
+//                      (the user owns the event); fetch charges the USER pool.
+//   - "service_post" — CRON warm auto-refresh (warm-scheduler / #70). Payload
+//                      {post_id}, user_id NULL. PUBLIC-DATA, NO event lookup;
+//                      fetch charges the OPERATOR (cron) pool.
+//
+// This worker claims up to N rows of ONE slot per tick (N =
+// env.SOCIAL_REFRESH_LANE_CONCURRENCY; batchScope "global" — across users) and
+// refreshes them CONCURRENTLY: Instagram's single-post endpoint can't batch
+// (1 request = 1 post), so scale comes from concurrency, not a multi-id call like
+// YouTube's videos.list.
 //
 // Each post is independent, so dispatch uses Promise.allSettled and writes a
 // per-post snapshot (ok or non-ok via categoryToSnapshotStatus) and NEVER throws
@@ -37,7 +44,7 @@ import { getSocialProvider } from "../provider/registry.js";
 import { getSocialSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
 
-export const INSTAGRAM_REFRESH_SLOTS = ["user_post"] as const;
+export const INSTAGRAM_REFRESH_SLOTS = ["user_post", "service_post"] as const;
 export type InstagramRefreshQueueName = (typeof INSTAGRAM_REFRESH_SLOTS)[number];
 
 const MAX_ATTEMPTS = 5;
@@ -58,6 +65,15 @@ const instagramRefreshWorker = createAdapterBatchLaneWorker({
   staleRecoveryIntervalMs: STALE_RECOVERY_INTERVAL_MS,
   claimGate: claimInstagramThrottleSlot,
   dispatch: dispatchRefreshBatch,
+  // Observability (#70 P3-A): one INFO per drained tick, tagged by slot, so warm
+  // (service_post) credit spend is visible in Loki/Grafana SEPARATE from manual
+  // (user_post) spend — the lane is where credits are actually burned.
+  emitDrained: ({ queueName, entriesProcessed, durationMs }) => {
+    logger.info(
+      { queueName, entriesProcessed, durationMs },
+      "instagram refresh lane: tick drained",
+    );
+  },
 });
 
 export async function instagramRefreshQueueTick(): Promise<AdapterBatchLaneWorkerTickResult> {
@@ -73,6 +89,11 @@ export async function instagramRefreshQueueTick(): Promise<AdapterBatchLaneWorke
 //     row completes and the button settles (post shows unavailable).
 //   - Daily cap ≥ 95% (balance still funded) resets at midnight Pacific — DEFER;
 //     it recovers on its own (mirrors the YouTube/Reddit "wait for reset" defer).
+//
+// Two-pool coupling (#70 P2-B, accepted): getSocialSpendToday SUMS both pools, so
+// this coarse gate can defer a service_post tick on user-pool spend (or vice-versa).
+// That's fine — the real per-pool ceiling is the in-fetch origin-scoped reserve
+// (user_post→user pool, service_post→cron pool); this stays a cheap tick throttle.
 async function claimInstagramThrottleSlot(
   _ctx: AdapterLaneClaimGateContext<InstagramRefreshQueueName>,
 ): Promise<AdapterLaneClaimGateResult> {
@@ -93,19 +114,47 @@ async function claimInstagramThrottleSlot(
 
 // allSettled + per-row snapshot + NEVER throw → the lane worker marks every
 // claimed row `done` (independent posts; a per-row failure must not re-fetch the
-// successes).
+// successes via a batch-wide throw-to-retry).
 async function dispatchRefreshBatch(rows: AdapterLaneWorkerRow[]): Promise<void> {
   await Promise.allSettled(rows.map((row) => processOne(row)));
 }
 
-async function processOne(row: AdapterLaneWorkerRow): Promise<void> {
-  // Tenant-scope P0 (S1): a row without a userId can't be safely scoped — skip,
-  // mirroring youtube/refresh-queue-tick.ts. Refresh-now rows always carry one.
-  if (row.userId === null) return;
-  const eventId = row.payload?.event_id;
-  if (typeof eventId !== "string") return;
+interface ResolvedPost {
+  postId: string;
+  permalink: string;
+}
 
-  // Resolve the post's media id from the event, tenant-scoped.
+async function processOne(row: AdapterLaneWorkerRow): Promise<void> {
+  try {
+    const resolved =
+      row.queueName === "service_post"
+        ? await resolveServicePostRow(row)
+        : await resolveUserPostRow(row);
+    if (resolved === null) return; // skip reasons are logged inside the resolvers
+    // user_post → user pool (the clicking user pays); service_post → cron pool
+    // (operator-funded warm auto-refresh, like YouTube service_video).
+    const origin = row.queueName === "service_post" ? "cron" : "user";
+    await refreshPost(resolved.postId, resolved.permalink, origin);
+  } catch (err) {
+    // #70 P1: a failure must NEVER vanish silently into allSettled. A resolution
+    // failure (a DB select threw) has no postId yet → it can't write a snapshot,
+    // so LOG it here (the prior code let it disappear). refreshPost owns its own
+    // non-ok snapshot for fetch/write failures (it has the postId). The row still
+    // completes `done`; recovery is the warm predicate re-selecting the stale post
+    // next scheduler tick (auto path) or a manual re-click (user_post).
+    logger.warn(
+      { rowId: row.id, queueName: row.queueName, err: String((err as Error)?.message ?? err) },
+      "instagram refresh: row failed before snapshot — recovered by re-selection",
+    );
+  }
+}
+
+// MANUAL path: resolve the post media id from the event, TENANT-SCOPED. A row
+// without a userId can't be safely scoped (refresh-now rows always carry one).
+async function resolveUserPostRow(row: AdapterLaneWorkerRow): Promise<ResolvedPost | null> {
+  if (row.userId === null) return null;
+  const eventId = row.payload?.event_id;
+  if (typeof eventId !== "string") return null;
   const [event] = await db
     .select({ externalId: events.externalId })
     .from(events)
@@ -119,11 +168,22 @@ async function processOne(row: AdapterLaneWorkerRow): Promise<void> {
     )
     .limit(1);
   const postId = event?.externalId ?? null;
-  if (postId === null) return;
+  if (postId === null) return null;
+  return resolvePermalink(postId);
+}
 
-  // The single-post endpoint needs the shortcode permalink, which lives on the
-  // public-data instagram_posts row. No row / no permalink (e.g. a paste before
-  // the first account poll) → graceful skip; the next scheduled poll fills it (D4).
+// CRON warm path: the post media id is in the payload directly. PUBLIC-DATA — no
+// event lookup, no userId (mirrors youtube loadVideoWork's service_video branch).
+async function resolveServicePostRow(row: AdapterLaneWorkerRow): Promise<ResolvedPost | null> {
+  const postId = row.payload?.post_id;
+  if (typeof postId !== "string") return null;
+  return resolvePermalink(postId);
+}
+
+// The single-post endpoint needs the shortcode permalink, which lives on the
+// public-data instagram_posts row. No row / no permalink (e.g. a paste before the
+// first account poll) → graceful skip; the next scheduled poll fills it (D4).
+async function resolvePermalink(postId: string): Promise<ResolvedPost | null> {
   const [postRow] = await db
     .select({ permalink: instagramPosts.permalink })
     .from(instagramPosts)
@@ -131,16 +191,28 @@ async function processOne(row: AdapterLaneWorkerRow): Promise<void> {
     .limit(1);
   const permalink = postRow?.permalink ?? null;
   if (permalink === null) {
-    logger.info({ eventId, postId }, "instagram refresh: post not cached yet — skip");
-    return;
+    logger.info({ postId }, "instagram refresh: post not cached yet — skip");
+    return null;
   }
+  return { postId, permalink };
+}
 
+// Fetch one post + write its snapshot. Owns its own try/catch so a per-row failure
+// lands a VISIBLE non-ok snapshot (stamps last_polled_at — the manual button
+// settles; the warm predicate's poll_failure_count bound advances) and NEVER
+// throws (the lane marks the row done; no batch-wide retry that would re-fetch +
+// re-charge the successes). `origin` picks the credit pool (user vs cron).
+async function refreshPost(
+  postId: string,
+  permalink: string,
+  origin: "cron" | "user",
+): Promise<void> {
   const provider = getSocialProvider("instagram");
   if (provider === null) return; // unconfigured — isEnabled gates the lane; defensive.
 
   try {
-    // origin "user" → fetchPostByUrl reserves one prepaid credit internally.
-    const post = await provider.fetchPostByUrl("instagram", permalink, { origin: "user" });
+    // fetchPostByUrl reserves one prepaid credit internally from the `origin` pool.
+    const post = await provider.fetchPostByUrl("instagram", permalink, { origin });
     if (post === null) {
       // Deleted / private — the envelope carried no media object.
       await writeSnapshot({ postId, permalink, metrics: null, status: "not_found" });
@@ -162,17 +234,13 @@ async function processOne(row: AdapterLaneWorkerRow): Promise<void> {
       status: "ok",
     });
   } catch (err) {
-    // Per-row failure → write a non-ok snapshot so last_polled_at is stamped (the
-    // button stop-loop settles) and the failure is VISIBLE — never a silent drop
-    // (P2-A). The row is still marked done (no batch-wide retry that would
-    // re-fetch the successes); recovery is a re-click after cooldown or the next
-    // scheduled source poll. An AdapterError maps to its category; an unexpected
-    // throw (e.g. a programmer bug) degrades to "auth_error" and is logged.
+    // An AdapterError maps to its category; an unexpected throw (a programmer bug)
+    // degrades to "auth_error" and is logged.
     const status =
       err instanceof AdapterError ? categoryToSnapshotStatus(err.category) : "auth_error";
     if (!(err instanceof AdapterError)) {
       logger.warn(
-        { eventId, postId, err: String((err as Error)?.message ?? err) },
+        { postId, err: String((err as Error)?.message ?? err) },
         "instagram refresh: unexpected error",
       );
     }

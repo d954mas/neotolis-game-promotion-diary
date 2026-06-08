@@ -207,6 +207,23 @@ export async function createEvent(
     }
   }
 
+  // #70 review P1 — instagram_post external_id is the MEDIA id: NOT URL-derivable
+  // (the permalink carries only the shortcode) and supplied by the client preview
+  // round-trip, so the request body's externalId is UNTRUSTED. A caller could pair
+  // post A's URL with post B's media id, binding feed-enrichment / thumbnail proxy
+  // / refresh to the wrong cache key. Re-derive from OUR OWN cache via the adapter
+  // seam (instagram_posts.permalink = the canonical url the preview UPSERTed),
+  // OVERRIDING the body value (this runs regardless of input.externalId — the
+  // opposite of the "caller wins" rule above, which is the whole point). No cache
+  // row (create without a prior preview) → null → an honest stats-less card,
+  // identical to the recognition-only paste path.
+  if (input.kind === "instagram_post" && input.url != null && input.url !== "") {
+    const igAdapter = getAdapter("instagram_account");
+    derivedExternalId = igAdapter.resolveCachedExternalId
+      ? await igAdapter.resolveCachedExternalId(input.url)
+      : null;
+  }
+
   // The events INSERT + junction INSERT loop run in a single tx so a
   // junction-INSERT failure rolls the parent INSERT back. Validation +
   // ownership pre-checks above are pure and stay outside. withQuotaGuard

@@ -689,6 +689,18 @@ export interface SourceAdapter {
    *  URL parseable as youtube_video. Throws AppError on invalid input. */
   validateEventInput?(input: { kind: string; url?: string | null }): void;
 
+  /** Resolve an event's canonical external_id from the adapter's OWN cache,
+   *  given the event URL. Declare this ONLY when the external_id is NOT
+   *  URL-derivable and the request body's value is therefore untrusted at the
+   *  create boundary. Instagram: the media id is keyed by canonical permalink in
+   *  instagram_posts (populated by the preview), so the create path re-derives
+   *  it here instead of trusting the client (a client could pair post A's URL
+   *  with post B's media id — #70 review P1). Returns null when the cache has no
+   *  row for the URL (create without a prior preview) → the caller saves a
+   *  stats-less card. Adapters whose external_id IS URL-derivable (YouTube
+   *  videoId, Reddit t3 id) omit this — the parseAnyUrl path already covers them. */
+  resolveCachedExternalId?(url: string): Promise<string | null>;
+
   /** Batch lookup of live poll-state for events of this adapter's kinds.
    *  dto.ts's overlayPollStateOnEvents iterates allAdapters and merges
    *  results. YouTube: SELECT publishedAt/lastPolledAt/lastPollStatus
