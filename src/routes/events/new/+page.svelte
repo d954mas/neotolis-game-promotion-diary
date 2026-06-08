@@ -36,6 +36,7 @@
         url: payload.url,
         notes: payload.notes,
         authorIsMe: payload.authorIsMe,
+        externalId: payload.externalId,
       }),
     });
     if (res.ok) {

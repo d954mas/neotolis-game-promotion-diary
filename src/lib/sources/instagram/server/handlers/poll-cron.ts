@@ -33,6 +33,7 @@ import { logger } from "$lib/server/logger.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { getSocialThrottleState } from "../quota.js";
 import { TIER_BOUNDARY_COLD_MS } from "$lib/server/services/tier-resolver.js";
+import { handleInstagramWarmRefresh } from "./warm-refresh.js";
 import type { MinimalBoss } from "$lib/sources/adapter.js";
 
 const PLATFORM = "instagram";
@@ -47,11 +48,20 @@ const INCREMENTAL_WINDOW_DAYS = 14;
 
 interface PollCronJob {
   id?: string;
-  data: { tier: "active" | "cold" } & Record<string, unknown>;
+  data: { tier: "active" | "cold" | "warm" } & Record<string, unknown>;
 }
 
 export async function handleInstagramPollCron(job: PollCronJob, boss: MinimalBoss): Promise<void> {
   const tier = job.data.tier;
+
+  // Warm per-post auto-refresh (#70) is a DIFFERENT operation from the account-
+  // level page-1 walk below (it enqueues service_post rows; it does not walk
+  // feeds). Branch BEFORE the account-picker SELECT so none of the active/cold
+  // machinery runs, and it carries its own throttle skip-gate.
+  if (tier === "warm") {
+    await handleInstagramWarmRefresh(job);
+    return;
+  }
 
   // Throttle skip-gate. The cron pool funds only non-essential background work.
   const throttle = await getSocialThrottleState(PLATFORM, PROVIDER);

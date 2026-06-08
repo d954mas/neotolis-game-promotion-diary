@@ -199,7 +199,10 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
 // video_play_count, thumbnail_src, taken_at_timestamp (unix seconds), owner.
 const XDT_IMAGE = {
   __typename: "XDTGraphImage",
-  id: "111_222",
+  // BARE media pk — the single-post GraphQL endpoint returns no owner suffix
+  // (unlike the feed/reels endpoints). The normalizer must reconstruct the
+  // canonical `<pk>_<owner>` key (#69) so a paste matches the source.
+  id: "111",
   shortcode: "DPhotoCode",
   is_video: false,
   taken_at_timestamp: 1780300000,
@@ -209,7 +212,7 @@ const XDT_IMAGE = {
   edge_media_to_caption: {
     edges: [{ node: { text: "First line of the caption\nSecond line dropped" } }],
   },
-  owner: { id: "owner-1", username: "neonicle_dev" },
+  owner: { id: "222", username: "neonicle_dev" },
 };
 
 const XDT_VIDEO = {
@@ -244,6 +247,9 @@ describe("instagram single-post normalizer (xdt_shortcode_media -> NormalizedSin
   it("XDTGraphImage maps to kind 'image' and reads the nested caption/like/comment counts", () => {
     const post = mapSinglePostToNormalized(XDT_IMAGE, false);
     expect(post.kind).toBe("image");
+    // Canonical id = `<pk>_<owner>` reconstructed from the bare-pk `id` (111) +
+    // owner.id (222), matching the feed/reels key so a paste shares the cache
+    // row + polling with the source-imported post (#69).
     expect(post.id).toBe("111_222");
     expect(post.shortcode).toBe("DPhotoCode");
     // Caption is the FULL multi-line text (the first-line split happens at the
@@ -253,10 +259,23 @@ describe("instagram single-post normalizer (xdt_shortcode_media -> NormalizedSin
     expect(post.metrics.comments).toBe(33);
     expect(post.metrics.views).toBeNull(); // photo → no play_count (D-05)
     expect(post.thumbnailUrl).toBe("https://cdn.example/single-photo.jpg");
-    expect(post.ownerId).toBe("owner-1");
+    expect(post.ownerId).toBe("222");
     expect(post.ownerUsername).toBe("neonicle_dev");
     // taken_at_timestamp is unix SECONDS.
     expect(post.publishedAt.toISOString()).toBe(new Date(1780300000 * 1000).toISOString());
+  });
+
+  it("leaves an already-suffixed single-post id unchanged (defensive, no double-suffix) — #69", () => {
+    const post = mapSinglePostToNormalized(
+      { ...XDT_IMAGE, id: "999_888", owner: { id: "888", username: "x" } },
+      false,
+    );
+    expect(post.id).toBe("999_888");
+  });
+
+  it("falls back to the bare pk when the single-post response carries no owner id — #69", () => {
+    const post = mapSinglePostToNormalized({ ...XDT_IMAGE, id: "777", owner: null }, false);
+    expect(post.id).toBe("777");
   });
 
   it("XDTGraphVideo on a /p/ URL (isReelUrl=false) maps to 'video' and reads video_play_count", () => {

@@ -150,6 +150,14 @@ const createEventSchema = z
     // "Author: me / not me" at create time. Service defaults to false when
     // omitted (preserves existing semantics).
     authorIsMe: z.boolean().optional(),
+    // The MEDIA id resolved by the preview flow (POST /api/events/preview-url
+    // returns it). Round-trips through the save body so the saved event keys on
+    // the same id the snapshot/enrichment caches use. createEvent prefers it for
+    // URL-derivable kinds (youtube_video / reddit_post). For instagram_post the
+    // body is UNTRUSTED and IGNORED: createEvent re-derives the media id from our
+    // own cache by canonical permalink (an adapter resolveCachedExternalId hook),
+    // so a client cannot pair post A's URL with post B's media id (#70 P1).
+    externalId: z.string().min(1).nullable().optional(),
   })
   .superRefine(urlRequiredForPollableKinds)
   .transform((obj) => {
@@ -420,6 +428,10 @@ eventsRoutes.post(
         authorUrl: enriched.authorUrl,
         // ISO string when set; null when oEmbed has no published_at.
         occurredAt: enriched.occurredAt ? enriched.occurredAt.toISOString() : null,
+        // The adapter's canonical permalink (IG: query stripped; YouTube: keeps
+        // ?v, drops ?t). The form swaps the pasted URL for this on a successful
+        // Fetch so the saved event stores a clean link, not a tracking-tailed one.
+        canonicalUrl: enriched.canonicalUrl,
       });
     } catch (err) {
       return mapErr(c, err, "POST /api/events/preview-url");

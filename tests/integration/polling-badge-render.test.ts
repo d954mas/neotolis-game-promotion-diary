@@ -59,6 +59,7 @@ type EventForBadge = {
   lastPolledAt: Date | string | null;
   lastPollStatus: string | null;
   metadata: Record<string, unknown> | null;
+  externalId?: string | null;
 };
 
 function mkEvent(overrides: Partial<EventForBadge> = {}): EventForBadge {
@@ -179,6 +180,41 @@ describe("PollingBadge — live state", () => {
     // rare edge case (only on rate-limit / auth-error swallow), and when
     // it does happen the user needs a way to retry.
     expect(out.body).toMatch(/class="refresh-now/);
+  });
+
+  it("Manual IG paste (instagram_post, externalId=null, no publishedAt) renders Manual — NOT a never-resolving Pending (#69)", () => {
+    // A user pastes an Instagram post and saves WITHOUT clicking the preview
+    // "Fetch" → the event has no media id (externalId null) and no publishedAt.
+    // Without the #69 fix this rendered "Pending · fetching video info" forever
+    // (pending tier from null publishedAt). An explicit-null externalId on a
+    // pollable kind is a manual entry → "Manual", and no refresh button.
+    const ev = mkEvent({
+      kind: "instagram_post",
+      externalId: null,
+      publishedAt: null,
+      lastPolledAt: null,
+    });
+    const out = render(PollingBadge, { props: { event: ev } });
+    expect(out.body).toMatch(/polling-badge--manual/);
+    expect(out.body).toMatch(/Manual entry/);
+    expect(out.body).not.toMatch(/fetching video info/);
+    expect(out.body).not.toMatch(/class="refresh-now/);
+  });
+
+  it("IG backfill in flight (instagram_post, externalId set, no publishedAt) still renders Pending", () => {
+    // The genuine pending case: an enriched paste / source import has a media id
+    // but the cache row's publishedAt hasn't landed yet. externalId is present,
+    // so this stays "Pending" (a poll WILL resolve it) — the #69 manual-entry
+    // carve-out must not swallow this real state.
+    const ev = mkEvent({
+      kind: "instagram_post",
+      externalId: "media-123",
+      publishedAt: null,
+      lastPolledAt: null,
+    });
+    const out = render(PollingBadge, { props: { event: ev } });
+    expect(out.body).toMatch(/fetching video info/);
+    expect(out.body).not.toMatch(/polling-badge--manual/);
   });
 
   it("Non-pollable kind (kind=conference): component renders nothing", () => {

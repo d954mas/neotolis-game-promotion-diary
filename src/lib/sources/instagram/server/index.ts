@@ -22,6 +22,7 @@ import type {
   BackfillWindow,
   CanonicalizeInput,
   CanonicalizeResult,
+  AdapterAppContext,
   CreateContext,
   EventKind,
   EventPreviewMetadata,
@@ -30,6 +31,7 @@ import type {
   SourceAdapter,
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
+import type { Hono } from "hono";
 import type { DbOrTx, Tx } from "$lib/server/db/client.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { getBoss } from "$lib/server/queue-client.js";
@@ -40,16 +42,22 @@ import { getUserQuotaUsedToday, nextPacificMidnight } from "$lib/server/services
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
-import { logger } from "$lib/server/logger.js";
 import { instagramAccountAdapterCore } from "./adapter.js";
 import { instagramParseUrl, instagramParseSourceUrl } from "./url.js";
 import { resetInstagramBackfillState } from "./backfill-state.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import { writeSnapshot } from "./snapshots.js";
+import { instagramThumbnailRoutes } from "./thumbnail-proxy.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
+import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
 import { handleBackfillAccount } from "./handlers/backfill-account.js";
 import { handleInstagramPollCron } from "./handlers/poll-cron.js";
 import { handleInstagramQuotaReset } from "./handlers/quota-reset.js";
+import {
+  instagramRefreshQueueTick,
+  INSTAGRAM_REFRESH_SLOTS,
+} from "./handlers/refresh-queue-tick.js";
 
 const KIND = "instagram_account" as const;
 const EPOCH_ISO = "1970-01-01T00:00:00Z";
@@ -98,7 +106,10 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.work(QUEUES.INSTAGRAM_POLL_CRON, { batchSize: 2 }, async (jobs) => {
     for (const job of jobs) {
       await handleInstagramPollCron(
-        job as { id?: string; data: { tier: "active" | "cold" } & Record<string, unknown> },
+        job as {
+          id?: string;
+          data: { tier: "active" | "cold" | "warm" } & Record<string, unknown>;
+        },
         boss,
       );
     }
@@ -112,10 +123,14 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
 }
 
 async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
-  // Active tier — every 6 hours UTC (matches YouTube's active cadence).
+  // Active tier — daily 06:00 UTC (#70). The account page-1 walk amortizes one
+  // feed credit across the newest ~12 posts; daily (was every 6h) cuts the
+  // dominant recurring spend ~4× and matches the daily wishlist-correlation
+  // cadence. Individual posts that roll off page-1 are topped up by the warm
+  // per-post lane below (1×/day while < INSTAGRAM_WARM_WINDOW_DAYS old).
   await boss.schedule(
     QUEUES.INSTAGRAM_POLL_CRON,
-    "0 */6 * * *",
+    "0 6 * * *",
     { tier: "active" },
     { key: "active" },
   );
@@ -126,6 +141,11 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
     { tier: "cold" },
     { key: "cold", tz: "America/Los_Angeles" },
   );
+  // Warm per-post auto-refresh (#70) — hourly. The staleness gate (>24h, just over
+  // the daily free-poll interval) means a post gets at most ~1 paid refresh/day;
+  // hourly just picks it up promptly after it crosses the gate (skip-if-pending
+  // dedup prevents pile-up).
+  await boss.schedule(QUEUES.INSTAGRAM_POLL_CRON, "0 * * * *", { tier: "warm" }, { key: "warm" });
   // Daily-cap reset — midnight Pacific (the social-provider daily-cap boundary;
   // the prepaid balance is never touched).
   await boss.schedule(QUEUES.INSTAGRAM_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
@@ -358,10 +378,17 @@ async function resetWalkerStateOnWidening(
 }
 
 /**
- * enqueueRefreshNow — the per-event Refresh-Now path. An IG post's fresh metrics
- * come from an account-level page-1 incremental walk (the walker re-polls every
- * post on the page via writeSnapshot). triggerUserId set → the user pays the
- * per-user cap.
+ * enqueueRefreshNow — the per-event Refresh-Now path. PER-POST (#69): inserts ONE
+ * row into the shared adapter_refresh_queue (queue_name "user_post"); the IG lane
+ * worker (handlers/refresh-queue-tick.ts) fetches exactly that post via the
+ * single-post endpoint + writeSnapshot. This replaces the old account-level walk
+ * (which re-snapshotted every page-1 neighbour and couldn't reach old posts).
+ *
+ * INSERT via the passed `tx` (requestRefreshPoll calls this inside its tx) — no
+ * boss.send outside the mutating transaction. No skip-if-pending dedup (D1): the
+ * 5-min cooldown in requestRefreshPoll is the dedup; a conscious Refresh always
+ * fetches fresh (mirrors Reddit's deliberate choice). The per-user cap is already
+ * enforced by requestRefreshPoll before this runs.
  */
 async function enqueueRefreshNow(input: {
   eventId: string;
@@ -370,38 +397,23 @@ async function enqueueRefreshNow(input: {
   eventKind: EventKind;
   tx?: DbOrTx;
 }): Promise<{ queue: string; jobId: string | null }> {
-  // Resolve the post's account_id from the public-data cache so the walk targets
-  // the right account. The post may not be cached yet (paste before first poll);
-  // in that case the refresh is a no-op (the next cron tick picks it up).
-  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
-  const { eq } = await import("drizzle-orm");
   const dbCtx = input.tx ?? db;
-  const [row] = await dbCtx
-    .select({ account: instagramPosts.accountId })
-    .from(instagramPosts)
-    .where(eq(instagramPosts.postId, input.externalId))
-    .limit(1);
-  const channelKey = row?.account ?? null;
-  if (channelKey === null) {
-    logger.info(
-      { eventId: input.eventId, externalId: input.externalId },
-      "instagram.enqueueRefreshNow: post not cached yet — refresh deferred to next cron tick",
-    );
-    return { queue: QUEUES.INSTAGRAM_BACKFILL_ACCOUNT, jobId: null };
-  }
-  const boss = await getBoss();
-  const jobId = await boss.send(
-    QUEUES.INSTAGRAM_BACKFILL_ACCOUNT,
-    {
-      kind: KIND,
-      channelKey,
-      triggerUserId: input.userId,
-      depthBoundIso: EPOCH_ISO,
-      flow: "incremental",
-    },
-    { singletonKey: `refresh-now-${channelKey}-${input.userId}`, priority: 1 },
-  );
-  return { queue: QUEUES.INSTAGRAM_BACKFILL_ACCOUNT, jobId };
+  const [inserted] = await dbCtx
+    .insert(adapterRefreshQueue)
+    .values({
+      adapterKind: KIND,
+      queueName: "user_post",
+      type: "post_stats",
+      payload: { event_id: input.eventId, post_id: input.externalId },
+      userId: input.userId,
+      priority: -10,
+      status: "pending",
+    })
+    .returning({ id: adapterRefreshQueue.id });
+  return {
+    queue: adapterRefreshQueueLabel(KIND, "user_post"),
+    jobId: inserted ? String(inserted.id) : null,
+  };
 }
 
 /**
@@ -557,6 +569,52 @@ function buildPreviewTitle(caption: string | null, mediaType: string, publishedA
   return `Instagram ${mediaType} · ${publishedAt.toISOString().slice(0, 10)}`;
 }
 
+/**
+ * resolveCachedExternalId — re-derive an instagram_post event's media id from
+ * OUR cache, given the (canonical or raw) event URL. The single-post PREVIEW
+ * (fetchEventPreviewMetadata) UPSERTed instagram_posts with
+ * permalink = the canonical `/p/`|`/reel/` URL and post_id = the media id, so the
+ * create boundary looks the media id up by permalink instead of trusting the
+ * request body (#70 review P1 — a client could pair post A's URL with post B's
+ * media id; the body is untrusted). instagramParseUrl canonicalizes the URL the
+ * SAME way the preview did (`/reels/`→`/reel/`), so the permalink match is exact.
+ * null when no cache row exists (create without a prior preview) → an honest
+ * stats-less card, identical to the recognition-only paste path.
+ */
+async function resolveCachedExternalId(url: string): Promise<string | null> {
+  const parsed = instagramParseUrl(url);
+  const permalink = parsed?.metadata?.permalink;
+  if (typeof permalink !== "string") return null;
+  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
+  const { eq, desc } = await import("drizzle-orm");
+  // permalink is not unique-constrained (PK is post_id). A single physical post
+  // can transiently land TWO rows with the same permalink — the bare `<pk>` form
+  // (single-post fetch, owner unknown) vs the canonical `<pk>_<owner>` form (feed)
+  // — so `LIMIT 1` alone could bind to an arbitrary id. Since this lookup is a
+  // trust boundary (#70 ultrareview P2), make it DETERMINISTIC: prefer the
+  // most-recently-updated row (the freshest write — normally the canonical
+  // `<pk>_<owner>` form the preview/walk produce). A permalink UNIQUE index is the
+  // heavier alternative but would fail the migration on any pre-existing dup.
+  const [row] = await db
+    .select({ postId: instagramPosts.postId })
+    .from(instagramPosts)
+    .where(eq(instagramPosts.permalink, permalink))
+    .orderBy(desc(instagramPosts.updatedAt))
+    .limit(1);
+  return row?.postId ?? null;
+}
+
+/**
+ * registerRoutes — mounts the per-source HTTP routes on the shared Hono app
+ * (createApp iterates allAdapters; mirrors youtube/reddit). Instagram mounts the
+ * same-origin thumbnail proxy: IG's CDN sends Cross-Origin-Resource-Policy:
+ * same-origin, so a raw <img> hotlink is blocked browser-side — the proxy
+ * re-serves the bytes from our origin (#69).
+ */
+function registerRoutes(app: Hono<AdapterAppContext>): void {
+  app.route("/api", instagramThumbnailRoutes);
+}
+
 // instagramAdapter — composes the polling core (./adapter.ts) with the
 // infrastructure-touching methods (registerQueues / scheduleCronTicks /
 // backfillSource) and the create-time hooks (canonicalizeOnCreate /
@@ -573,14 +631,48 @@ export const instagramAdapter: SourceAdapter & typeof instagramAccountAdapterCor
   onSourceCreated,
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
+  resolveCachedExternalId,
+  registerRoutes,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "instagram_post",
     canRun: async () => {
+      // Block when the provider is unconfigured: the lane worker's isEnabled gates
+      // OFF when getSocialProvider is null, so an enqueued row would NEVER run — an
+      // orphan pending row + a forever-spinning Refresh button (#70 ultrareview P1).
+      // A funded budget with an unconstructable provider (e.g. INSTAGRAM_PROVIDER
+      // set but the key missing) is exactly that misconfig — getSocialThrottleState
+      // reads the budget, not provider-constructability, so it can't catch this.
+      if (getSocialProvider("instagram") === null) {
+        return { action: "skip", reason: "instagram not configured" };
+      }
       const throttle = await getSocialThrottleState("instagram", "scrapecreators");
       return throttle === "ninetyfive"
         ? { action: "skip", reason: "instagram budget at 95%" }
         : { action: "run" };
     },
     enqueue: enqueueRefreshNow,
+  },
+  // Per-post Refresh lane (#69). The generic worker bootstrap auto-starts each
+  // declared scheduledWorker; isEnabled gates it off when the provider is
+  // unconfigured (self-host without IG) so the lane never ticks/throws.
+  workQueue: {
+    scheduledWorkers: [
+      {
+        name: "instagram.refresh",
+        intervalMs: 1000,
+        replicaPolicy: "parallel",
+        readyMessage: "instagram refresh queue worker ready",
+        disabledMessage: "instagram refresh queue worker disabled (provider unconfigured)",
+        laneQueue: {
+          strategy: "fixed-slot-round-robin",
+          adapterKind: KIND,
+          slots: INSTAGRAM_REFRESH_SLOTS,
+          fallthrough: INSTAGRAM_REFRESH_SLOTS,
+          batchScope: "global",
+        },
+        isEnabled: () => getSocialProvider("instagram") !== null,
+        tick: instagramRefreshQueueTick,
+      },
+    ],
   },
 };

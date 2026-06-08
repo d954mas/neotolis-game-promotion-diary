@@ -278,6 +278,36 @@ const RawSchema = z.object({
   // there"). The quota_reset cron clears only the daily-cap counter, never
   // this balance. 0 default => degrade.
   SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS: z.coerce.number().int().nonnegative().default(0),
+
+  // Concurrency of the social-provider per-post Refresh lane (#69 follow-on).
+  // The single-post endpoint can't batch (1 request = 1 post), so the lane
+  // worker claims up to N rows per tick and fetches them CONCURRENTLY — this is
+  // the parallelism knob, NOT a batch-in-one-request size like YouTube's 50.
+  // Keep conservative to respect ScrapeCreators rate limits; raise per plan.
+  SOCIAL_REFRESH_LANE_CONCURRENCY: z.coerce.number().int().positive().default(10),
+
+  // Warm auto-refresh (#69 follow-on). A post is "warm" (gets a PAID single-post
+  // refresh via the service_post lane) while it is YOUNGER than this many days
+  // AND has gone stale (not refreshed within INSTAGRAM_WARM_STALENESS_HOURS).
+  // Older than the window → frozen (manual Refresh only). The first week is where
+  // metrics move + wishlist correlation matters; bounding the window caps spend
+  // to ≤ window credits/post.
+  INSTAGRAM_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
+  // Staleness gate: a warm post is re-refreshed only when its last_polled_at is
+  // older than this. Must be JUST OVER the 24h free account-poll interval: the
+  // daily account poll re-stamps last_polled_at on EVERY page-1 post, so a value
+  // >24h keeps page-1 posts UNDER the gate (the free poll covers them — we never
+  // pay) and only OFF-page-1 posts (the free poll no longer reaches them) go stale
+  // enough to earn a paid warm refresh ~1×/day. A value <24h would pay daily for
+  // page-1 posts the free poll already covers — the exact opposite of the cost
+  // goal. 26h = 24h interval + 2h margin for free-poll scheduling jitter.
+  INSTAGRAM_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
+  // Bound on consecutive non-ok polls before a post drops OUT of warm
+  // auto-refresh (IG's HTTP seam collapses transient + budget-exhaustion into
+  // last_poll_status='auth_error'; a single blip must NOT freeze a post forever,
+  // and a PERSISTENT failure must NOT churn credits forever — poll_failure_count
+  // bounds both). Resets to 0 on the next ok poll.
+  INSTAGRAM_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -402,6 +432,10 @@ export const env = {
   SOCIAL_BACKFILL_WINDOW_DAYS: raw.SOCIAL_BACKFILL_WINDOW_DAYS,
   SOCIAL_PROVIDER_DAILY_CAP_CREDITS: raw.SOCIAL_PROVIDER_DAILY_CAP_CREDITS,
   SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS: raw.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS,
+  SOCIAL_REFRESH_LANE_CONCURRENCY: raw.SOCIAL_REFRESH_LANE_CONCURRENCY,
+  INSTAGRAM_WARM_WINDOW_DAYS: raw.INSTAGRAM_WARM_WINDOW_DAYS,
+  INSTAGRAM_WARM_STALENESS_HOURS: raw.INSTAGRAM_WARM_STALENESS_HOURS,
+  INSTAGRAM_WARM_MAX_FAILURES: raw.INSTAGRAM_WARM_MAX_FAILURES,
 } as const;
 
 export type Env = typeof env;

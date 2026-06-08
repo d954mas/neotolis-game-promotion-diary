@@ -73,14 +73,16 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         target: instagramPosts.postId,
         set: {
           // Refresh snippet fields. COALESCE keeps a prior non-null value when
-          // the caller passes null (e.g. a metrics-only re-poll that did not
-          // re-resolve the account id), but ALWAYS refreshes thumbnail_url —
-          // the expiring CDN URL must reflect the latest poll.
+          // the caller passes null. An OK poll always carries a fresh
+          // thumbnail_url (so COALESCE refreshes the expiring CDN URL, D-08); a
+          // NON-OK poll (a failed/deleted refresh) carries none → COALESCE
+          // PRESERVES the last good URL instead of blanking the cover (#69 P1-A —
+          // a transient Refresh failure must not erase a working thumbnail).
           accountId: sql`COALESCE(${args.accountId ?? null}, ${instagramPosts.accountId})`,
           mediaType: sql`COALESCE(${args.mediaType ?? null}, ${instagramPosts.mediaType})`,
           caption: args.caption ?? null,
           permalink: sql`COALESCE(${args.permalink ?? null}, ${instagramPosts.permalink})`,
-          thumbnailUrl: args.thumbnailUrl ?? null,
+          thumbnailUrl: sql`COALESCE(${args.thumbnailUrl ?? null}, ${instagramPosts.thumbnailUrl})`,
           publishedAt: sql`COALESCE(${args.publishedAt ?? null}, ${instagramPosts.publishedAt})`,
           lastPolledAt: now,
           lastPollStatus: args.status,

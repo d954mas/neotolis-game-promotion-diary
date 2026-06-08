@@ -380,6 +380,7 @@
         notes: payload.notes,
         authorIsMe: payload.authorIsMe,
         metadata: payload.metadata,
+        externalId: payload.externalId,
       }),
     });
     if (res.ok) {

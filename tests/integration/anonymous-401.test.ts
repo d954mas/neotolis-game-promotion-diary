@@ -99,6 +99,12 @@ describe("anonymous-401 sweep", () => {
     // tenantScope middleware fires before redditFetch ever reaches
     // the Reddit servers, so anonymous probes never burn a unit.
     "/api/reddit/fetch-metadata",
+    // Instagram same-origin thumbnail proxy (#69). IG's CDN sends
+    // Cross-Origin-Resource-Policy: same-origin, so a raw <img> hotlink is
+    // browser-blocked; the feed card loads /api/instagram/thumbnail/<postId>
+    // instead. adapter.registerRoutes mounts it; tenantScope gates it so an
+    // anonymous probe → 401 before any CDN fetch.
+    "/api/instagram/thumbnail/:postId",
     // Phase 3.4 design-v2-ux — bulk endpoints (PATCH + DELETE on the
     // same /api/events/bulk path). Wave 2 Plan 06 mounted the Hono
     // route; the path participates in the load-bearing toContain guard

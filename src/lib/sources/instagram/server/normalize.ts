@@ -279,8 +279,22 @@ export function mapSinglePostToNormalized(
   isReelUrl: boolean,
 ): NormalizedSinglePost {
   const caption = media.edge_media_to_caption?.edges?.[0]?.node?.text ?? null;
+  const ownerId = media.owner?.id ?? null;
   return {
-    id: media.id,
+    // The feed/reels endpoints key a post as `<media_pk>_<owner_id>`, but the
+    // single-post GraphQL endpoint returns the bare `<media_pk>` here. Build the
+    // suffixed form so a PASTED post shares its instagram_posts cache row +
+    // snapshots + polling with the SAME post imported from a source — otherwise
+    // it is a divergent, never-refreshed orphan: different stats and an expiring
+    // (never re-fetched) thumbnail. #69 follow-up. Skip if owner is absent or
+    // the id already carries the suffix.
+    //
+    // ASSUMPTION: media.owner.id == the `<owner_id>` the feed/reels endpoints use.
+    // True for own-account tracking (the diary use case). For a reshare/collab the
+    // single-post owner could differ → the paste would key on a different id than
+    // the source import (the orphan we guard against). Acceptable risk for the use
+    // case; revisit (key on `<pk>` everywhere) if cross-account posts become common.
+    id: ownerId !== null && !media.id.includes("_") ? `${media.id}_${ownerId}` : media.id,
     shortcode: media.shortcode ?? null,
     kind: typenameToKind(media.__typename, isReelUrl),
     publishedAt: new Date(media.taken_at_timestamp * 1000), // unix SECONDS
@@ -291,7 +305,7 @@ export function mapSinglePostToNormalized(
     },
     caption,
     thumbnailUrl: media.thumbnail_src ?? null,
-    ownerId: media.owner?.id ?? null,
+    ownerId,
     ownerUsername: media.owner?.username ?? null,
   };
 }

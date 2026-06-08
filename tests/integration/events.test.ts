@@ -786,10 +786,12 @@ describe("createEvent kind-aware enrichment", () => {
 
   it("enrichFromUrl RECOGNIZES an Instagram permalink (kind+URL, empty title, no fetch, no DB write)", async () => {
     // Phase 08 recognition-only: there is no IG single-post metadata/stats
-    // API, so enrichFromUrl must NOT throw 'unsupported_url' / 'kind_not_yet_
-    // functional' for a valid IG URL. It returns kind=instagram_post + the
-    // shortcode externalId + the canonical permalink with an EMPTY title (the
-    // user types the title manually). No network call, no event row written.
+    // API when the provider is unconfigured, so enrichFromUrl must NOT throw
+    // 'unsupported_url' / 'kind_not_yet_functional' for a valid IG URL. It
+    // returns kind=instagram_post + a NULL externalId (the URL shortcode is NOT
+    // the media-id cache key — storing it would strand the event on the pending
+    // badge, #69) + the canonical permalink with an EMPTY title (the user types
+    // the title manually). No network call, no event row written.
     const u = await seedUserDirectly({ email: `ev17ig-${uniq()}@test.local` });
 
     const result = await enrichFromUrl(
@@ -798,7 +800,7 @@ describe("createEvent kind-aware enrichment", () => {
       "127.0.0.1",
     );
     expect(result.kind).toBe("instagram_post");
-    expect(result.externalId).toBe("XyZ_-789");
+    expect(result.externalId).toBeNull();
     expect(result.canonicalUrl).toBe("https://www.instagram.com/reel/XyZ_-789/");
     expect(result.title).toBe(""); // No live preview — user supplies the title.
     expect(result.thumbnailUrl).toBeNull();
@@ -809,12 +811,14 @@ describe("createEvent kind-aware enrichment", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("createEvent saves a bare instagram_post event (externalId derived from the pasted URL)", async () => {
-    // The accepted manual-entry result: a user pastes an IG link (recognized
-    // above), types a Title, and saves. createEvent derives the externalId
-    // (shortcode) from the URL via parseAnyUrl and persists a bare event —
-    // no stats, no thumbnail. It renders in /feed with the central "Instagram"
-    // label and a plain card (no media_type pill, no enrichment row).
+  it("createEvent saves a bare instagram_post event with NULL externalId (shortcode is not the media-id cache key, #69)", async () => {
+    // The accepted manual-entry result: a user pastes an IG link, types a Title,
+    // and saves WITHOUT a preview fetch. createEvent does NOT derive an
+    // externalId from the URL for instagram_post — the URL shortcode is not the
+    // media-id key the snapshot/enrichment caches use, so storing it would
+    // strand the event on the "pending" badge with no stats forever (#69).
+    // externalId stays null → a bare, honest stats-less card. (A media-id-keyed
+    // enriched event requires the preview's externalId, covered elsewhere.)
     const u = await seedUserDirectly({ email: `ev17igsave-${uniq()}@test.local` });
 
     const ev = await createEvent(
@@ -831,9 +835,8 @@ describe("createEvent kind-aware enrichment", () => {
     expect(ev.kind).toBe("instagram_post");
     expect(ev.title).toBe("My launch reel");
     expect(ev.url).toBe("https://www.instagram.com/p/CabcDEF123/");
-    // externalId derived from the pasted permalink shortcode by createEvent's
-    // parseAnyUrl enrichment (kind matches → externalId used).
-    expect(ev.externalId).toBe("CabcDEF123");
+    // No URL-derived externalId for IG — the shortcode is not the cache key (#69).
+    expect(ev.externalId).toBeNull();
 
     // It appears in the user's feed.
     const feed = await listFeedPage(u.id, {}, null);

@@ -84,6 +84,14 @@
     const base = baseChartOptions({ reducedMotion });
     return {
       ...base,
+      // svelte-echarts <Chart> applies options with notMerge:true, so EVERY
+      // setOption (e.g. a Refresh-Now invalidateAll re-running the loader) RESETS
+      // the chart and replays the entry animation — the "graph redraws from 0"
+      // jank (#69). Disable animation on this chart so a data reload updates in
+      // place (instant), not from 0. The custom legend toggle still works (it
+      // filters the series array, which notMerge:true replaces each setOption).
+      // Mirrors what reduced-motion users already get.
+      animation: false,
       grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
       tooltip: {
         trigger: "axis" as const,

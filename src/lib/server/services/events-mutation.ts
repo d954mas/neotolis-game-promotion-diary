@@ -19,7 +19,7 @@ import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { withQuotaGuard, getUserQuotaUsedToday } from "./quota.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
-import { getAdapter } from "$lib/sources/registry.js";
+import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { logger } from "../logger.js";
 import { mapEventsToDtos, type EventDto } from "../dto.js";
 import {
@@ -195,8 +195,38 @@ export async function createEvent(
     // services through syncStats/create flows.
     const { parseAnyUrl } = await import("$lib/sources/url.js");
     const parsed = parseAnyUrl(input.url);
-    if (parsed !== null && parsed.kind === input.kind) {
+    // instagram_post is excluded: its URL carries only the shortcode, which is
+    // NOT the media-id key the snapshot / feed-enrichment caches use. The media
+    // id is resolved ONLY by the preview flow and arrives as an explicit
+    // input.externalId (handled above). Deriving the shortcode here would save
+    // an event whose external_id never matches any snapshot — stuck on the
+    // "pending" badge with no stats forever (issue #69). Leaving it null yields
+    // an honest stats-less manual card instead.
+    if (parsed !== null && parsed.kind === input.kind && parsed.kind !== "instagram_post") {
       derivedExternalId = parsed.externalId;
+    }
+  }
+
+  // Cache-derived external_id (registry-driven; #70 review P1 + ultrareview).
+  // An adapter that declares `resolveCachedExternalId` owns its event-kind's
+  // external_id AUTHORITATIVELY because the id is NOT URL-derivable and the request
+  // body is untrusted (instagram_post: the MEDIA id is keyed by canonical permalink
+  // in our own cache, populated by the preview — a client could otherwise pair post
+  // A's URL with post B's media id). When the matched adapter provides it, it
+  // OVERRIDES any body/parsed value above (this runs REGARDLESS of input.externalId
+  // — the opposite of the "caller wins" rule, which is the whole point). Adapters
+  // whose id IS URL-derivable (YouTube videoId, Reddit t3) don't implement it → the
+  // parseAnyUrl result above stands. No cache row → null → honest stats-less card.
+  const cacheKindSource = eventKindToSourceKind(input.kind);
+  if (
+    cacheKindSource !== null &&
+    hasAdapter(cacheKindSource) &&
+    input.url != null &&
+    input.url !== ""
+  ) {
+    const adapter = getAdapter(cacheKindSource);
+    if (adapter.resolveCachedExternalId !== undefined) {
+      derivedExternalId = await adapter.resolveCachedExternalId(input.url);
     }
   }
 
@@ -536,13 +566,14 @@ export async function enrichFromUrl(
   // the soft path over a hard 429 — no credit was burned, so the cost guardrail
   // still held.
   if (parsed.kind === "instagram_post") {
-    // Recognition-only carries the URL SHORTCODE, not the media id the cache keys
-    // on (no live fetch). It won't enrich, and a later account poll won't re-bind
-    // it (that poll creates a SEPARATE media-id-keyed event) — re-paste once the
-    // provider recovers to get an enriched event.
+    // Recognition-only has NO media id (no live fetch resolved one). externalId
+    // is null, NOT the URL shortcode: the shortcode is not the cache key, so
+    // storing it would strand the event on the "pending" badge with no stats
+    // forever (issue #69). null yields an honest stats-less manual card; re-paste
+    // once the provider recovers to get an enriched, media-id-keyed event.
     const recognitionOnly: EnrichmentResult = {
       kind: "instagram_post",
-      externalId: parsed.externalId,
+      externalId: null,
       title: "",
       occurredAt: null,
       thumbnailUrl: null,
@@ -595,9 +626,10 @@ export async function enrichFromUrl(
       // single-post fetch UPSERTed instagram_posts + a snapshot keyed by the
       // media id; saving the event with the shortcode would orphan it from the
       // cache so feed-enrichment / metric-series / poll-state / refresh-now
-      // never match. Falls back to the parsed shortcode only if the adapter
-      // didn't surface a media id (defensive — the IG adapter always does).
-      externalId: preview.externalId ?? parsed.externalId,
+      // never match. Falls back to null (never the shortcode) if the adapter
+      // somehow didn't surface a media id (defensive — the IG adapter always
+      // does): an unenriched-but-honest card beats a permanently-pending one.
+      externalId: preview.externalId ?? null,
       title: preview.title,
       occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,
