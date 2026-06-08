@@ -50,11 +50,18 @@
   } = $props();
 
   // BACK-01: social sources import a CURRENT snapshot, not per-post history
-  // (D-14), and cap the number of imported posts per window (D-10). Gate both
-  // honesty notes on instagram_account; the post-cap note only on wide presets.
-  const isSocialSource = $derived(kind === "instagram_account");
+  // (D-14) → the snapshot note renders for both instagram_account AND
+  // telegram_channel (older Telegram posts also import as a current snapshot;
+  // per-post view history only accrues once tracking begins).
+  //
+  // The POST-CAP note stays gated on instagram_account ONLY: IG caps the
+  // imported posts per window (D-10, SOCIAL_BACKFILL_MAX_POSTS), but Telegram
+  // has NO cap — the resumable ?before walker slow-drains the whole channel
+  // through the global pacer (Plan 04), so a "up to N posts" note would be a
+  // false limit for telegram_channel.
+  const isSocialSource = $derived(kind === "instagram_account" || kind === "telegram_channel");
   const showPostCapNote = $derived(
-    isSocialSource &&
+    kind === "instagram_account" &&
       postCap !== undefined &&
       !customDate &&
       (value === "90d" || value === "1y" || value === "everything"),
