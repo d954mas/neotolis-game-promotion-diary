@@ -14,6 +14,7 @@
 
 import { logger } from "$lib/server/logger.js";
 import { getSocialThrottleState } from "../quota.js";
+import { getSocialProvider } from "../provider/registry.js";
 import { selectWarmInstagramPostIds } from "../warm-eligibility.js";
 import { enqueueServiceInstagramPostStats } from "./enqueue-service-post-stats.js";
 
@@ -21,6 +22,17 @@ const PLATFORM = "instagram";
 const PROVIDER = "scrapecreators";
 
 export async function handleInstagramWarmRefresh(job: { id?: string }): Promise<void> {
+  // Don't enqueue work the lane can't run: the refresh lane worker is disabled
+  // (isEnabled) when the provider is unconfigured, so service_post rows would
+  // orphan as pending forever (#70 ultrareview P1). Mirror the manual canRun gate.
+  if (getSocialProvider("instagram") === null) {
+    logger.debug(
+      { jobId: job.id },
+      "instagram.poll.cron tier=warm: provider unconfigured — skip (lane disabled)",
+    );
+    return;
+  }
+
   const throttle = await getSocialThrottleState(PLATFORM, PROVIDER);
   if (throttle === "ninetyfive" || throttle === "eighty") {
     logger.info(

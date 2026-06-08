@@ -19,7 +19,7 @@ import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { withQuotaGuard, getUserQuotaUsedToday } from "./quota.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
-import { getAdapter } from "$lib/sources/registry.js";
+import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { logger } from "../logger.js";
 import { mapEventsToDtos, type EventDto } from "../dto.js";
 import {
@@ -207,21 +207,27 @@ export async function createEvent(
     }
   }
 
-  // #70 review P1 — instagram_post external_id is the MEDIA id: NOT URL-derivable
-  // (the permalink carries only the shortcode) and supplied by the client preview
-  // round-trip, so the request body's externalId is UNTRUSTED. A caller could pair
-  // post A's URL with post B's media id, binding feed-enrichment / thumbnail proxy
-  // / refresh to the wrong cache key. Re-derive from OUR OWN cache via the adapter
-  // seam (instagram_posts.permalink = the canonical url the preview UPSERTed),
-  // OVERRIDING the body value (this runs regardless of input.externalId — the
-  // opposite of the "caller wins" rule above, which is the whole point). No cache
-  // row (create without a prior preview) → null → an honest stats-less card,
-  // identical to the recognition-only paste path.
-  if (input.kind === "instagram_post" && input.url != null && input.url !== "") {
-    const igAdapter = getAdapter("instagram_account");
-    derivedExternalId = igAdapter.resolveCachedExternalId
-      ? await igAdapter.resolveCachedExternalId(input.url)
-      : null;
+  // Cache-derived external_id (registry-driven; #70 review P1 + ultrareview).
+  // An adapter that declares `resolveCachedExternalId` owns its event-kind's
+  // external_id AUTHORITATIVELY because the id is NOT URL-derivable and the request
+  // body is untrusted (instagram_post: the MEDIA id is keyed by canonical permalink
+  // in our own cache, populated by the preview — a client could otherwise pair post
+  // A's URL with post B's media id). When the matched adapter provides it, it
+  // OVERRIDES any body/parsed value above (this runs REGARDLESS of input.externalId
+  // — the opposite of the "caller wins" rule, which is the whole point). Adapters
+  // whose id IS URL-derivable (YouTube videoId, Reddit t3) don't implement it → the
+  // parseAnyUrl result above stands. No cache row → null → honest stats-less card.
+  const cacheKindSource = eventKindToSourceKind(input.kind);
+  if (
+    cacheKindSource !== null &&
+    hasAdapter(cacheKindSource) &&
+    input.url != null &&
+    input.url !== ""
+  ) {
+    const adapter = getAdapter(cacheKindSource);
+    if (adapter.resolveCachedExternalId !== undefined) {
+      derivedExternalId = await adapter.resolveCachedExternalId(input.url);
+    }
   }
 
   // The events INSERT + junction INSERT loop run in a single tx so a

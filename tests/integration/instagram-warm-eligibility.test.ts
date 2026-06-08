@@ -23,6 +23,18 @@ vi.mock("../../src/lib/sources/instagram/server/quota.js", async (importOriginal
   return { ...actual, getSocialThrottleState: async () => throttle };
 });
 
+// The warm handler gates on getSocialProvider (#70 P1) — control it so the
+// "throttle ok" tests aren't accidentally skipped by the test env's unconfigured IG.
+let providerConfigured = true;
+vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    getSocialProvider: (p: string) =>
+      providerConfigured && p === "instagram" ? ({ name: "scrapecreators" } as never) : null,
+  };
+});
+
 const { db } = await import("../../src/lib/server/db/client.js");
 const { instagramPosts, adapterRefreshQueue, events } =
   await import("../../src/lib/server/db/schema/index.js");
@@ -80,6 +92,7 @@ async function seedCandidate(userId: string, opts: SeedOpts): Promise<string> {
 
 beforeEach(() => {
   throttle = "ok";
+  providerConfigured = true;
 });
 
 describe("selectWarmInstagramPostIds predicate (#70)", () => {
@@ -197,5 +210,20 @@ describe("handleInstagramWarmRefresh producer (#70)", () => {
       .from(adapterRefreshQueue)
       .where(eq(sql`${adapterRefreshQueue.payload}->>'post_id'`, id));
     expect(rows).toHaveLength(0);
+  });
+
+  it("skips when the provider is unconfigured — lane is disabled, no orphan rows (#70 P1)", async () => {
+    const u = await seedUserDirectly({ email: `warm-h-noprov-${uniq()}@t.io` });
+    const id = await seedCandidate(u.id, { publishedAgoDays: 2, lastPolledAgoHours: 30 });
+    throttle = "ok";
+    providerConfigured = false; // getSocialProvider("instagram") === null
+
+    await handleInstagramWarmRefresh({ id: "warm-job-noprov" });
+
+    const rows = await db
+      .select({ id: adapterRefreshQueue.id })
+      .from(adapterRefreshQueue)
+      .where(eq(sql`${adapterRefreshQueue.payload}->>'post_id'`, id));
+    expect(rows).toHaveLength(0); // never enqueued — the lane could never run it
   });
 });

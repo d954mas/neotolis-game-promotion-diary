@@ -585,11 +585,20 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
   const permalink = parsed?.metadata?.permalink;
   if (typeof permalink !== "string") return null;
   const { instagramPosts } = await import("$lib/server/db/schema/index.js");
-  const { eq } = await import("drizzle-orm");
+  const { eq, desc } = await import("drizzle-orm");
+  // permalink is not unique-constrained (PK is post_id). A single physical post
+  // can transiently land TWO rows with the same permalink — the bare `<pk>` form
+  // (single-post fetch, owner unknown) vs the canonical `<pk>_<owner>` form (feed)
+  // — so `LIMIT 1` alone could bind to an arbitrary id. Since this lookup is a
+  // trust boundary (#70 ultrareview P2), make it DETERMINISTIC: prefer the
+  // most-recently-updated row (the freshest write — normally the canonical
+  // `<pk>_<owner>` form the preview/walk produce). A permalink UNIQUE index is the
+  // heavier alternative but would fail the migration on any pre-existing dup.
   const [row] = await db
     .select({ postId: instagramPosts.postId })
     .from(instagramPosts)
     .where(eq(instagramPosts.permalink, permalink))
+    .orderBy(desc(instagramPosts.updatedAt))
     .limit(1);
   return row?.postId ?? null;
 }
@@ -626,6 +635,15 @@ export const instagramAdapter: SourceAdapter & typeof instagramAccountAdapterCor
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "instagram_post",
     canRun: async () => {
+      // Block when the provider is unconfigured: the lane worker's isEnabled gates
+      // OFF when getSocialProvider is null, so an enqueued row would NEVER run — an
+      // orphan pending row + a forever-spinning Refresh button (#70 ultrareview P1).
+      // A funded budget with an unconstructable provider (e.g. INSTAGRAM_PROVIDER
+      // set but the key missing) is exactly that misconfig — getSocialThrottleState
+      // reads the budget, not provider-constructability, so it can't catch this.
+      if (getSocialProvider("instagram") === null) {
+        return { action: "skip", reason: "instagram not configured" };
+      }
       const throttle = await getSocialThrottleState("instagram", "scrapecreators");
       return throttle === "ninetyfive"
         ? { action: "skip", reason: "instagram budget at 95%" }

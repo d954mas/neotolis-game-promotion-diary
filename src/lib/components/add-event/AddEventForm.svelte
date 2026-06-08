@@ -124,6 +124,10 @@
     fetched = false;
     fetchedSrc = "";
     fetchedExternalId = null;
+    // Clear fetched metadata too (#70 ultrareview P3): otherwise a fetch of URL A
+    // (e.g. Reddit subreddit) survives a Reset/edit and gets forwarded on submit
+    // for the new URL B — stale denormalized metadata on the saved event.
+    fetchedMetadata = {};
     urlError = null;
   }
   let urlError = $state<string | null>(null);
@@ -503,6 +507,7 @@
         oninput={() => {
           fetched = false;
           fetchedExternalId = null;
+          fetchedMetadata = {};
           urlError = null;
         }}
         onkeydown={(e) => {
