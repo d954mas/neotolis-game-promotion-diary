@@ -68,6 +68,10 @@ const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
   "reddit_account",
   "reddit_subreddit",
   "instagram_account",
+  // telegram_channel is functional (Plan 09-05) AND needs NO provider-config
+  // gate — t.me/s scraping is free, always available (the structural contrast
+  // with instagram_account's isInstagramConfigured branch below).
+  "telegram_channel",
 ]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata.
@@ -79,7 +83,7 @@ const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   reddit_account: "available",
   reddit_subreddit: "available",
   twitter_account: "out of scope - Twitter API is paid",
-  telegram_channel: "coming soon",
+  telegram_channel: "available",
   discord_server: "coming soon",
   instagram_account: "not configured by operator",
 };
