@@ -100,6 +100,21 @@ export interface CardEventLite {
     thumbnailUrl: string | null;
     mediaType: string | null;
   };
+  /** Telegram public-data decoration attached by
+   *  sources/telegram/server/feed-enrichment.ts (mirrors instagramEnrichment).
+   *  Telegram is VIEWS-ONLY (D-04) — a single nullable view count, never likes
+   *  / comments. metrics-by-presence (D-05): a very-new / views-hidden post
+   *  carries null views, NEVER coerced to 0. thumbnailUrl is the fresh t.me
+   *  hotlink (D-06), mediaKind ("photo" | "video" | "album" | null) drives the
+   *  adaptive media-vs-text card layout — null = text-only post. */
+  telegramEnrichment?: {
+    stats: {
+      viewCount: number | null;
+      polledAt: Date | string;
+    } | null;
+    thumbnailUrl: string | null;
+    mediaKind: string | null;
+  };
 }
 
 export interface CardSourceLite {
@@ -144,6 +159,17 @@ export function redditAuthorByline(metadata: unknown): string | null {
  *  is owned by data_sources and can be renamed). Falls back to displayName
  *  (user's own label) then the raw handleUrl. Mirrors youtubeChannelLabel. */
 export function instagramHandleLabel(source: CardSourceLite | null): string {
+  return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
+}
+
+/** Read the Telegram channel display name / @handle from FK-joined
+ *  data_sources, NEVER from event metadata (no-denorm rule — the @handle is
+ *  owned by data_sources and the channel owner can rename it). Falls back to
+ *  displayName (user's own label) then the raw handleUrl. Mirrors
+ *  instagramHandleLabel / youtubeChannelLabel. (The metadata-reading
+ *  telegramChannelLabel below is the URL-intrinsic numeric/slug key, a
+ *  different concern — this is the renameable display surface.) */
+export function telegramChannelHandleLabel(source: CardSourceLite | null): string {
   return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
 }
 
