@@ -400,6 +400,13 @@
       "when": 1780690896206,
       "tag": "0056_legal_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1780944521743,
+      "tag": "0057_flaky_talisman",
+      "breakpoints": true
     }
   ]
 }
