@@ -308,6 +308,21 @@ const RawSchema = z.object({
   // and a PERSISTENT failure must NOT churn credits forever — poll_failure_count
   // bounds both). Resets to 0 on the next ok poll.
   INSTAGRAM_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
+
+  // Telegram warm per-post auto-refresh (Phase 9, free t.me/s scrape). A post
+  // is "warm" (gets a single-post ?embed=1 refresh via the service_post lane)
+  // while it is YOUNGER than this many days AND has gone stale (not refreshed
+  // within TELEGRAM_WARM_STALENESS_HOURS). Denser than IG's 7d/26h because
+  // there is NO paid 24h double-poll to dodge — Telegram is free.
+  TELEGRAM_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
+  // Staleness gate: a warm post is re-refreshed only when last_polled_at is
+  // older than this. 12h > the 6h listing-poll interval, so a post still on
+  // the ~20-post listing (re-stamped every 6h) never enters the warm lane —
+  // the warm lane only catches posts that scrolled OFF the listing.
+  TELEGRAM_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(12),
+  // Bound on consecutive non-ok polls before a post drops OUT of warm
+  // auto-refresh (stops hammering a permanently-broken post). Resets on ok.
+  TELEGRAM_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -436,6 +451,9 @@ export const env = {
   INSTAGRAM_WARM_WINDOW_DAYS: raw.INSTAGRAM_WARM_WINDOW_DAYS,
   INSTAGRAM_WARM_STALENESS_HOURS: raw.INSTAGRAM_WARM_STALENESS_HOURS,
   INSTAGRAM_WARM_MAX_FAILURES: raw.INSTAGRAM_WARM_MAX_FAILURES,
+  TELEGRAM_WARM_WINDOW_DAYS: raw.TELEGRAM_WARM_WINDOW_DAYS,
+  TELEGRAM_WARM_STALENESS_HOURS: raw.TELEGRAM_WARM_STALENESS_HOURS,
+  TELEGRAM_WARM_MAX_FAILURES: raw.TELEGRAM_WARM_MAX_FAILURES,
 } as const;
 
 export type Env = typeof env;

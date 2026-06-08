@@ -93,6 +93,17 @@ export const QUEUES = {
    *  spend counter / audit-transition Set — NEVER the prepaid balance, which
    *  is a monotonic hard ceiling (D-16 / Pitfall 3). */
   INSTAGRAM_QUOTA_RESET: "instagram.quota_reset",
+
+  // Per-kind: telegram (Phase 9, free t.me/s scrape — no secret).
+  /** Telegram 6h listing poll + warm producer collapsed via pg-boss
+   *  key-based schedules ({ tier } payload — active/cold 6h listing /
+   *  warm per-post). The poll-cron handler dispatches on job.data.tier.
+   *  Cron handlers do ZERO t.me HTTP — they enqueue adapter_refresh_queue
+   *  rows; the lane worker fetches (Reddit DV-RDT-7 model). Telegram needs
+   *  NO quota_reset queue (free, no daily cap) and NO separate backfill
+   *  queue (the backfill walker drains via adapter_refresh_queue lane rows,
+   *  not pg-boss). ONE pg-boss cron queue only. */
+  TELEGRAM_POLL_CRON: "telegram.poll.cron",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
