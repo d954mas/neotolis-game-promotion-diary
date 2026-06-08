@@ -121,18 +121,25 @@ describe("kind-display config — derived helper sets stay in lockstep", () => {
   it("POLLABLE_EVENT_KINDS equals exactly the pollable=true entries", () => {
     const expected = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_DISPLAY[k].pollable);
     expect([...POLLABLE_EVENT_KINDS].sort()).toEqual([...expected].sort());
-    // Sanity: the three API-polled kinds are in, a free-form kind is out.
+    // Sanity: the four polled kinds are in, a free-form kind is out.
     expect(POLLABLE_EVENT_KINDS.has("youtube_video")).toBe(true);
     expect(POLLABLE_EVENT_KINDS.has("reddit_post")).toBe(true);
     expect(POLLABLE_EVENT_KINDS.has("instagram_post")).toBe(true);
+    // Phase 09 — telegram_post is now polled (free t.me/s listing + warm lane).
+    expect(POLLABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
     expect(POLLABLE_EVENT_KINDS.has("post")).toBe(false);
     expect(POLLABLE_EVENT_KINDS.has("conference")).toBe(false);
+    // Still-deferred kinds stay out.
+    expect(POLLABLE_EVENT_KINDS.has("twitter_post")).toBe(false);
+    expect(POLLABLE_EVENT_KINDS.has("discord_drop")).toBe(false);
   });
 
   it("CHARTABLE_EVENT_KINDS equals exactly the chartable=true entries", () => {
     const expected = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_DISPLAY[k].chartable);
     expect([...CHARTABLE_EVENT_KINDS].sort()).toEqual([...expected].sort());
     expect(CHARTABLE_EVENT_KINDS.has("instagram_post")).toBe(true);
+    // Phase 09 — telegram_post charts its view_count series.
+    expect(CHARTABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
     expect(CHARTABLE_EVENT_KINDS.has("other")).toBe(false);
   });
 });
@@ -163,21 +170,24 @@ describe("kind-display config — Add Event manual picker is config-driven + in 
     }
   });
 
-  it("includes instagram_post (Phase 08) and excludes the not-yet-functional kinds", () => {
+  it("includes instagram_post (Phase 08) + telegram_post (Phase 09) and excludes the still-deferred kinds", () => {
     const set = new Set<string>(MANUAL_EVENT_KINDS);
     expect(set.has("instagram_post")).toBe(true);
+    // Phase 09 — telegram_post joins the paste-flow kinds (free t.me/s).
+    expect(set.has("telegram_post")).toBe(true);
     // The deferred kinds (no adapter, no paste flow, filtered from /feed) must
     // NOT be manually creatable — letting a user create un-filterable events
     // is the footgun manualCreatable:false prevents.
     expect(set.has("twitter_post")).toBe(false);
-    expect(set.has("telegram_post")).toBe(false);
     expect(set.has("discord_drop")).toBe(false);
   });
 
-  it("preserves the picker order (instagram_post right after reddit_post)", () => {
+  it("preserves the picker order (instagram_post after reddit_post, telegram_post after instagram_post)", () => {
     const ri = MANUAL_EVENT_KINDS.indexOf("reddit_post");
     const ii = MANUAL_EVENT_KINDS.indexOf("instagram_post");
+    const ti = MANUAL_EVENT_KINDS.indexOf("telegram_post");
     expect(ri).toBeGreaterThanOrEqual(0);
     expect(ii).toBe(ri + 1);
+    expect(ti).toBe(ii + 1);
   });
 });
