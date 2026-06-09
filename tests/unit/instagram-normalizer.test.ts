@@ -189,6 +189,54 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
     expect(page.endOfFeed).toBe(true);
     expect(page.nextCursor).toBeNull();
   });
+
+  // The posts response carries a FREE top-level `user` owner object (the account
+  // whose feed this is) — captured into ProviderPage.owner so the walker can
+  // refresh instagram_accounts with NO extra credit.
+  it("normalizePostsResponse captures the FREE top-level user owner (id/username/avatar)", () => {
+    const page = normalizePostsResponse({
+      items: [PHOTO_ITEM],
+      next_max_id: null,
+      more_available: false,
+      user: { id: "528817151", username: "nasa", profile_pic_url: "https://cdn/nasa.jpg" },
+    });
+    expect(page.owner).toEqual({
+      accountId: "528817151",
+      username: "nasa",
+      avatarUrl: "https://cdn/nasa.jpg",
+    });
+  });
+
+  it("normalizePostsResponse: owner is null when the response omits the user object", () => {
+    const page = normalizePostsResponse({
+      items: [PHOTO_ITEM],
+      next_max_id: null,
+      more_available: false,
+    });
+    expect(page.owner).toBeNull();
+  });
+
+  it("normalizePostsResponse: a user with pk (numeric) but no id still resolves accountId", () => {
+    const page = normalizePostsResponse({
+      items: [PHOTO_ITEM],
+      next_max_id: null,
+      more_available: false,
+      user: { pk: 99, username: "pkonly", profile_pic_url_hd: "https://cdn/hd.jpg" },
+    });
+    expect(page.owner).toEqual({
+      accountId: "99",
+      username: "pkonly",
+      avatarUrl: "https://cdn/hd.jpg",
+    });
+  });
+
+  it("normalizeReelsResponse: owner is null when the reels response carries no user", () => {
+    const page = normalizeReelsResponse({
+      items: [{ media: REEL_ITEM }],
+      paging_info: { max_id: null, more_available: false },
+    });
+    expect(page.owner).toBeNull();
+  });
 });
 
 // ---- Single-post (/v1/instagram/post?url=) shape (issue #65) ----

@@ -123,6 +123,7 @@ export const ALLOWLIST_TABLES = new Set([
   // a post's play/like/comment counts are identical regardless of which
   // tenant looked them up; the operator spend/balance rows are operator-side
   // state keyed by platform/provider, not tenant data).
+  "instagramAccounts", // public external data, no tenant scope (account subject entity)
   "instagramPosts", // public external data, no tenant scope
   "instagramPostSnapshots", // public external data, no tenant scope (time-series)
   "socialProviderSpend", // operator-side spend counter, no tenant scope

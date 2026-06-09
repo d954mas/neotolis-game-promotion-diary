@@ -29,31 +29,56 @@ describe("scrapeCreatorsProvider.resolveAccount (profile parsing)", () => {
     instagramFetch.mockReset();
   });
 
-  it("reads the real data.user nesting → { accountId, displayName }", async () => {
-    // The exact live shape (trimmed to the load-bearing fields).
+  it("reads the real data.user nesting → { accountId, displayName, ...entity fields }", async () => {
+    // The exact live shape (trimmed) plus the entity-metadata fields read off the
+    // SAME response (no extra fetch) to populate instagram_accounts.
     instagramFetch.mockResolvedValueOnce(
       jsonResponse({
         success: true,
         credits_remaining: 91,
         status: "ok",
-        data: { user: { id: "528817151", username: "nasa", full_name: "NASA" } },
+        data: {
+          user: {
+            id: "528817151",
+            username: "nasa",
+            full_name: "NASA",
+            profile_pic_url: "https://cdn/nasa.jpg",
+            follower_count: 98000000,
+          },
+        },
       }),
     );
 
     const result = await scrapeCreatorsProvider.resolveAccount("instagram", "nasa");
 
     // Pre-fix this is null (user pointed at the { user } wrapper, no id).
-    expect(result).toEqual({ accountId: "528817151", displayName: "NASA" });
+    expect(result).toEqual({
+      accountId: "528817151",
+      displayName: "NASA",
+      username: "nasa",
+      fullName: "NASA",
+      avatarUrl: "https://cdn/nasa.jpg",
+      followerCount: 98000000,
+    });
   });
 
-  it("falls back to username when full_name is absent", async () => {
+  it("falls back to username for displayName + edge_followed_by.count for followers; null avatar/follower when absent", async () => {
     instagramFetch.mockResolvedValueOnce(
-      jsonResponse({ data: { user: { id: "42", username: "handleonly" } } }),
+      jsonResponse({
+        data: { user: { id: "42", username: "handleonly", edge_followed_by: { count: 7 } } },
+      }),
     );
 
     const result = await scrapeCreatorsProvider.resolveAccount("instagram", "handleonly");
 
-    expect(result).toEqual({ accountId: "42", displayName: "handleonly" });
+    expect(result).toEqual({
+      accountId: "42",
+      displayName: "handleonly",
+      username: "handleonly",
+      fullName: null,
+      avatarUrl: null,
+      followerCount: 7,
+    });
   });
 
   it("returns null for the not-found shape (data: null)", async () => {

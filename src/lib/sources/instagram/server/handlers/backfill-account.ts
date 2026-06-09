@@ -51,6 +51,7 @@ import {
   markChannelBackfillComplete,
 } from "$lib/server/services/channel-state.js";
 import { instagramAccountAdapterCore as adapter, type InstagramFeed } from "../adapter.js";
+import { upsertInstagramAccount } from "../snapshots.js";
 import { readInstagramBackfillState, writeInstagramBackfillState } from "../backfill-state.js";
 import { env } from "$lib/server/config/env.js";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -242,6 +243,31 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
     }
 
     requestsUsed += page.unitsUsed;
+
+    // Opportunistically refresh the account subject entity (instagram_accounts)
+    // from the FREE feed owner object the page already carries — NO extra credit.
+    // The richer profile fields (avatar / follower_count) were set by the PAID
+    // create-time resolve and are COALESCE-preserved here; this cheap refresh only
+    // keeps account_id + the current @handle (+ avatar when the owner carries one)
+    // fresh, appending a renamed handle to handle_aliases. Anchor on the feed
+    // owner's id, falling back to the channelKey (= the account_id) so a feed that
+    // omits the owner id still refreshes the row. Best-effort: a failed write must
+    // not abort the walk.
+    if (page.owner !== null) {
+      const ownerAccountId = page.owner.accountId ?? channelKey;
+      try {
+        await upsertInstagramAccount({
+          accountId: ownerAccountId,
+          username: page.owner.username,
+          avatarUrl: page.owner.avatarUrl,
+        });
+      } catch (err) {
+        logger.warn(
+          { jobId: job.id, channelKey, feed, err: String((err as Error)?.message ?? err) },
+          "instagram.backfill.account: instagram_accounts UPSERT from feed owner failed (non-fatal)",
+        );
+      }
+    }
 
     // Date-window bound: collect posts newer than the window boundary; stop the
     // feed the moment we cross below it (the page is newest-first).
