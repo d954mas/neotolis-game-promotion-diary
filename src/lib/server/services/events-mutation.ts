@@ -195,14 +195,23 @@ export async function createEvent(
     // services through syncStats/create flows.
     const { parseAnyUrl } = await import("$lib/sources/url.js");
     const parsed = parseAnyUrl(input.url);
-    // instagram_post is excluded: its URL carries only the shortcode, which is
-    // NOT the media-id key the snapshot / feed-enrichment caches use. The media
-    // id is resolved ONLY by the preview flow and arrives as an explicit
-    // input.externalId (handled above). Deriving the shortcode here would save
-    // an event whose external_id never matches any snapshot — stuck on the
-    // "pending" badge with no stats forever (issue #69). Leaving it null yields
-    // an honest stats-less manual card instead.
-    if (parsed !== null && parsed.kind === input.kind && parsed.kind !== "instagram_post") {
+    // instagram_post AND telegram_post are excluded: their URLs carry only a
+    // RENAMEABLE id (the IG shortcode / the TG @username-slug), which is NOT the
+    // canonical key the snapshot / feed-enrichment caches use. The canonical key
+    // is resolved ONLY via the preview (an explicit input.externalId, handled
+    // above) or the adapter's resolveCachedExternalId below.
+    //   - instagram_post: the media id is not URL-derivable (issue #69).
+    //   - telegram_post: the stored id is "<channelKey>/<messageId>" (rename-proof);
+    //     deriving the slug-based "<slug>/<messageId>" here would re-key on a rename
+    //     and never match the channelKey-based snapshot (#1). Leaving it null →
+    //     resolveCachedExternalId recovers the channelKey id, or an honest
+    //     stats-less card if there was no preview.
+    if (
+      parsed !== null &&
+      parsed.kind === input.kind &&
+      parsed.kind !== "instagram_post" &&
+      parsed.kind !== "telegram_post"
+    ) {
       derivedExternalId = parsed.externalId;
     }
   }
@@ -551,22 +560,21 @@ export async function enrichFromUrl(
   // ONE synchronous ?embed=1 t.me fetch (free — no credit, no cap), which UPSERTs
   // telegram_posts + a snapshot so the saved event renders views immediately.
   //
-  // The externalId is URL-derivable — telegramParsePostUrl returns
-  // "<channel>/<messageId>", which IS telegram_posts.post_id — so we set it
-  // directly here (and createEvent's parseAnyUrl path derives the same value on
-  // save; telegram_post is NOT in that path's exclusion list). The IG-style
-  // resolveCachedExternalId is deliberately NOT used (IG needs it only because
-  // the IG media id is NOT in the URL).
+  // #1 — the canonical externalId is the rename-proof "<channelKey>/<messageId>"
+  // the preview decodes from the post's data-view and OVERRIDES via
+  // EventPreviewMetadata.externalId (mirrors IG's media-id override of the URL
+  // shortcode). The URL-parsed "<slug>/<messageId>" is NEVER stored — the slug is
+  // renameable; a rename would re-key the same post and split its metric history.
   if (parsed.kind === "telegram_post") {
-    const { telegramParsePostUrl } = await import("$lib/sources/telegram/server/url.js");
-    const telegramExternalId = telegramParsePostUrl(parsed.canonicalUrl)?.externalId ?? null;
-    // Recognition-only fallback (no live data resolved) — honest stats-less
-    // manual card, never a dead-end. externalId stays the URL-derived composite
-    // (unlike IG's shortcode trap: the Telegram composite IS the cache key, so
-    // the card can still be enriched later by the warm/cron lane or a Refresh).
+    // Recognition-only fallback (no live data resolved, or no channelKey decoded)
+    // — honest stats-less manual card, never a dead-end. externalId is NULL, NOT
+    // the URL slug id: storing the slug id would re-key on a channel rename and
+    // never match the channelKey-based snapshot (the bug #1 eliminates). Mirrors
+    // IG's recognition-only → null (issue #69); re-paste once the post resolves a
+    // channelKey to get an enriched, channelKey-keyed event.
     const recognitionOnly: EnrichmentResult = {
       kind: "telegram_post",
-      externalId: telegramExternalId,
+      externalId: null,
       title: "",
       occurredAt: null,
       thumbnailUrl: null,
@@ -599,15 +607,21 @@ export async function enrichFromUrl(
       return recognitionOnly;
     }
 
-    // Any non-ok discriminator (unreachable / private / unavailable) →
-    // recognition-only so the user can still save a bare event (no 422 dead-end).
+    // Any non-ok discriminator (unreachable / private / unavailable / no
+    // channelKey) → recognition-only so the user can still save a bare event (no
+    // 422 dead-end), with externalId=null (never the slug id).
     if (preview.kind !== "ok") return recognitionOnly;
 
     return {
       kind: "telegram_post",
-      // URL-derived composite — matches telegram_posts.post_id (the snapshot the
-      // preview just wrote keys on it). Falls back to null (never a partial id).
-      externalId: telegramExternalId,
+      // The channelKey-based id (preview.externalId), NOT the URL slug id. The
+      // ?embed=1 fetch UPSERTed telegram_posts + a snapshot keyed by it; saving
+      // the event with the slug id would orphan it from the cache so
+      // feed-enrichment / metric-series / poll-state / refresh-now never match.
+      // Falls back to null (never the slug) if the preview somehow didn't surface
+      // an id (defensive): an unenriched-but-honest card beats a permanently-
+      // pending one. Mirrors IG's preview.externalId ?? null.
+      externalId: preview.externalId ?? null,
       title: preview.title,
       occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,
