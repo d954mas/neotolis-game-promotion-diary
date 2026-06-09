@@ -178,55 +178,6 @@ export async function recordTelegramAdapterPause(
   });
 }
 
-export async function getTelegramAdapterPauseState(): Promise<{
-  pausedUntil: Date | null;
-  pauseLevel: number;
-  pauseReason: string | null;
-  isPaused: boolean;
-  waitMs: number;
-}> {
-  const result = await db.execute<{
-    paused_until: Date | string | null;
-    pause_level: number | string;
-    last_pause_reason: string | null;
-    wait_ms: number | string;
-    is_paused: boolean;
-  }>(sql`
-    SELECT
-      paused_until,
-      pause_level,
-      last_pause_reason,
-      (paused_until IS NOT NULL AND paused_until > NOW()) AS is_paused,
-      GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(paused_until, NOW()) - NOW())) * 1000)::int AS wait_ms
-    FROM telegram_pacer
-    WHERE id = 1
-  `);
-  const row = (
-    result as unknown as {
-      rows?: Array<{
-        paused_until: Date | string | null;
-        pause_level: number | string;
-        last_pause_reason: string | null;
-        wait_ms: number | string;
-        is_paused: boolean;
-      }>;
-    }
-  ).rows?.[0];
-  const pausedUntil =
-    row?.paused_until == null
-      ? null
-      : row.paused_until instanceof Date
-        ? row.paused_until
-        : new Date(row.paused_until);
-  return {
-    pausedUntil,
-    pauseLevel: Number(row?.pause_level ?? 0),
-    pauseReason: row?.last_pause_reason ?? null,
-    isPaused: row?.is_paused === true,
-    waitMs: Number(row?.wait_ms ?? 0),
-  };
-}
-
 /** Test-only reset. The singleton id=1 row is seeded in migration 0057
  *  (INSERT ... ON CONFLICT DO NOTHING, mirroring reddit_pacer), so this
  *  UPSERTs the row first to be robust against a fresh test DB, then clears the
