@@ -70,11 +70,15 @@
     disabledReason: DisabledReason | null;
   };
 
+  // The URL-first redesign derives EVERYTHING (which chip is enabled / greyed /
+  // matched, which detection hint to show) from `kindMatrix` — itself derived
+  // server-side from FUNCTIONAL_KINDS + per-adapter isOperatorConfigured. The
+  // old redditOperatorConfigured / instagramConfigured props are gone: the
+  // not-configured state now lives on the matrix entry's disabledReason, so a
+  // separate boolean would be a second source of truth.
   let {
     open,
     kindMatrix,
-    redditOperatorConfigured = false,
-    instagramConfigured = false,
     socialBackfillMaxPosts = 48,
     defaultIsOwnedByMe = true,
     defaultAutoImport = true,
@@ -83,8 +87,6 @@
   }: {
     open: boolean;
     kindMatrix: KindEntry[];
-    redditOperatorConfigured?: boolean;
-    instagramConfigured?: boolean;
     socialBackfillMaxPosts?: number;
     defaultIsOwnedByMe?: boolean;
     defaultAutoImport?: boolean;
@@ -96,7 +98,6 @@
   const initialIsOwnedByMe = untrack(() => defaultIsOwnedByMe);
   const initialAutoImport = untrack(() => defaultAutoImport);
 
-  let selectedKind = $state<SourceKind>("youtube_channel");
   let description = $state("");
   let handleUrl = $state("");
   let isOwnedByMe = $state(initialIsOwnedByMe);
@@ -107,67 +108,56 @@
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   let backfillWindow = $state<BackfillWindow>("30d");
   let backfillCustomDate = $state<string | null>(null);
-  const selectedKindEnabled = $derived(
-    kindMatrix.find((k) => k.value === selectedKind)?.disabled !== true,
+  // URL-first: the pasted link decides the kind. The chips below are an
+  // informational legend, NOT selectors (user 2026-06-09: «тип понятен из
+  // URL, кнопки выбора не нужны»). Client infer is a preview; the server's
+  // parseSourceUrl iterator stays the source of truth on submit.
+  const inferredKind = $derived(inferSourceKindFromUrl(handleUrl));
+  const inferredEntry = $derived(
+    inferredKind ? (kindMatrix.find((k) => k.value === inferredKind) ?? null) : null,
   );
-  const showPicker = $derived(selectedKindEnabled && autoImport);
+
+  // Legend = every kind EXCEPT "not-built" ones (Twitter / Discord are
+  // hidden entirely). "not-configured" kinds (Reddit / Instagram without
+  // operator keys) stay visible but greyed (user 2026-06-09).
+  const visibleKinds = $derived(kindMatrix.filter((k) => k.disabledReason !== "not-built"));
+
+  // The kind we POST — purely URL-derived. null when the link is empty,
+  // unrecognized, or resolves to a kind that isn't usable right now.
+  const submitKind = $derived(
+    inferredEntry && !inferredEntry.disabled ? inferredEntry.value : null,
+  );
+  const hasUrl = $derived(handleUrl.trim().length > 0);
+
+  // Detection feedback shown under the input.
+  type DetectState =
+    | { state: "idle" }
+    | { state: "ok"; label: string }
+    | { state: "needs-config"; entry: KindEntry }
+    | { state: "not-built"; label: string }
+    | { state: "unknown" };
+  const detect = $derived.by((): DetectState => {
+    if (!hasUrl) return { state: "idle" };
+    if (!inferredEntry) return { state: "unknown" };
+    if (!inferredEntry.disabled) return { state: "ok", label: labelFor(inferredEntry.labelKey) };
+    if (inferredEntry.disabledReason === "not-configured")
+      return { state: "needs-config", entry: inferredEntry };
+    return { state: "not-built", label: labelFor(inferredEntry.labelKey) };
+  });
+
+  // Reddit's listing-limit caveat is useful whenever a Reddit link is
+  // detected (independent of the not-configured gate).
+  const showRedditCaveat = $derived(inferredKind === "reddit");
+
+  const showPicker = $derived(submitKind !== null && autoImport);
+  // BackfillPicker needs a concrete kind; only rendered when submitKind set.
+  const pickerKind: SourceKind = $derived(submitKind ?? "youtube_channel");
 
   // Picker collapse → reset value (same effect as /sources/new).
   $effect(() => {
     if (!showPicker && backfillWindow !== "30d") {
       backfillWindow = "30d";
     }
-  });
-
-  const showRedditHint = $derived.by(() => {
-    if (selectedKind === "reddit") return true;
-    return handleUrl.toLowerCase().includes("reddit");
-  });
-
-  // SOC-05: surface the env-var hint when Instagram is not configured and
-  // the user is looking at it (selected the disabled chip OR typed an IG
-  // URL). Mirror showRedditHint exactly. The disabled-chip + this hint is
-  // the COMPLETE key-related UI — no operator-key form (CONTEXT D-03).
-  const showInstagramHint = $derived.by(() => {
-    if (instagramConfigured) return false;
-    if (selectedKind === "instagram_account") return true;
-    return handleUrl.toLowerCase().includes("instagram");
-  });
-
-  // "Paste a link → we figure out the kind." Same client-side heuristic +
-  // auto-select behaviour as /sources/new (the shared helper keeps the
-  // host table single-sourced). The server's parseSourceUrl iterator stays
-  // the source of truth on submit.
-  const inferredKind = $derived(inferSourceKindFromUrl(handleUrl));
-  const inferredEntry = $derived(
-    inferredKind ? (kindMatrix.find((k) => k.value === inferredKind) ?? null) : null,
-  );
-
-  // Auto-select the matched chip when ENABLED; never select a disabled
-  // chip (those surface a hint instead). untrack(selectedKind) avoids a
-  // self-dependency thrash loop.
-  $effect(() => {
-    const entry = inferredEntry;
-    if (entry && !entry.disabled && untrack(() => selectedKind) !== entry.value) {
-      selectedKind = entry.value;
-    }
-  });
-
-  // Generic coming-soon / out-of-scope hint for a matched-but-disabled
-  // kind that doesn't already own dedicated copy (Reddit / Instagram do).
-  const showComingSoonHint = $derived.by(() => {
-    const entry = inferredEntry;
-    if (!entry || !entry.disabled) return false;
-    if (entry.value === "reddit" || entry.value === "instagram_account") return false;
-    return true;
-  });
-  const comingSoonHintText = $derived.by(() => {
-    const entry = inferredEntry;
-    if (!entry) return "";
-    return m.sources_kind_disabled_tooltip({
-      kind: labelFor(entry.labelKey),
-      status: statusFor(entry.statusKey) ?? "",
-    });
   });
 
   function labelFor(key: KindLabelKey): string {
@@ -221,7 +211,6 @@
   }
 
   function resetForm(): void {
-    selectedKind = "youtube_channel";
     description = "";
     handleUrl = "";
     isOwnedByMe = initialIsOwnedByMe;
@@ -246,6 +235,10 @@
       formError = m.ingest_error_malformed_url();
       return;
     }
+    if (submitKind === null) {
+      formError = m.add_source_link_unrecognized();
+      return;
+    }
     submitting = true;
     formError = null;
     try {
@@ -253,7 +246,7 @@
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          kind: selectedKind,
+          kind: submitKind,
           handleUrl: handleUrl.trim(),
           metadata: description.trim() ? { description: description.trim() } : undefined,
           isOwnedByMe,
@@ -283,7 +276,7 @@
         // ignore parse failures
       }
       if (res.status === 422 && body.error === "kind_not_yet_functional") {
-        const kindLabel = body.metadata?.kind ?? selectedKind;
+        const kindLabel = body.metadata?.kind ?? submitKind ?? "";
         const status = body.metadata?.status ?? "";
         formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, status });
         return;
@@ -333,7 +326,7 @@
       }
       if (res.status === 422 && body.error === "validation_failed") {
         formError =
-          selectedKind === "reddit"
+          inferredKind === "reddit"
             ? m.sources_error_not_a_reddit_url()
             : m.sources_error_not_a_youtube_url();
         return;
@@ -371,39 +364,7 @@
     </header>
 
     <form onsubmit={submit} class="add-source-dialog-body">
-      <fieldset class="kinds">
-        <legend>Kind</legend>
-        <div class="kind-chips">
-          {#each kindMatrix as entry (entry.value)}
-            {@const prefix = chipPrefixFor(entry.value)}
-            {#if entry.disabled}
-              <button
-                type="button"
-                class="chip disabled"
-                disabled
-                aria-disabled="true"
-                tabindex="-1"
-                title={disabledTooltip(entry)}
-              >
-                {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
-                {labelFor(entry.labelKey)}
-                <small class="status">{statusFor(entry.statusKey)}</small>
-              </button>
-            {:else}
-              <button
-                type="button"
-                class="chip"
-                class:active={selectedKind === entry.value}
-                aria-pressed={selectedKind === entry.value}
-                onclick={() => (selectedKind = entry.value)}
-              >
-                {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
-                {labelFor(entry.labelKey)}
-              </button>
-            {/if}
-          {/each}
-        </div>
-      </fieldset>
+      <p class="url-first-hint">{m.add_source_url_first_hint()}</p>
 
       <label class="field">
         <span class="label">Handle URL *</span>
@@ -412,25 +373,51 @@
           type="url"
           bind:value={handleUrl}
           required
-          placeholder="https://www.youtube.com/@handle"
+          placeholder="https://t.me/channel · youtube.com/@handle · reddit.com/r/sub"
         />
       </label>
 
-      {#if showRedditHint}
+      {#if detect.state === "ok"}
+        <p class="detect-ok">✓ {m.add_source_detected({ kind: detect.label })}</p>
+      {:else if detect.state === "needs-config"}
+        {#if detect.entry.value === "instagram_account"}
+          <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
+        {:else if detect.entry.value === "reddit"}
+          <p class="hint">{m.sources_new_reddit_disabled()}</p>
+        {:else}
+          <p class="hint">{disabledTooltip(detect.entry)}</p>
+        {/if}
+      {:else if detect.state === "not-built"}
+        <p class="hint">{m.add_source_not_supported_yet({ kind: detect.label })}</p>
+      {:else if detect.state === "unknown"}
+        <p class="hint">{m.add_source_link_unrecognized()}</p>
+      {/if}
+
+      {#if showRedditCaveat}
         <p class="hint">{m.sources_new_reddit_input_hint()}</p>
         <p class="hint hint-warning">⚠ {m.sources_new_reddit_listing_limit()}</p>
-        {#if !redditOperatorConfigured}
-          <p class="hint hint-warning">{m.sources_new_reddit_disabled()}</p>
-        {/if}
       {/if}
 
-      {#if showInstagramHint}
-        <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
-      {/if}
-
-      {#if showComingSoonHint}
-        <p class="hint">{comingSoonHintText}</p>
-      {/if}
+      <div class="legend">
+        <span class="legend-label">{m.add_source_supported_legend()}</span>
+        <ul class="kind-legend">
+          {#each visibleKinds as entry (entry.value)}
+            {@const prefix = chipPrefixFor(entry.value)}
+            {@const isMatch = inferredKind === entry.value}
+            <li
+              class="chip"
+              class:active={isMatch && !entry.disabled}
+              class:muted={entry.disabled}
+              class:matched={isMatch}
+              title={entry.disabled ? disabledTooltip(entry) : undefined}
+            >
+              {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
+              <span class="chip-label">{labelFor(entry.labelKey)}</span>
+              {#if entry.disabled}<small class="status">{statusFor(entry.statusKey)}</small>{/if}
+            </li>
+          {/each}
+        </ul>
+      </div>
 
       <label class="toggle">
         <input type="checkbox" bind:checked={isOwnedByMe} />
@@ -460,7 +447,7 @@
         <BackfillPicker
           bind:value={backfillWindow}
           bind:customDate={backfillCustomDate}
-          kind={selectedKind}
+          kind={pickerKind}
           postCap={socialBackfillMaxPosts}
         />
       {/if}
@@ -473,11 +460,7 @@
         <button type="button" class="btn ghost" onclick={handleClose} disabled={submitting}
           >{m.common_cancel()}</button
         >
-        <button
-          type="submit"
-          class="btn primary"
-          disabled={submitting || handleUrl.trim().length === 0}
-        >
+        <button type="submit" class="btn primary" disabled={submitting || submitKind === null}>
           {submitting ? "Saving…" : m.sources_cta_save_source()}
         </button>
       </footer>
@@ -563,21 +546,37 @@
   /* ----- Field controls. Ported from /sources/new/+page.svelte. -----
    * Kept structurally identical so behaviour matches the fallback route
    * exactly. */
-  .kinds {
-    border: none;
-    padding: 0;
+  .url-first-hint {
     margin: 0;
+    color: var(--text-2);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
   }
-  .kinds legend {
+  .detect-ok {
+    margin: 0;
+    color: var(--accent);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+  }
+  .legend {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-1);
+  }
+  .legend-label {
     font-size: var(--t-13);
     color: var(--text-2);
-    margin-bottom: var(--s-1);
   }
-  .kind-chips {
+  .kind-legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-wrap: wrap;
     gap: var(--s-1);
   }
+  /* Chips are an informational legend now (not selectors) — no pointer,
+     no hover affordance. The URL drives which one is highlighted. */
   .chip {
     display: inline-flex;
     flex-direction: column;
@@ -588,31 +587,37 @@
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
-    cursor: pointer;
     font-family: var(--f-sans);
     font-size: var(--t-13);
     transition:
       background var(--m-fast) var(--m-ease),
       border-color var(--m-fast) var(--m-ease);
   }
-  .chip:hover:not(:disabled) {
-    background: var(--accent-soft);
-    border-color: var(--accent-strong);
-  }
+  /* The matched-from-URL kind, when usable. */
   .chip.active {
     background: var(--accent-soft);
     color: var(--accent);
     border-color: var(--accent-strong);
     font-weight: var(--w-sb);
   }
-  .chip.disabled {
+  /* not-configured kinds (Reddit / Instagram without operator keys): visible
+     but greyed, so the user sees they exist but need setup. */
+  .chip.muted {
     opacity: 0.55;
-    cursor: not-allowed;
+  }
+  /* a greyed chip the URL points at — accent the border so it reads
+     "this is what you pasted, but it isn't configured yet". */
+  .chip.muted.matched {
+    opacity: 0.85;
+    border-color: var(--accent-strong);
   }
   .chip-prefix {
     font-size: 1em;
     line-height: 1;
     margin-right: 4px;
+  }
+  .chip-label {
+    line-height: 1;
   }
   .status {
     font-size: var(--t-12);

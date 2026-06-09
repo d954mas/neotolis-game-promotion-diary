@@ -567,6 +567,11 @@
 
   "add_source_modal_title": "Add data source",
   "add_source_modal_close_aria": "Close add source dialog",
+  "add_source_url_first_hint": "Paste a link and we'll detect the source automatically.",
+  "add_source_supported_legend": "Supported",
+  "add_source_detected": "Detected: {kind}",
+  "add_source_not_supported_yet": "{kind} isn't supported yet.",
+  "add_source_link_unrecognized": "We don't recognize this link yet. Supported: YouTube, Reddit, Telegram, Instagram.",
 
   "privacy_title": "Privacy Policy",
   "privacy_last_updated": "Last updated: {date}",
