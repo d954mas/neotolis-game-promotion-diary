@@ -289,8 +289,11 @@ describe("telegram backfill walker — window + cap bounding (B1)", () => {
     const channel = `b1cap_${uniq()}`;
     // "everything" subscriber → no date bound; only the post-count cap stops it.
     await seedSubscriber(channel, new Date("1970-01-01T00:00:00Z"));
-    const originalCap = env.SOCIAL_BACKFILL_MAX_POSTS;
-    env.SOCIAL_BACKFILL_MAX_POSTS = 2; // tiny cap for the test
+    // env is a runtime-mutable plain object with a readonly TS type — cast to a
+    // mutable view to override the cap for this case only.
+    const mutableEnv = env as { SOCIAL_BACKFILL_MAX_POSTS: number };
+    const originalCap = mutableEnv.SOCIAL_BACKFILL_MAX_POSTS;
+    mutableEnv.SOCIAL_BACKFILL_MAX_POSTS = 2; // tiny cap for the test
     try {
       const posts = [
         { externalId: `${channel}/9`, publishedAt: new Date("2026-06-03T00:00:00Z"), viewCount: 3 },
@@ -309,7 +312,7 @@ describe("telegram backfill walker — window + cap bounding (B1)", () => {
       expect(await snapshotCountFor([`${channel}/7`])).toBe(0);
       expect(await countPendingBackfillContinuations(channel)).toBe(0);
     } finally {
-      env.SOCIAL_BACKFILL_MAX_POSTS = originalCap;
+      mutableEnv.SOCIAL_BACKFILL_MAX_POSTS = originalCap;
     }
   });
 
