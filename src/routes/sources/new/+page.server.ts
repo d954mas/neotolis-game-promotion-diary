@@ -1,30 +1,23 @@
 import type { Actions, PageServerLoad } from "./$types";
 import { fail, redirect } from "@sveltejs/kit";
 import { allAdapters, getAdapter, hasAdapter } from "$lib/sources/registry.js";
+import { buildKindMatrix } from "$lib/sources/kind-matrix.js";
 import { createSource } from "$lib/server/services/data-sources.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { env } from "$lib/server/config/env.js";
 
 /**
- * /sources/new loader — full-page form for adding a data source.
+ * /sources/new loader — full-page, non-JS fallback for the AddSourceModal.
  *
- * The kindMatrix is computed server-side so the page renders all 6 chips
- * with the correct disabled state + status tooltip. Disabled chips MUST
- * carry `aria-disabled="true"` and `tabindex="-1"`.
- *
- * Each entry carries a `disabledReason` so the tooltip is accurate (issue
- * #64): a kind whose adapter IS built but the operator hasn't configured
- * the provider env ("not-configured" — Reddit / Instagram unconfigured)
- * must NOT claim "the polling adapter isn't [ready]". Only "not-built"
- * kinds (Twitter / Telegram / Discord coming-soon / out-of-scope) carry
- * the schema-ready-adapter-isn't phrasing. `null` for enabled kinds.
- *
- * Reddit kinds (`reddit_account` + `reddit_subreddit`) are enabled iff
- * the Reddit adapter reports `observability.auth.isOperatorConfigured` (env.REDDIT_USER_AGENT non-empty). When
- * the operator has not configured Reddit (e.g., self-host before env
- * setup), Reddit chips remain disabled with a "not configured" tooltip
- * (D-RDT-AUTH-EMPTY); the form's auto-detect path still fires server-side
- * but returns a typed error.
+ * The kindMatrix is computed server-side via buildKindMatrix — the SAME call
+ * the /sources loader makes (F1), so the modal and this fallback can never
+ * drift in which kinds they offer. Every entry's disabled state derives from
+ * FUNCTIONAL_KINDS + per-adapter isOperatorConfigured: the synthetic "reddit"
+ * chip, the not-built (Twitter / Discord) entries, and the not-configured
+ * (Reddit / Instagram without env) greying all come out of the derivation —
+ * no hand-maintained literal here. The page is URL-first (the pasted link
+ * decides the kind; chips are an informational legend), reading the
+ * not-configured state off each entry's disabledReason.
  *
  * Anonymous users redirect to /login. The PROTECTED_PATHS array in the
  * layout server load already covers /sources but we defend in depth here
@@ -34,79 +27,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) {
     throw redirect(303, `/login?next=${encodeURIComponent(url.pathname)}`);
   }
-  // Read configured-ness through the adapter contract instead of a
-  // direct env probe — same fact, no per-source import leak into the
-  // SvelteKit loader.
-  const redditOperatorConfigured = hasAdapter("reddit_account")
-    ? getAdapter("reddit_account").observability.auth.isOperatorConfigured
-    : false;
-  // SOC-05: instagram_account is functional but gated on the operator's
-  // provider env. Disabled-but-visible chip + env hint when unconfigured
-  // (same shape Reddit uses for empty REDDIT_USER_AGENT).
-  const instagramConfigured = hasAdapter("instagram_account")
-    ? getAdapter("instagram_account").observability.auth.isOperatorConfigured
-    : false;
   return {
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
-    redditOperatorConfigured,
-    instagramConfigured,
     // BACK-01: post-cap ceiling for the BackfillPicker honesty note.
     socialBackfillMaxPosts: env.SOCIAL_BACKFILL_MAX_POSTS,
-    kindMatrix: [
-      {
-        value: "youtube_channel" as const,
-        labelKey: "source_kind_label_youtube_channel" as const,
-        statusKey: null,
-        disabled: false,
-        disabledReason: null,
-      },
-      {
-        // Single "Reddit" chip — the backend resolves subreddit vs account
-        // from the URL shape via redditAdapter.parseSourceUrl. The user
-        // doesn't pre-pick; pasting reddit.com/r/X creates a subreddit
-        // source, reddit.com/user/X creates an account source. The /sources
-        // list still paints them distinctly (🏛 vs 🧑) via SourceRow.
-        value: "reddit" as const,
-        labelKey: "common_kind_reddit" as const,
-        statusKey: redditOperatorConfigured ? null : "source_kind_status_reddit_account",
-        disabled: !redditOperatorConfigured,
-        // Adapter is built; the operator simply hasn't set the env. The
-        // tooltip must say "not configured by operator", NOT "adapter isn't
-        // ready" — the latter misleads a self-host operator (issue #64).
-        disabledReason: redditOperatorConfigured ? null : ("not-configured" as const),
-      },
-      {
-        value: "instagram_account" as const,
-        labelKey: "source_kind_label_instagram_account" as const,
-        statusKey: instagramConfigured ? null : ("source_kind_status_instagram_account" as const),
-        disabled: !instagramConfigured,
-        // Same as Reddit: adapter built, operator env missing.
-        disabledReason: instagramConfigured ? null : ("not-configured" as const),
-      },
-      {
-        value: "twitter_account" as const,
-        labelKey: "source_kind_label_twitter_account" as const,
-        statusKey: "source_kind_status_twitter_account" as const,
-        disabled: true,
-        // No adapter yet — schema-ready / adapter-isn't phrasing is correct.
-        disabledReason: "not-built" as const,
-      },
-      {
-        value: "telegram_channel" as const,
-        labelKey: "source_kind_label_telegram_channel" as const,
-        statusKey: "source_kind_status_telegram_channel" as const,
-        disabled: true,
-        disabledReason: "not-built" as const,
-      },
-      {
-        value: "discord_server" as const,
-        labelKey: "source_kind_label_discord_server" as const,
-        statusKey: "source_kind_status_discord_server" as const,
-        disabled: true,
-        disabledReason: "not-built" as const,
-      },
-    ],
+    kindMatrix: buildKindMatrix(),
   };
 };
 
