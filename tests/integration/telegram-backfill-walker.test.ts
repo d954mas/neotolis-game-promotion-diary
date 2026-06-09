@@ -22,7 +22,7 @@ const { dataSourceChannelState } =
 const adapterMod = await import("../../src/lib/sources/telegram/server/adapter.js");
 const { handleTelegramBackfillWalker, countPendingBackfillContinuations } =
   await import("../../src/lib/sources/telegram/server/handlers/backfill-walker.js");
-const { getTelegramWalkState, resetTelegramWalkState } =
+const { getTelegramWalkState, resetTelegramWalkState, commitTelegramWalkProgress } =
   await import("../../src/lib/sources/telegram/server/walker-state.js");
 const { telegramAdapter } = await import("../../src/lib/sources/telegram/server/index.js");
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
@@ -487,5 +487,154 @@ describe("telegram backfill walker — widening re-opens a complete channel (G3)
     expect((await getTelegramWalkState(channel)).backfillComplete).toBe(false);
     // A fresh backfill_page row was enqueued to re-open the deep walk.
     expect(await countPendingBackfillContinuations(channel)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// #2 — backfill continuation must be ATOMIC with the cursor persist AND guarded
+// by an expected-cursor CAS so a crash or a concurrent worker can't strand the
+// walk or double-enqueue the continuation. These tests call
+// commitTelegramWalkProgress directly (the walker-state helper the handler now
+// uses) to isolate the race semantics — mirrors reddit-walker-continuation.test.ts.
+describe("telegram backfill walker — atomic persist+enqueue + CAS (#2)", () => {
+  it("first commit (expected=null on a never-walked channel) persists cursor + enqueues ONE continuation", async () => {
+    const channel = `casfirst_${uniq()}`;
+    const r = await commitTelegramWalkProgress(channel, {
+      expectedBeforeCursor: null, // never walked → cursor is null going in
+      nextBeforeCursor: "509",
+      backfillComplete: false,
+      oldestPublishedAt: new Date("2026-05-31T00:00:00Z"),
+      collected: 2,
+    });
+    expect(r.committed).toBe(true);
+
+    // Cursor + collected persisted on the channel-state row.
+    const state = await getTelegramWalkState(channel);
+    expect(state.beforeCursor).toBe("509");
+    expect(state.collected).toBe(2);
+
+    // Exactly ONE continuation row on the service lane.
+    expect(await countPendingBackfillContinuations(channel)).toBe(1);
+  });
+
+  it("CAS race — two simultaneous commits with the same expected cursor: only one commits + one continuation lands", async () => {
+    const channel = `casrace_${uniq()}`;
+    // Plant a mid-walk cursor (expected="600") via a first committed tick, then
+    // clear the continuation it enqueued so the race assertion counts only the
+    // racing pair's continuations.
+    await commitTelegramWalkProgress(channel, {
+      expectedBeforeCursor: null,
+      nextBeforeCursor: "600",
+      backfillComplete: false,
+      oldestPublishedAt: new Date("2026-06-01T00:00:00Z"),
+      collected: 1,
+    });
+    await db
+      .delete(adapterRefreshQueue)
+      .where(
+        and(
+          eq(adapterRefreshQueue.adapterKind, "telegram_channel"),
+          eq(adapterRefreshQueue.type, "backfill_page"),
+          sql`${adapterRefreshQueue.payload}->>'channel' = ${channel}`,
+        ),
+      );
+
+    // Two replicas both read cursor "600" for the same page and both compute the
+    // next cursor "590". Run both commits; assert exactly one wins.
+    const [a, b] = await Promise.all([
+      commitTelegramWalkProgress(channel, {
+        expectedBeforeCursor: "600",
+        nextBeforeCursor: "590",
+        backfillComplete: false,
+        oldestPublishedAt: new Date("2026-05-20T00:00:00Z"),
+        collected: 3,
+      }),
+      commitTelegramWalkProgress(channel, {
+        expectedBeforeCursor: "600",
+        nextBeforeCursor: "590",
+        backfillComplete: false,
+        oldestPublishedAt: new Date("2026-05-20T00:00:00Z"),
+        collected: 3,
+      }),
+    ]);
+    const wins = [a, b].filter((r) => r.committed).length;
+    expect(wins).toBe(1);
+
+    // Exactly ONE continuation enqueued for the page (the CAS-loser skipped it).
+    expect(await countPendingBackfillContinuations(channel)).toBe(1);
+
+    const state = await getTelegramWalkState(channel);
+    expect(state.beforeCursor).toBe("590");
+  });
+
+  it("CAS loser — commit against a STALE expected cursor: no persist, no continuation", async () => {
+    const channel = `casstale_${uniq()}`;
+    // The row has already advanced to cursor "700".
+    await commitTelegramWalkProgress(channel, {
+      expectedBeforeCursor: null,
+      nextBeforeCursor: "700",
+      backfillComplete: false,
+      oldestPublishedAt: new Date("2026-06-02T00:00:00Z"),
+      collected: 1,
+    });
+    await db
+      .delete(adapterRefreshQueue)
+      .where(
+        and(
+          eq(adapterRefreshQueue.adapterKind, "telegram_channel"),
+          eq(adapterRefreshQueue.type, "backfill_page"),
+          sql`${adapterRefreshQueue.payload}->>'channel' = ${channel}`,
+        ),
+      );
+
+    // A straggler tick observed an OLDER cursor "650" before the row moved on.
+    // Its commit must be rejected (CAS loses) — no persist, no continuation.
+    const r = await commitTelegramWalkProgress(channel, {
+      expectedBeforeCursor: "650",
+      nextBeforeCursor: "640",
+      backfillComplete: false,
+      oldestPublishedAt: new Date("2026-05-15T00:00:00Z"),
+      collected: 9,
+    });
+    expect(r.committed).toBe(false);
+
+    // The cursor is untouched (still "700") and NO continuation was enqueued.
+    const state = await getTelegramWalkState(channel);
+    expect(state.beforeCursor).toBe("700");
+    expect(await countPendingBackfillContinuations(channel)).toBe(0);
+  });
+
+  it("end-of-history commit clears the cursor and does NOT enqueue a continuation", async () => {
+    const channel = `caseoh_${uniq()}`;
+    await commitTelegramWalkProgress(channel, {
+      expectedBeforeCursor: null,
+      nextBeforeCursor: "300",
+      backfillComplete: false,
+      oldestPublishedAt: new Date("2026-06-01T00:00:00Z"),
+      collected: 1,
+    });
+    await db
+      .delete(adapterRefreshQueue)
+      .where(
+        and(
+          eq(adapterRefreshQueue.adapterKind, "telegram_channel"),
+          eq(adapterRefreshQueue.type, "backfill_page"),
+          sql`${adapterRefreshQueue.payload}->>'channel' = ${channel}`,
+        ),
+      );
+
+    const r = await commitTelegramWalkProgress(channel, {
+      expectedBeforeCursor: "300",
+      nextBeforeCursor: null, // end-of-history
+      backfillComplete: true,
+      oldestPublishedAt: new Date("2025-01-01T00:00:00Z"),
+      collected: 5,
+    });
+    expect(r.committed).toBe(true);
+
+    const state = await getTelegramWalkState(channel);
+    expect(state.backfillComplete).toBe(true);
+    expect(state.beforeCursor).toBeNull(); // cleared on completion
+    // No continuation at end-of-history.
+    expect(await countPendingBackfillContinuations(channel)).toBe(0);
   });
 });

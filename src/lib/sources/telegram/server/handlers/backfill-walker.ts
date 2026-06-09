@@ -35,7 +35,7 @@
 // channelKey for the walker state is the channel slug (data_sources.metadata.channel).
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { db, type DbOrTx } from "$lib/server/db/client.js";
+import { db } from "$lib/server/db/client.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { env } from "$lib/server/config/env.js";
@@ -43,7 +43,11 @@ import { logger } from "$lib/server/logger.js";
 import { telegramChannelAdapterCore } from "../adapter.js";
 import { writeTelegramSnapshot, upsertTelegramChannel } from "../snapshots.js";
 import { materializeTelegramEvents } from "../events.js";
-import { getTelegramWalkState, persistTelegramWalkProgress } from "../walker-state.js";
+import {
+  getTelegramWalkState,
+  persistTelegramWalkProgress,
+  commitTelegramWalkProgress,
+} from "../walker-state.js";
 import type { ParsedTelegramPost } from "../parse.js";
 
 const ADAPTER_KIND = "telegram_channel";
@@ -90,20 +94,6 @@ async function resolveDeepestTargetSince(channel: string): Promise<Date | null> 
   return deepest;
 }
 
-/** Enqueue a continuation backfill_page row on the service lane (user_id=NULL →
- *  cron-pool, cap-exempt). The user paid for the first page; the operator pool
- *  drains the rest. */
-async function enqueueBackfillContinuation(channel: string, dbCtx: DbOrTx): Promise<void> {
-  await dbCtx.insert(adapterRefreshQueue).values({
-    adapterKind: ADAPTER_KIND,
-    queueName: "service_source",
-    type: "backfill_page",
-    payload: { channel },
-    userId: null,
-    priority: 0,
-  });
-}
-
 export async function handleTelegramBackfillWalker(args: {
   channel: string;
   userId?: string | null;
@@ -138,6 +128,7 @@ export async function handleTelegramBackfillWalker(args: {
       "telegram.backfill: channel not found mid-walk — marking complete (stop fetching)",
     );
     await persistTelegramWalkProgress(channel, {
+      expectedBeforeCursor: state.beforeCursor,
       nextBeforeCursor: null,
       backfillComplete: true,
       oldestPublishedAt: null,
@@ -223,19 +214,24 @@ export async function handleTelegramBackfillWalker(args: {
   const backfillComplete =
     listing.posts.length === 0 || listing.nextBeforeCursor === null || crossedWindow || capReached;
 
-  await persistTelegramWalkProgress(channel, {
+  // Persist the new cursor/frontier/complete AND enqueue the continuation
+  // backfill_page row in ONE transaction, guarded by an expected-cursor CAS
+  // (mirrors reddit commitSubredditWalkProgress). The CAS re-checks the
+  // channel-state cursor inside the tx and only commits/continues when it still
+  // equals the cursor THIS tick started from (state.beforeCursor); a concurrent
+  // worker that already advanced it loses the CAS → no duplicate continuation.
+  // The atomic pair also closes the crash-between-persist-and-enqueue window: a
+  // crash leaves either both (walk continues) or neither (next cron tick resumes
+  // from the still-pending cursor). The helper only enqueues a continuation when
+  // committed AND there is more in-window history (not complete, more-anchor
+  // present) — never past the window / cap bound (B1).
+  const persistResult = await commitTelegramWalkProgress(channel, {
+    expectedBeforeCursor: state.beforeCursor,
     nextBeforeCursor: listing.nextBeforeCursor,
     backfillComplete,
     oldestPublishedAt,
     collected,
   });
-
-  // Continue draining on the service lane ONLY when there is more in-window
-  // history to fetch (more-anchor present AND no bound hit). Do NOT enqueue a
-  // continuation past the window / cap bound (B1).
-  if (!backfillComplete && listing.nextBeforeCursor !== null) {
-    await enqueueBackfillContinuation(channel, db);
-  }
 
   logger.debug(
     {
@@ -245,6 +241,7 @@ export async function handleTelegramBackfillWalker(args: {
       backfillComplete,
       crossedWindow,
       capReached,
+      casLost: !persistResult.committed,
       target: target?.toISOString() ?? null,
       nextBeforeCursor: listing.nextBeforeCursor,
     },
