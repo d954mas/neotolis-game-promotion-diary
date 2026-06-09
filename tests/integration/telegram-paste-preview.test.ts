@@ -10,13 +10,16 @@
 //     (FREE — no credit, no cap; the structural contrast with IG/Reddit), then
 //     UPSERTs the telegram_posts cache + a snapshot so the saved event renders
 //     views immediately in /feed.
-//   - The externalId is URL-derivable ("<channel>/<messageId>" = the
-//     telegram_posts.post_id key), so it is NOT overridden by the preview (the
-//     opposite of IG's non-URL media id). createEvent's parseAnyUrl path derives
-//     the same composite on save.
-//   - A failed preview (parse-null deleted post, rate-limited / network error)
-//     degrades to recognition-only so the user can still save a bare manual event
-//     — NEVER a 422 dead-end.
+//   - #1: the externalId is the rename-proof "<channelKey>/<messageId>" the
+//     preview decodes from the post's data-view and OVERRIDES via
+//     EventPreviewMetadata.externalId (mirrors IG's media-id override). The
+//     URL-parsed "<slug>/<messageId>" is NEVER stored. On save, createEvent's
+//     resolveCachedExternalId recovers the same channelKey id from the cache
+//     (telegram_post is EXCLUDED from the slug-deriving parseAnyUrl path).
+//   - A failed preview (parse-null deleted post, rate-limited / network error,
+//     or an undecodable channelKey) degrades to recognition-only with
+//     externalId=null (NEVER a slug id) so the user can still save a bare manual
+//     event — NEVER a 422 dead-end (the IG #69 rule).
 //
 // Integration test — real Postgres via tests/setup.ts; ONLY the upstream t.me
 // fetch (the http layer's fetchTelegramPost) is mocked. NEVER the DB, NEVER the
@@ -75,14 +78,18 @@ interface TelegramEnrichment {
   mediaKind: string | null;
 }
 
-// The byte-exact single-post-embed fixture parses to durov/505 with 3.71M views
-// (asserted in tests/unit/sources/telegram/parse.test.ts) — so the paste URL
-// MUST be t.me/durov/505 for the URL-derived composite to line up with the
-// fixture's data-post.
+// The byte-exact single-post-embed fixture parses to data-view c = -1006503122,
+// messageId 505, 3.71M views (asserted in tests/unit/sources/telegram/parse.test.ts).
+// The paste URL is the human/slug form t.me/durov/505; the STORED post id (#1) is
+// the channelKey-based "-1006503122/505". The two diverge — that divergence is
+// the whole point of #1.
 const FIXTURE_CHANNEL = "durov";
 const FIXTURE_MESSAGE_ID = "505";
-const FIXTURE_POST_ID = `${FIXTURE_CHANNEL}/${FIXTURE_MESSAGE_ID}`;
-const FIXTURE_URL = `https://t.me/${FIXTURE_POST_ID}`;
+const FIXTURE_CHANNEL_KEY = "-1006503122";
+// The URL the user pastes (slug form) vs the STORED canonical key (channelKey form).
+const FIXTURE_SLUG_PATH = `${FIXTURE_CHANNEL}/${FIXTURE_MESSAGE_ID}`;
+const FIXTURE_POST_ID = `${FIXTURE_CHANNEL_KEY}/${FIXTURE_MESSAGE_ID}`;
+const FIXTURE_URL = `https://t.me/${FIXTURE_SLUG_PATH}`;
 
 beforeEach(() => {
   tg.next = SINGLE_POST_EMBED;
@@ -98,9 +105,10 @@ describe("telegram live paste-preview (single-post ?embed=1 fetch — Phase-9 C1
     const result = await enrichFromUrl(user.id, FIXTURE_URL, "127.0.0.1");
 
     expect(result.kind).toBe("telegram_post");
-    // externalId is the URL-derived "<channel>/<messageId>" composite — the
-    // telegram_posts.post_id key (RESEARCH Q3), NOT a partial id.
+    // #1 — externalId is the channelKey-based key the preview OVERRODE from the
+    // post's data-view ("-1006503122/505"), NOT the URL slug id ("durov/505").
     expect(result.externalId).toBe(FIXTURE_POST_ID);
+    expect(result.externalId).not.toBe(FIXTURE_SLUG_PATH);
     // Title = the post's first text line (non-empty; the Add Event form requires
     // one). The fixture is a real durov post, so the title is its first line.
     expect(result.title.length).toBeGreaterThan(0);
@@ -139,18 +147,21 @@ describe("telegram live paste-preview (single-post ?embed=1 fetch — Phase-9 C1
     expect(snaps[0]!.viewCount).toBe(3710000);
   });
 
-  it("end-to-end: a pasted TG post saves with the URL-derived id so feed-enrichment matches the cache (thumbnail + views)", async () => {
+  it("end-to-end: a pasted TG post saves with the channelKey-based id (resolved from cache) so feed-enrichment matches (thumbnail + views)", async () => {
     const user = await seedUserDirectly({
       email: `tg-e2e-${Math.random().toString(36).slice(2)}@t.io`,
     });
 
-    // 1. Preview (the "Fetch" button) → enriched fields the form pre-fills.
+    // 1. Preview (the "Fetch" button) → enriched fields the form pre-fills. The
+    //    preview OVERRODE externalId to the channelKey-based key (#1).
     const enriched = await enrichFromUrl(user.id, FIXTURE_URL, "127.0.0.1");
     expect(enriched.externalId).toBe(FIXTURE_POST_ID);
 
-    // 2. Save the event WITHOUT passing an explicit externalId — exercise the
-    //    createEvent parseAnyUrl path (telegram_post must NOT be excluded from
-    //    it, so the same composite is derived from the URL on save).
+    // 2. Save the event WITHOUT passing an explicit externalId — telegram_post is
+    //    EXCLUDED from the slug-deriving parseAnyUrl path (#1), so createEvent's
+    //    resolveCachedExternalId recovers the SAME channelKey-based id from the
+    //    telegram_posts cache the preview just UPSERTed (keyed by external_url),
+    //    NOT the renameable slug id.
     const created = await createEvent(
       user.id,
       {
@@ -192,22 +203,25 @@ describe("telegram live paste-preview (single-post ?embed=1 fetch — Phase-9 C1
 
     const result = await enrichFromUrl(user.id, FIXTURE_URL, "127.0.0.1");
 
-    // Recognition-only shape: kind + canonical URL + the URL-derived externalId
-    // (the TG composite IS the cache key, so it can still be enriched later by a
-    // Refresh / the warm lane — unlike IG's shortcode trap which stores null).
+    // Recognition-only shape (#1 / IG #69 rule): kind + canonical URL, but
+    // externalId is NULL — NOT the slug id. A deleted post has no data-view to
+    // decode a channelKey from, so there is no canonical key; storing the slug id
+    // would re-key on a rename and orphan the card. null = an honest stats-less
+    // card; re-paste once the post resolves a channelKey.
     expect(result.kind).toBe("telegram_post");
-    expect(result.externalId).toBe(FIXTURE_POST_ID);
+    expect(result.externalId).toBeNull();
     expect(result.title).toBe("");
     expect(result.thumbnailUrl).toBeNull();
     expect(result.canonicalUrl).toBe(FIXTURE_URL);
 
-    // A not_found snapshot stamped polling state but wrote NO snapshot row (a
-    // null view count is a chart GAP, never coerced to 0).
-    const [cached] = await db
+    // A null parse wrote NO telegram_posts row at all (we had no channelKey to key
+    // a not_found marker on — the embed page carried no post block), and no
+    // snapshot row.
+    const cached = await db
       .select()
       .from(telegramPosts)
       .where(eq(telegramPosts.postId, FIXTURE_POST_ID));
-    expect(cached!.lastPollStatus).toBe("not_found");
+    expect(cached).toHaveLength(0);
     const snaps = await db
       .select()
       .from(telegramPostSnapshots)
@@ -225,9 +239,11 @@ describe("telegram live paste-preview (single-post ?embed=1 fetch — Phase-9 C1
 
     const result = await enrichFromUrl(user.id, FIXTURE_URL, "127.0.0.1");
 
-    // Soft-degrade — manual entry preserved, NEVER a 422.
+    // Soft-degrade — manual entry preserved, NEVER a 422. externalId is null
+    // (#1 / IG #69 rule): no channelKey could be resolved (the fetch threw before
+    // any parse), so we store no slug id.
     expect(result.kind).toBe("telegram_post");
-    expect(result.externalId).toBe(FIXTURE_POST_ID);
+    expect(result.externalId).toBeNull();
     expect(result.title).toBe("");
     expect(result.canonicalUrl).toBe(FIXTURE_URL);
     // No cache row landed (the fetch threw before any write).

@@ -63,17 +63,25 @@ function listing(
             subscriberCount: null,
           },
     status: "ok",
-    posts: posts.map((p) => ({
-      externalId: p.externalId,
-      channelKey: p.channelKey ?? channelKey,
-      publishedAt: p.publishedAt,
-      viewCount: p.viewCount,
-      textSnippet: "snip",
-      mediaKind: null,
-      thumbnailUrl: null,
-      reactionsTotal: p.reactionsTotal ?? null,
-      reactionsTop: p.reactionsTop ?? [],
-    })),
+    posts: posts.map((p) => {
+      // Derive slug/messageId from the externalId the test passes (the value it
+      // asserts on) so the walker's slug-based t.me URL + the channelKey-based
+      // key both stay consistent with the assertions.
+      const slash = p.externalId.indexOf("/");
+      return {
+        externalId: p.externalId,
+        slug: slash > 0 ? p.externalId.slice(0, slash) : p.externalId,
+        messageId: slash > 0 ? p.externalId.slice(slash + 1) : "",
+        channelKey: p.channelKey ?? channelKey,
+        publishedAt: p.publishedAt,
+        viewCount: p.viewCount,
+        textSnippet: "snip",
+        mediaKind: null,
+        thumbnailUrl: null,
+        reactionsTotal: p.reactionsTotal ?? null,
+        reactionsTop: p.reactionsTop ?? [],
+      };
+    }),
     nextBeforeCursor,
   };
 }
@@ -92,6 +100,21 @@ async function snapshotCountFor(postIds: string[]): Promise<number> {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+});
+
+// Export-completeness smoke for the index.ts split (#1 refactor): the adapter
+// methods MOVED into preview.ts / sync-stats.ts / refresh.ts must still be
+// exposed on the composed telegramAdapter barrel, and resolveCachedExternalId
+// must now be present (the channelKey re-derivation gate, mirrors IG).
+describe("telegram adapter export-completeness (index.ts split)", () => {
+  it("telegramAdapter still exposes preview/syncStats/refreshQueue + the new resolveCachedExternalId after the split", () => {
+    expect(typeof telegramAdapter.fetchEventPreviewMetadata).toBe("function");
+    expect(typeof telegramAdapter.resolveCachedExternalId).toBe("function");
+    expect(typeof telegramAdapter.syncStats?.fetch).toBe("function");
+    expect(typeof telegramAdapter.refreshQueue?.enqueue).toBe("function");
+    expect(telegramAdapter.refreshQueue?.canRefresh("telegram_post")).toBe(true);
+    expect(Array.isArray(telegramAdapter.workQueue?.scheduledWorkers)).toBe(true);
+  });
 });
 
 describe("telegram backfill walker (Phase 9)", () => {

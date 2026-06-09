@@ -14,8 +14,11 @@
 //   - album = exactly ONE post with mediaKind='album' (D-01)
 //   - not_found is CONTENT-based (HTTP-200-safe), by absence of tgme_* markers
 //   - ?before cursor extraction; null = end-of-history
-//   - externalId is the FULL "<channel>/<messageId>" (RESEARCH Q3 — message ids
-//     are per-channel sequential, NOT globally unique)
+//   - externalId is the STABLE "<channelKey>/<messageId>" (#1 — channelKey is the
+//     rename-proof numeric channel id decoded from data-view, NOT the renameable
+//     @username slug; the durov fixture's data-view c = -1006503122). A block
+//     whose data-view can't be decoded → externalId null (no slug fallback).
+//   - slug carries the renameable @username separately (NEVER the key).
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -68,10 +71,35 @@ describe("parseTelegramListing — healthy listing", () => {
     expect(listing.posts.length).toBe(19);
   });
 
-  it("externalId is the FULL '<channel>/<messageId>' (RESEARCH Q3), NOT the bare id", () => {
-    expect(listing.posts[0]!.externalId).toBe("durov/503");
+  it("externalId is the channelKey-based '<channelKey>/<messageId>' (#1), NOT the slug-based id", () => {
+    // The durov fixture's data-view c = -1006503122; messageId 503 → the stable
+    // key is "-1006503122/503", NOT "durov/503" (the renameable slug).
+    expect(listing.posts[0]!.externalId).toBe("-1006503122/503");
     for (const post of listing.posts) {
-      expect(post.externalId).toMatch(/^[^/]+\/\d+$/);
+      expect(post.externalId).toMatch(/^-1006503122\/\d+$/);
+    }
+  });
+
+  it("slug carries the renameable @username separately (durov), never as the key", () => {
+    expect(listing.posts[0]!.slug).toBe("durov");
+    expect(listing.posts[0]!.messageId).toBe("503");
+    for (const post of listing.posts) {
+      expect(post.slug).toBe("durov");
+    }
+  });
+
+  it("a block whose data-view can't be decoded → externalId null (NO slug fallback, #1 / IG #69 rule)", () => {
+    // Strip every data-view attr so no channelKey decodes. The block still parses
+    // (it has views/text/media), but externalId is null — we NEVER fall back to a
+    // slug-based "durov/503" id (the rename bug this change eliminates).
+    const stripped = fixture("listing-healthy.html").replace(/data-view="[^"]*"/g, 'data-view=""');
+    const noKey = parseTelegramListing(stripped);
+    expect(noKey.posts.length).toBeGreaterThan(0);
+    for (const post of noKey.posts) {
+      expect(post.externalId).toBeNull();
+      expect(post.channelKey).toBeNull();
+      // The slug is still parsed (for the URL / title), just never the key.
+      expect(post.slug).toBe("durov");
     }
   });
 
@@ -109,6 +137,34 @@ describe("parseTelegramListing — healthy listing", () => {
   });
 });
 
+describe("parseTelegramListing — rename-dedup (#1: the WHOLE point)", () => {
+  it("the SAME post under a renamed @username maps to the SAME channelKey-based externalId (no duplicate)", () => {
+    // Simulate a channel rename: the SAME physical post (same data-view, same
+    // messageId) served under two different data-post slugs ("oldname" then
+    // "newname"). With a slug-based key these would be TWO different ids
+    // (oldname/503 vs newname/503) → duplicate events + split metric history. With
+    // the channelKey-based key (#1) both decode to the SAME "-1006503122/503".
+    const healthy = fixture("listing-healthy.html");
+    const underOld = parseTelegramListing(
+      healthy.replace(/data-post="durov\//g, 'data-post="oldname/'),
+    );
+    const underNew = parseTelegramListing(
+      healthy.replace(/data-post="durov\//g, 'data-post="newname/'),
+    );
+
+    const oldFirst = underOld.posts[0]!;
+    const newFirst = underNew.posts[0]!;
+
+    // The slug differs (the rename)…
+    expect(oldFirst.slug).toBe("oldname");
+    expect(newFirst.slug).toBe("newname");
+    // …but the stable channelKey-based externalId is IDENTICAL → no duplicate.
+    expect(oldFirst.externalId).toBe("-1006503122/503");
+    expect(newFirst.externalId).toBe("-1006503122/503");
+    expect(oldFirst.externalId).toBe(newFirst.externalId);
+  });
+});
+
 describe("parseTelegramListing — album (D-01: one post, not N)", () => {
   const listing = parseTelegramListing(fixture("album-post.html"));
 
@@ -120,7 +176,9 @@ describe("parseTelegramListing — album (D-01: one post, not N)", () => {
   it("that single album post carries ONE viewCount and mediaKind='album'", () => {
     expect(listing.posts[0]!.mediaKind).toBe("album");
     expect(listing.posts[0]!.viewCount).toBe(2640000);
-    expect(listing.posts[0]!.externalId).toBe("durov/510");
+    // channelKey-based id (#1): data-view c = -1006503122, messageId 510.
+    expect(listing.posts[0]!.externalId).toBe("-1006503122/510");
+    expect(listing.posts[0]!.slug).toBe("durov");
   });
 });
 
@@ -144,10 +202,11 @@ describe("parseTelegramListing — view-format normalization across blocks", () 
   const listing = parseTelegramListing(fixture("views-mixed.html"));
 
   it("plain / K / M view formats all normalize to the right ints", () => {
+    // channelKey-based ids (#1): data-view c = -1006503122; messageIds 901/902/903.
     const byId = new Map(listing.posts.map((p) => [p.externalId, p.viewCount]));
-    expect(byId.get("durov/901")).toBe(227);
-    expect(byId.get("durov/902")).toBe(18100);
-    expect(byId.get("durov/903")).toBe(1010000);
+    expect(byId.get("-1006503122/901")).toBe(227);
+    expect(byId.get("-1006503122/902")).toBe(18100);
+    expect(byId.get("-1006503122/903")).toBe(1010000);
   });
 });
 
@@ -182,9 +241,25 @@ describe("parseTelegramPost — single-post ?embed=1 page (Pitfall 2: embed carr
   it("returns a single post with a non-null viewCount", () => {
     const post = parseTelegramPost(fixture("single-post-embed.html"));
     expect(post).not.toBeNull();
-    expect(post!.externalId).toBe("durov/505");
+    // channelKey-based id (#1): the ?embed=1 block's data-view c = -1006503122,
+    // messageId 505 → "-1006503122/505" (NOT "durov/505").
+    expect(post!.externalId).toBe("-1006503122/505");
+    expect(post!.slug).toBe("durov");
+    expect(post!.messageId).toBe("505");
     expect(post!.viewCount).toBe(3710000);
     expect(post!.publishedAt).toBeInstanceOf(Date);
+  });
+
+  it("the embed block with an undecodable data-view → externalId null (no slug fallback)", () => {
+    const stripped = fixture("single-post-embed.html").replace(
+      /data-view="[^"]*"/g,
+      'data-view=""',
+    );
+    const post = parseTelegramPost(stripped);
+    expect(post).not.toBeNull();
+    expect(post!.externalId).toBeNull();
+    expect(post!.channelKey).toBeNull();
+    expect(post!.slug).toBe("durov"); // slug still parsed, never the key
   });
 
   it("returns null when the page has no message block", () => {

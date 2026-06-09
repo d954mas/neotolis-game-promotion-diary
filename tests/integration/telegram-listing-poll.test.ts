@@ -67,17 +67,25 @@ function listing(
             subscriberCount: null,
           },
     status: "ok",
-    posts: posts.map((p) => ({
-      externalId: p.externalId,
-      channelKey: p.channelKey ?? channelKey,
-      publishedAt: p.publishedAt,
-      viewCount: p.viewCount,
-      textSnippet: "snip",
-      mediaKind: null,
-      thumbnailUrl: null,
-      reactionsTotal: p.reactionsTotal ?? null,
-      reactionsTop: p.reactionsTop ?? [],
-    })),
+    posts: posts.map((p) => {
+      // The fixture posts pass externalId directly (the value the test asserts
+      // on). Derive slug/messageId from it so the handler's slug-based t.me URL +
+      // the channelKey-based key both stay consistent with what's asserted.
+      const slash = p.externalId.indexOf("/");
+      return {
+        externalId: p.externalId,
+        slug: slash > 0 ? p.externalId.slice(0, slash) : p.externalId,
+        messageId: slash > 0 ? p.externalId.slice(slash + 1) : "",
+        channelKey: p.channelKey ?? channelKey,
+        publishedAt: p.publishedAt,
+        viewCount: p.viewCount,
+        textSnippet: "snip",
+        mediaKind: null,
+        thumbnailUrl: null,
+        reactionsTotal: p.reactionsTotal ?? null,
+        reactionsTop: p.reactionsTop ?? [],
+      };
+    }),
     nextBeforeCursor: null,
   };
 }
@@ -593,6 +601,8 @@ describe("telegram listing-poll event materialization (A2)", () => {
 
     const post = {
       externalId: `${channel}/77`,
+      slug: channel,
+      messageId: "77",
       channelKey: "-1009999",
       publishedAt: new Date("2026-06-05T00:00:00Z"),
       viewCount: 500,
@@ -610,5 +620,88 @@ describe("telegram listing-poll event materialization (A2)", () => {
 
     expect(await telegramEventCount(userA.id, `${channel}/77`)).toBe(1);
     expect(await telegramEventCount(userB.id, `${channel}/77`)).toBe(1);
+  });
+});
+
+// #1 — the core regression: a channel @username rename must NOT re-key the same
+// physical post. The stored post_id / events.external_id is channelKey-based, so
+// the SAME post (same channelKey + messageId) seen under two different slugs maps
+// to ONE event + ONE telegram_posts row — no duplicate, no split metric history.
+describe("telegram rename-dedup (#1: same post under a renamed slug → no duplicate)", () => {
+  async function telegramEventCount(userId: string, externalId: string): Promise<number> {
+    const rows = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(
+        and(
+          eq(events.userId, userId),
+          eq(events.kind, "telegram_post"),
+          eq(events.externalId, externalId),
+        ),
+      );
+    return rows.length;
+  }
+
+  it("the same channelKey+messageId under two different @-handles materializes ONE event (no slug-keyed duplicate)", async () => {
+    const user = await seedUserDirectly({ email: `tg-rename-${uniq()}@test.local` });
+    // A stable channel: ONE channelKey, ONE subscriber source — but the channel's
+    // @username gets renamed between two polls. Pre-rename the listing parses with
+    // slug=oldSlug; post-rename with slug=newSlug. The data-view channelKey is the
+    // same in both, so the channelKey-based externalId is identical.
+    const channelKey = `-100${Math.floor(Math.random() * 1e9)}`;
+    const slug = `chan_${uniq()}`;
+    const oldSlug = `old_${uniq()}`;
+    const newSlug = `new_${uniq()}`;
+    const messageId = "503";
+    const stablePostId = `${channelKey}/${messageId}`;
+
+    await createSource(
+      user.id,
+      {
+        kind: "telegram_channel",
+        handleUrl: `https://t.me/${slug}`,
+        isOwnedByMe: true,
+        autoImport: true,
+        backfillTargetSince: new Date("2026-01-01T00:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+
+    // The SAME physical post, parsed once with the old @-handle and once with the
+    // new one (a rename between polls). With a slug-based key these would be two
+    // ids (oldSlug/503 vs newSlug/503) → a duplicate event. With the channelKey-
+    // based key (#1) both are stablePostId → the (user, kind, source, external_id)
+    // unique + onConflictDoNothing dedup to ONE event.
+    const post = (postSlug: string) => ({
+      externalId: stablePostId, // channelKey-based — IDENTICAL across the rename
+      slug: postSlug, // the renameable handle — differs
+      messageId,
+      channelKey,
+      publishedAt: new Date("2026-06-05T00:00:00Z"),
+      viewCount: 100,
+      textSnippet: "stable promo",
+      mediaKind: null,
+      thumbnailUrl: null,
+      reactionsTotal: null,
+      reactionsTop: [],
+    });
+
+    // Poll 1 — pre-rename handle. One new event.
+    expect(await materializeTelegramEvents(slug, [post(oldSlug)], { userId: user.id })).toBe(1);
+    // Poll 2 — post-rename handle, SAME channelKey id → dedup → zero new events.
+    expect(await materializeTelegramEvents(slug, [post(newSlug)], { userId: user.id })).toBe(0);
+
+    // Exactly ONE telegram_post event, keyed on the channelKey-based id — and NO
+    // slug-keyed id exists anywhere (the rename bug is gone).
+    expect(await telegramEventCount(user.id, stablePostId)).toBe(1);
+    expect(await telegramEventCount(user.id, `${oldSlug}/${messageId}`)).toBe(0);
+    expect(await telegramEventCount(user.id, `${newSlug}/${messageId}`)).toBe(0);
+
+    const allExt = await db
+      .select({ externalId: events.externalId })
+      .from(events)
+      .where(and(eq(events.userId, user.id), eq(events.kind, "telegram_post")));
+    expect(allExt).toHaveLength(1);
+    expect(allExt[0]!.externalId).toBe(stablePostId);
   });
 });
