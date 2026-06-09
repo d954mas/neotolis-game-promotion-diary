@@ -253,6 +253,39 @@ describe("telegram live paste-preview (single-post ?embed=1 fetch — Phase-9 C1
     expect(tg.calls).toHaveLength(0);
   });
 
+  it("dual-keyed rows sharing ONE channelKey (legacy slug-keyed beside channelKey-keyed): canonical id, ZERO live fetch (the NULL-external_id regression)", async () => {
+    const { telegramAdapter } = await import("../../src/lib/sources/telegram/server/index.js");
+
+    // The exact pre-fix bug. A pre-channelKey-canonical SLUG-keyed row
+    // (post_id "durov/505") left beside the channelKey-keyed row the later preview
+    // wrote ("-1006503122/505"). BOTH carry the SAME external_url AND the SAME
+    // channel_key (-1006503122) — they are the SAME post keyed two ways, NOT a
+    // slug-reuse collision. The OLD row-count check saw 2 rows → fired a live
+    // disambiguation fetch that the just-consumed pacer slot denied → returned null
+    // → the event saved with a NULL external_id (no feed preview). Counting DISTINCT
+    // channelKeys (1 here) must short-circuit to the canonical id with ZERO fetch.
+    // A revert to row-counting would fail THIS test (the single/collision tests
+    // above both pass under either logic — only this one pins the fix).
+    const externalUrl = FIXTURE_URL; // https://t.me/durov/505
+    const LEGACY_SLUG_KEYED_ID = FIXTURE_SLUG_PATH; // "durov/505" (pre-fix keying)
+    await db
+      .insert(telegramPosts)
+      .values({ postId: LEGACY_SLUG_KEYED_ID, channelKey: FIXTURE_CHANNEL_KEY, externalUrl })
+      .onConflictDoNothing();
+    await db
+      .insert(telegramPosts)
+      .values({ postId: FIXTURE_POST_ID, channelKey: FIXTURE_CHANNEL_KEY, externalUrl })
+      .onConflictDoNothing();
+
+    const resolved = await telegramAdapter.resolveCachedExternalId!(FIXTURE_URL);
+
+    // Canonical channelKey-based id (NOT the legacy slug id) and — the crux of the
+    // regression — NO live fetch (the old path's needless fetch → pacer denial → null).
+    expect(resolved).toBe(FIXTURE_POST_ID);
+    expect(resolved).not.toBe(LEGACY_SLUG_KEYED_ID);
+    expect(tg.calls).toHaveLength(0);
+  });
+
   it("a deleted/private/nonexistent post (null parse) degrades gracefully (no 422 dead-end)", async () => {
     const user = await seedUserDirectly({
       email: `tg-preview-gone-${Math.random().toString(36).slice(2)}@t.io`,

@@ -215,10 +215,10 @@ export async function resolveCachedExternalId(url: string): Promise<string | nul
     .where(eq(telegramPosts.externalUrl, externalUrl));
 
   if (rows.length === 0) return null;
-  // Decide on DISTINCT channelKeys, not row count. channelKey is non-null on every
-  // row we write (fetchTelegramPostSingle returns unwritten when it's undecodable,
-  // so we never persist a slug-keyed snapshot), so the filter only drops
-  // hypothetical legacy null rows.
+  // Decide on DISTINCT channelKeys, not row count. A "<channelKey>/<messageId>"-keyed
+  // row always carries that channelKey (it is part of the PK we wrote, and warm-lane
+  // refreshes COALESCE-preserve it); the non-null filter is defense-in-depth for any
+  // hypothetical legacy slug-keyed row, not a mask over a real null.
   const channelKeys = new Set(rows.map((r) => r.channelKey).filter((k): k is string => k !== null));
   if (channelKeys.size === 0) return null;
   if (channelKeys.size === 1) {
