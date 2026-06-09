@@ -1,7 +1,9 @@
 // Idempotent per-post snapshot writer for Telegram (mirrors
-// reddit/server/snapshots.ts, stripped to VIEWS-ONLY — Telegram exposes only a
-// view count on the public t.me/s surface, no likes/comments/shares, D-04 → no
-// like/comment columns).
+// reddit/server/snapshots.ts). Telegram's public t.me/s listing exposes TWO
+// metrics: a view count AND a per-post reaction tally (E1 — Phase 9 UAT second
+// metric); no likes/comments/shares (D-04). The snapshot table holds the
+// view_count + reactions_total time-series; telegram_posts holds the top-5
+// reactions_top current-state (parallel to thumbnail_url).
 //
 // Two phases, each idempotent on its OWN — NO wrapping db.transaction (G2,
 // mirrors reddit snapshots which are bare single-statement writes). The atomicity
@@ -35,6 +37,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { telegramPosts, telegramPostSnapshots } from "$lib/server/db/schema/index.js";
+import type { TelegramReaction } from "./schema/posts.js";
 
 export type TelegramSnapshotStatus = "ok" | "not_found" | "private" | "rate_limited";
 
@@ -54,11 +57,29 @@ export interface WriteTelegramSnapshotArgs {
   /** Drives tier classification. */
   publishedAt?: Date | null;
   /**
-   * Resolved view count. NULL → no snapshot row (views absent — very new post
-   * or views disabled), but the telegram_posts row still updates its polling
-   * state.
+   * Resolved view count. NULL → views absent (very new post or views disabled).
+   * A snapshot row is written when status==='ok' AND at least one metric
+   * (viewCount OR reactionsTotal) is non-null; view_count stays NULL in that
+   * row when only reactions are present (the chart draws a GAP, not a 0).
    */
   viewCount: number | null;
+  /**
+   * Resolved summed reaction count (E1, second metric). NULL → the post carries
+   * no reactions block. Written to the snapshot's reactions_total column
+   * (parallel to view_count): a present value charts as the reactions trend, a
+   * NULL is a GAP (never 0 — D-05). The metric-series reader drops an all-null
+   * reactions line. Reactions live ONLY on the t.me/s listing, so the warm-lane
+   * embed path passes null here.
+   */
+  reactionsTotal?: number | null;
+  /**
+   * Top-5 most-popular reactions for the card's current-state list (E1).
+   * UPSERTed onto telegram_posts.reactions_top (parallel to thumbnail_url):
+   * COALESCE-preserved on a non-ok poll so a transient failure does not blank a
+   * working reactions list. The listing path passes the parsed array (possibly
+   * []); the embed path passes undefined → no change to the stored list.
+   */
+  reactionsTop?: TelegramReaction[] | null;
   /** Outcome label written to telegram_posts.last_poll_status. */
   status: TelegramSnapshotStatus;
 }
@@ -69,6 +90,14 @@ export async function writeTelegramSnapshot(args: WriteTelegramSnapshotArgs): Pr
   //    poll_failure_count increments on non-ok, resets on ok. Idempotent on
   //    re-run (last-write-wins on the snippet + monotonic-ish state).
   const now = new Date();
+  // reactions_top is jsonb. For the INSERT .values() path Drizzle serializes a
+  // JS array automatically. For the UPDATE COALESCE expression we bind a JSON
+  // STRING with an explicit ::jsonb cast (a raw JS array bound into a sql`` tag
+  // would serialize as a Postgres array literal, not jsonb). `undefined` (embed
+  // path / not threaded) → null so COALESCE preserves the stored list; an OK
+  // poll with [] (reactions removed upstream) DOES overwrite — [] is non-null.
+  const reactionsTop = args.reactionsTop ?? null;
+  const reactionsTopJson = reactionsTop === null ? null : JSON.stringify(reactionsTop);
   await db
     .insert(telegramPosts)
     .values({
@@ -77,6 +106,7 @@ export async function writeTelegramSnapshot(args: WriteTelegramSnapshotArgs): Pr
       textSnippet: args.textSnippet ?? null,
       mediaKind: args.mediaKind ?? null,
       thumbnailUrl: args.thumbnailUrl ?? null,
+      reactionsTop,
       externalUrl: args.externalUrl ?? null,
       publishedAt: args.publishedAt ?? null,
       fetchedAt: now,
@@ -97,6 +127,11 @@ export async function writeTelegramSnapshot(args: WriteTelegramSnapshotArgs): Pr
         textSnippet: sql`COALESCE(${args.textSnippet ?? null}, ${telegramPosts.textSnippet})`,
         mediaKind: sql`COALESCE(${args.mediaKind ?? null}, ${telegramPosts.mediaKind})`,
         thumbnailUrl: sql`COALESCE(${args.thumbnailUrl ?? null}, ${telegramPosts.thumbnailUrl})`,
+        // reactions_top (E1): same COALESCE-preserve rule as thumbnail_url — an
+        // OK poll carries the fresh top-5 (refreshes the list, [] overwrites a
+        // stale one); a non-ok poll carries null → COALESCE keeps the last good
+        // list instead of blanking it. jsonb cast keeps the bind typed.
+        reactionsTop: sql`COALESCE(${reactionsTopJson}::jsonb, ${telegramPosts.reactionsTop})`,
         externalUrl: sql`COALESCE(${args.externalUrl ?? null}, ${telegramPosts.externalUrl})`,
         publishedAt: sql`COALESCE(${args.publishedAt ?? null}, ${telegramPosts.publishedAt})`,
         lastPolledAt: now,
@@ -106,17 +141,22 @@ export async function writeTelegramSnapshot(args: WriteTelegramSnapshotArgs): Pr
       },
     });
 
-  // 2. Snapshot row — only on success AND when views are present. ON CONFLICT DO
-  //    NOTHING makes within-the-same-minute retries idempotent. Independent of
-  //    the UPSERT above (see header — no wrapping tx; a lost snapshot on a crash
-  //    is a benign missing time-series point).
-  if (args.status === "ok" && args.viewCount !== null) {
+  // 2. Snapshot row — on success AND when AT LEAST ONE metric (views OR
+  //    reactions) is present. ON CONFLICT DO NOTHING makes within-the-same-minute
+  //    retries idempotent. Independent of the UPSERT above (see header — no
+  //    wrapping tx; a lost snapshot on a crash is a benign missing time-series
+  //    point). Each column is written independently: a post with reactions but
+  //    hidden views gets a row with view_count NULL + reactions_total set (and
+  //    vice versa) — null is a per-metric chart GAP (D-05), never coerced to 0.
+  const reactionsTotal = args.reactionsTotal ?? null;
+  if (args.status === "ok" && (args.viewCount !== null || reactionsTotal !== null)) {
     await db
       .insert(telegramPostSnapshots)
       .values({
         postId: args.postId,
         polledAt: sql`date_trunc('minute', now())` as unknown as Date,
         viewCount: args.viewCount,
+        reactionsTotal,
       })
       .onConflictDoNothing();
   }

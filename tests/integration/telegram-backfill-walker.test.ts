@@ -39,6 +39,8 @@ interface FixturePost {
   externalId: string;
   publishedAt: Date | null;
   viewCount: number | null;
+  reactionsTotal?: number | null;
+  reactionsTop?: { emoji: string | null; kind: "standard" | "custom" | "paid"; count: number }[];
 }
 
 function listing(posts: FixturePost[], nextBeforeCursor: string | null): ParsedTelegramListing {
@@ -52,6 +54,8 @@ function listing(posts: FixturePost[], nextBeforeCursor: string | null): ParsedT
       textSnippet: "snip",
       mediaKind: null,
       thumbnailUrl: null,
+      reactionsTotal: p.reactionsTotal ?? null,
+      reactionsTop: p.reactionsTop ?? [],
     })),
     nextBeforeCursor,
   };

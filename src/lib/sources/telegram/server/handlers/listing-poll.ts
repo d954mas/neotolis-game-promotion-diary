@@ -63,6 +63,8 @@ export async function handleTelegramListingPoll(args: {
       externalUrl: externalUrlForPost(post.externalId),
       publishedAt: post.publishedAt,
       viewCount: post.viewCount,
+      reactionsTotal: post.reactionsTotal,
+      reactionsTop: post.reactionsTop,
       status: "ok",
     });
     written += 1;

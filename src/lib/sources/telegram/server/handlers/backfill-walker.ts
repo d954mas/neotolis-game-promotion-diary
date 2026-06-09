@@ -178,6 +178,8 @@ export async function handleTelegramBackfillWalker(args: {
       externalUrl: externalUrlForPost(post.externalId),
       publishedAt: post.publishedAt,
       viewCount: post.viewCount,
+      reactionsTotal: post.reactionsTotal,
+      reactionsTop: post.reactionsTop,
       status: "ok",
     });
     inWindowPosts.push(post);
