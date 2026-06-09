@@ -54,10 +54,16 @@ export interface TelegramWalkState {
   backfillComplete: boolean;
   /** Deepest published_at reached so far (frontier). null until set. */
   backfillOldestAt: Date | null;
+  /** Running count of posts snapshotted across all walked pages this walk. The
+   *  SOCIAL_BACKFILL_MAX_POSTS cap bounds it so the deep walk's cost is
+   *  independent of archive size (B1 — mirrors IG state.collected). Persisted in
+   *  metadata across continuation ticks; reset to 0 when a widen re-opens the
+   *  walk. */
+  collected: number;
 }
 
 /** Read the walker state for a channel slug. Defaults for a never-walked
- *  channel (no row): cursor null, not complete, no frontier. */
+ *  channel (no row): cursor null, not complete, no frontier, zero collected. */
 export async function getTelegramWalkState(
   channelKey: string,
   dbCtx: DbOrTx = db,
@@ -71,11 +77,14 @@ export async function getTelegramWalkState(
     .from(dataSourceChannelState)
     .where(and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelKey)))
     .limit(1);
-  const cursor = (row?.metadata as { lastBackfillCursor?: unknown } | null)?.lastBackfillCursor;
+  const md = (row?.metadata as { lastBackfillCursor?: unknown; backfillCollected?: unknown } | null) ?? null;
+  const cursor = md?.lastBackfillCursor;
+  const collected = md?.backfillCollected;
   return {
     beforeCursor: typeof cursor === "string" && cursor !== "" ? cursor : null,
     backfillComplete: row?.backfillComplete ?? false,
     backfillOldestAt: row?.backfillOldestAt ?? null,
+    collected: typeof collected === "number" && Number.isFinite(collected) ? collected : 0,
   };
 }
 
@@ -90,6 +99,9 @@ export async function getTelegramWalkState(
  *   null (the walk is done; page-1 re-polls ignore it).
  * - `oldestPublishedAt` moves the frontier (deeper-only, WHERE-guarded). null
  *   skips the frontier move (a page with no dated posts).
+ * - `collected` is the running post count across the walk (cap bookkeeping for
+ *   B1). Cleared to null on completion so a future widen-reopened walk starts
+ *   from 0 again.
  */
 export async function persistTelegramWalkProgress(
   channelKey: string,
@@ -97,22 +109,29 @@ export async function persistTelegramWalkProgress(
     nextBeforeCursor: string | null;
     backfillComplete: boolean;
     oldestPublishedAt: Date | null;
+    collected: number;
   },
   dbCtx: DbOrTx = db,
 ): Promise<void> {
   await ensureChannelState(KIND, channelKey, dbCtx);
   await markChannelLastPolledAt(KIND, channelKey, dbCtx);
 
-  // Advance (or clear, on completion) the ?before cursor under metadata. Atomic
-  // JSONB merge preserves any other adapter metadata on the row.
+  // Advance (or clear, on completion) the ?before cursor + collected count under
+  // metadata. Atomic JSONB merge preserves any other adapter metadata on the row.
+  // On completion both keys are dropped (the walk is done; page-1 re-polls ignore
+  // them and a future widen restarts the count from 0).
   const cursor = next.backfillComplete ? null : next.nextBeforeCursor;
+  const cursorSet =
+    cursor === null
+      ? sql`COALESCE(${dataSourceChannelState.metadata}, '{}'::jsonb) - 'lastBackfillCursor'`
+      : sql`jsonb_set(COALESCE(${dataSourceChannelState.metadata}, '{}'::jsonb), '{lastBackfillCursor}', to_jsonb(${cursor}::text), true)`;
+  const collectedSet = next.backfillComplete
+    ? sql`(${cursorSet}) - 'backfillCollected'`
+    : sql`jsonb_set(${cursorSet}, '{backfillCollected}', to_jsonb(${next.collected}::int), true)`;
   await dbCtx
     .update(dataSourceChannelState)
     .set({
-      metadata:
-        cursor === null
-          ? sql`COALESCE(${dataSourceChannelState.metadata}, '{}'::jsonb) - 'lastBackfillCursor'`
-          : sql`jsonb_set(COALESCE(${dataSourceChannelState.metadata}, '{}'::jsonb), '{lastBackfillCursor}', to_jsonb(${cursor}::text), true)`,
+      metadata: collectedSet,
       updatedAt: new Date(),
     })
     .where(and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelKey)));
@@ -123,4 +142,42 @@ export async function persistTelegramWalkProgress(
   if (next.backfillComplete) {
     await markChannelBackfillComplete(KIND, channelKey, dbCtx);
   }
+}
+
+/**
+ * Re-open a COMPLETE channel's deep walk after a window widen (G3 — fired by
+ * telegramAdapter.resetWalkerStateOnWidening). Clears the sticky
+ * `backfill_complete` flag and drops the metadata cursor + collected count so
+ * the next backfill_page row re-enters page 1 (newest page, beforeCursor=null)
+ * and walks toward the new (deeper) deepest-subscriber target. Mirrors reddit's
+ * `backfillAfterCursor=null, backfillComplete=false` reset and YT/IG's state
+ * clear.
+ *
+ * The frontier (`backfill_oldest_at`) is intentionally LEFT IN PLACE — it is the
+ * deepest-walked watermark for display + the deeper-only WHERE guard, not a
+ * resume cursor; a widen-reopened walk re-discovers older posts past it.
+ *
+ * Returns the number of channel-state rows that were complete and got reset (0
+ * when the channel was never walked / already incomplete — caller logs a no-op).
+ */
+export async function resetTelegramWalkState(
+  channelKey: string,
+  dbCtx: DbOrTx = db,
+): Promise<number> {
+  const result = await dbCtx
+    .update(dataSourceChannelState)
+    .set({
+      backfillComplete: false,
+      metadata: sql`COALESCE(${dataSourceChannelState.metadata}, '{}'::jsonb) - 'lastBackfillCursor' - 'backfillCollected'`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(dataSourceChannelState.kind, KIND),
+        eq(dataSourceChannelState.channelKey, channelKey),
+        eq(dataSourceChannelState.backfillComplete, true),
+      ),
+    )
+    .returning({ channelKey: dataSourceChannelState.channelKey });
+  return result.length;
 }

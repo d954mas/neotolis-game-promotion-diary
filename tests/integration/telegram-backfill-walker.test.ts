@@ -12,18 +12,22 @@
 //     pollListing was called with the persisted cursor, never re-fetching page 1)
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 const { db } = await import("../../src/lib/server/db/client.js");
-const { telegramPosts, telegramPostSnapshots } =
+const { telegramPosts, telegramPostSnapshots, adapterRefreshQueue } =
   await import("../../src/lib/server/db/schema/index.js");
 const { dataSourceChannelState } =
   await import("../../src/lib/server/db/schema/data-source-channel-state.js");
 const adapterMod = await import("../../src/lib/sources/telegram/server/adapter.js");
 const { handleTelegramBackfillWalker, countPendingBackfillContinuations } =
   await import("../../src/lib/sources/telegram/server/handlers/backfill-walker.js");
-const { getTelegramWalkState } =
+const { getTelegramWalkState, resetTelegramWalkState } =
   await import("../../src/lib/sources/telegram/server/walker-state.js");
+const { telegramAdapter } = await import("../../src/lib/sources/telegram/server/index.js");
+const { createSource } = await import("../../src/lib/server/services/data-sources.js");
+const { seedUserDirectly } = await import("./helpers.js");
+const { env } = await import("../../src/lib/server/config/env.js");
 
 type ParsedTelegramListing = Awaited<
   ReturnType<typeof adapterMod.telegramChannelAdapterCore.pollListing>
@@ -216,5 +220,198 @@ describe("telegram backfill walker (Phase 9)", () => {
       .where(eq(telegramPosts.postId, `${channel}/7`));
     expect(postRow?.viewless).toBe("ok");
     expect(await snapshotCountFor([`${channel}/7`])).toBe(1);
+  });
+});
+
+// B1 — the walk is BOUNDED by the deepest subscriber's window + the post-count
+// cap, instead of crawling to absolute end-of-history.
+describe("telegram backfill walker — window + cap bounding (B1)", () => {
+  /** Seed an auto-import telegram_channel source whose backfillTargetSince is the
+   *  chosen window. createSource persists the window as the absolute target the
+   *  walker reads (resolveDeepestTargetSince). createSource(autoImport=true) also
+   *  enqueues an onboarding backfill_page row via onSourceCreated; we clear it so
+   *  the continuation-count assertions isolate the WALKER's own enqueue decision
+   *  (does it continue past the bound?) from the onboarding kick. */
+  async function seedSubscriber(channel: string, targetSince: Date): Promise<void> {
+    const user = await seedUserDirectly({ email: `tg-b1-${uniq()}@test.local` });
+    await createSource(
+      user.id,
+      {
+        kind: "telegram_channel",
+        handleUrl: `https://t.me/${channel}`,
+        isOwnedByMe: false,
+        autoImport: true,
+        backfillTargetSince: targetSince,
+      },
+      "127.0.0.1",
+    );
+    await db
+      .delete(adapterRefreshQueue)
+      .where(
+        and(
+          eq(adapterRefreshQueue.adapterKind, "telegram_channel"),
+          eq(adapterRefreshQueue.type, "backfill_page"),
+          sql`${adapterRefreshQueue.payload}->>'channel' = ${channel}`,
+        ),
+      );
+  }
+
+  it("STOPS at the deepest-subscriber window — a more-anchor page is NOT walked past it", async () => {
+    const channel = `b1win_${uniq()}`;
+    // Subscriber wants posts back to 2026-05-25. The page carries one post inside
+    // the window (05-31) and one OLDER than it (05-20) — the walk must snapshot
+    // the in-window post, skip the out-of-window one, and mark complete EVEN
+    // THOUGH the page still has a more-anchor cursor (would otherwise continue).
+    await seedSubscriber(channel, new Date("2026-05-25T00:00:00Z"));
+    const posts = [
+      { externalId: `${channel}/510`, publishedAt: new Date("2026-05-31T00:00:00Z"), viewCount: 100 },
+      { externalId: `${channel}/505`, publishedAt: new Date("2026-05-20T00:00:00Z"), viewCount: 90 },
+    ];
+    vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
+      listing(posts, "505"), // more-anchor present — only the window bound stops it
+    );
+
+    const r = await handleTelegramBackfillWalker({ channel });
+    expect(r.written).toBe(1); // only the in-window post snapshotted
+    expect(r.backfillComplete).toBe(true); // window crossed → complete despite cursor
+    expect(r.nextBeforeCursor).toBeNull();
+
+    const state = await getTelegramWalkState(channel);
+    expect(state.backfillComplete).toBe(true);
+    // The out-of-window post was NOT snapshotted.
+    expect(await snapshotCountFor([`${channel}/510`])).toBe(1);
+    expect(await snapshotCountFor([`${channel}/505`])).toBe(0);
+    // No continuation enqueued past the window bound.
+    expect(await countPendingBackfillContinuations(channel)).toBe(0);
+  });
+
+  it("STOPS at SOCIAL_BACKFILL_MAX_POSTS even with more history + an unbounded window", async () => {
+    const channel = `b1cap_${uniq()}`;
+    // "everything" subscriber → no date bound; only the post-count cap stops it.
+    await seedSubscriber(channel, new Date("1970-01-01T00:00:00Z"));
+    const originalCap = env.SOCIAL_BACKFILL_MAX_POSTS;
+    env.SOCIAL_BACKFILL_MAX_POSTS = 2; // tiny cap for the test
+    try {
+      const posts = [
+        { externalId: `${channel}/9`, publishedAt: new Date("2026-06-03T00:00:00Z"), viewCount: 3 },
+        { externalId: `${channel}/8`, publishedAt: new Date("2026-06-02T00:00:00Z"), viewCount: 2 },
+        { externalId: `${channel}/7`, publishedAt: new Date("2026-06-01T00:00:00Z"), viewCount: 1 },
+      ];
+      vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
+        listing(posts, "7"), // plenty of older history (more-anchor present)
+      );
+
+      const r = await handleTelegramBackfillWalker({ channel });
+      expect(r.written).toBe(2); // cap reached after 2 posts
+      expect(r.backfillComplete).toBe(true); // cap bound → complete
+      expect(r.nextBeforeCursor).toBeNull();
+      // The 3rd post was never snapshotted (cap hit first).
+      expect(await snapshotCountFor([`${channel}/7`])).toBe(0);
+      expect(await countPendingBackfillContinuations(channel)).toBe(0);
+    } finally {
+      env.SOCIAL_BACKFILL_MAX_POSTS = originalCap;
+    }
+  });
+
+  it("an UNBOUNDED channel (no subscriber row) still walks to end-of-history", async () => {
+    // No seedSubscriber — resolveDeepestTargetSince returns null → unbounded.
+    const channel = `b1none_${uniq()}`;
+    const posts = [
+      { externalId: `${channel}/2`, publishedAt: new Date("2020-01-02T00:00:00Z"), viewCount: 5 },
+      { externalId: `${channel}/1`, publishedAt: new Date("2020-01-01T00:00:00Z"), viewCount: 3 },
+    ];
+    vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
+      listing(posts, null), // end-of-history is the only stop
+    );
+    const r = await handleTelegramBackfillWalker({ channel });
+    expect(r.written).toBe(2); // both ancient posts snapshotted (no window bound)
+    expect(r.backfillComplete).toBe(true); // end-of-history
+  });
+});
+
+// G3 — widening a COMPLETE channel re-opens the deep walk.
+describe("telegram backfill walker — widening re-opens a complete channel (G3)", () => {
+  it("resetTelegramWalkState clears complete + cursor on a complete channel", async () => {
+    const channel = `g3reset_${uniq()}`;
+    // Drive a channel to completion (end-of-history).
+    vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
+      listing(
+        [{ externalId: `${channel}/3`, publishedAt: new Date("2025-01-01T00:00:00Z"), viewCount: 9 }],
+        null,
+      ),
+    );
+    await handleTelegramBackfillWalker({ channel });
+    let state = await getTelegramWalkState(channel);
+    expect(state.backfillComplete).toBe(true);
+
+    const resetCount = await resetTelegramWalkState(channel);
+    expect(resetCount).toBe(1); // one complete row reset
+    state = await getTelegramWalkState(channel);
+    expect(state.backfillComplete).toBe(false);
+    expect(state.beforeCursor).toBeNull(); // re-enters page 1 (newest)
+  });
+
+  it("resetTelegramWalkState is a no-op (0) on a never-walked / incomplete channel", async () => {
+    const channel = `g3noop_${uniq()}`;
+    expect(await resetTelegramWalkState(channel)).toBe(0);
+  });
+
+  it("adapter.resetWalkerStateOnWidening re-enqueues a backfill_page on a complete channel", async () => {
+    const channel = `g3widen_${uniq()}`;
+    const user = await seedUserDirectly({ email: `tg-g3-${uniq()}@test.local` });
+    // Seed an owned auto-import source (sets metadata.channel) but don't trigger
+    // the onboarding backfill yet (autoImport=false → no onSourceCreated enqueue).
+    const source = await createSource(
+      user.id,
+      {
+        kind: "telegram_channel",
+        handleUrl: `https://t.me/${channel}`,
+        isOwnedByMe: false,
+        autoImport: false,
+        backfillTargetSince: new Date("2026-05-01T00:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+
+    // Drive the channel to completion.
+    vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
+      listing(
+        [{ externalId: `${channel}/4`, publishedAt: new Date("2026-05-10T00:00:00Z"), viewCount: 2 }],
+        null,
+      ),
+    );
+    await handleTelegramBackfillWalker({ channel });
+    expect((await getTelegramWalkState(channel)).backfillComplete).toBe(true);
+    expect(await countPendingBackfillContinuations(channel)).toBe(0);
+
+    // Widen the window to "everything" (deeper than the prior 2026-05-01 +
+    // deeper than the frontier 2026-05-10). The hook must clear complete +
+    // enqueue a fresh backfill_page.
+    await db.transaction(async (tx) => {
+      await telegramAdapter.resetWalkerStateOnWidening!(
+        {
+          id: source.id,
+          userId: user.id,
+          autoImport: source.autoImport,
+          handleUrl: source.handleUrl,
+          metadata: (source.metadata ?? {}) as Record<string, unknown>,
+          kind: source.kind,
+          channelId: source.channelId,
+          backfillTargetSince: new Date("1970-01-01T00:00:00Z"),
+          isOwnedByMe: source.isOwnedByMe,
+        },
+        {
+          previousTarget: new Date("2026-05-01T00:00:00Z"),
+          newTarget: new Date("1970-01-01T00:00:00Z"),
+          triggerUserId: user.id,
+          ipAddress: "127.0.0.1",
+          tx,
+        },
+      );
+    });
+
+    expect((await getTelegramWalkState(channel)).backfillComplete).toBe(false);
+    // A fresh backfill_page row was enqueued to re-open the deep walk.
+    expect(await countPendingBackfillContinuations(channel)).toBeGreaterThanOrEqual(1);
   });
 });

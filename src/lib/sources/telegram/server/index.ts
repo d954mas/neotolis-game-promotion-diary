@@ -53,6 +53,7 @@ import { telegramParsePostUrl, telegramParseSourceUrl } from "./url.js";
 import { fetchTelegramPost } from "./http.js";
 import { parseTelegramPost } from "./parse.js";
 import { writeTelegramSnapshot } from "./snapshots.js";
+import { getTelegramWalkState, resetTelegramWalkState } from "./walker-state.js";
 import { handleTelegramWarmRefresh } from "./handlers/warm-refresh.js";
 import {
   telegramWorkerTick,
@@ -271,18 +272,96 @@ async function normalizeSourceOnCreate(input: NormalizeSourceInput): Promise<Nor
  *  is user-driven (they just registered the source), so the row lands on the
  *  user_source lane with origin="user" — matching Reddit's onboarding intent.
  *
- *  backfillWindow is part of the contract; Telegram's walker drains from the
- *  newest page backward and the window is the depth bound the walker's frontier
- *  respects (the listing exposes all available history regardless). */
+ *  The chosen window is NOT threaded into the queue payload: createSource has
+ *  already persisted it as the row's absolute `backfillTargetSince` (the source
+ *  of truth) BEFORE this hook runs, and the walker
+ *  (handlers/backfill-walker.ts resolveDeepestTargetSince) reads the deepest
+ *  subscriber target straight off `data_sources` at walk time. That bounds the
+ *  deep walk to the window (B1) — a multi-subscriber channel's cron continuation
+ *  pages have no single window to carry in a payload, so the persisted column is
+ *  the correct, denorm-free source. `opts.backfillWindow` is intentionally
+ *  unused here for that reason. */
 async function onSourceCreated(
   source: SourceCreatedHookSource,
   opts: { backfillWindow: BackfillWindow; tx: Tx },
 ): Promise<void> {
   if (!source.autoImport) return;
+  void opts.backfillWindow; // honored via the persisted backfillTargetSince — see docstring
   await backfillSource(
     { id: source.id, userId: source.userId, metadata: source.metadata },
     { userId: source.userId, origin: "user", tx: opts.tx },
   );
+}
+
+/**
+ * resetWalkerStateOnWidening — cross-source hook fired by updateSource when the
+ * user widens backfillTargetSince past the prior value (G3). Telegram's walker
+ * state lives on the cross-tenant data_source_channel_state row (one per slug);
+ * mirrors reddit's reset (cache row + adapter_refresh_queue continuation):
+ *   1. resetTelegramWalkState clears backfill_complete + drops the metadata
+ *      cursor/collected so the next backfill_page re-enters page 1 and walks
+ *      toward the new (deeper) deepest-subscriber target (the walker reads that
+ *      target off data_sources at walk time — resolveDeepestTargetSince).
+ *   2. Enqueue a user_source backfill_page row to kick the walk off immediately;
+ *      the walker's continuation enqueue then drains the rest on the service lane.
+ *
+ * NO per-user cap gate (unlike reddit/IG): Telegram is FREE — there is no
+ * operator budget or user fair-share to protect, so a widen costs nothing.
+ *
+ * No-op when: the source carries no metadata.channel (defensive — createSource
+ * always sets it), OR the channel-state row wasn't in the complete state (an
+ * incomplete walk already deepens on its own next tick; resetTelegramWalkState
+ * returns 0). Runs inside the updateSource transaction.
+ */
+async function resetWalkerStateOnWidening(
+  source: SourceCreatedHookSource,
+  ctx: {
+    previousTarget: Date | null;
+    newTarget: Date;
+    triggerUserId: string;
+    ipAddress: string;
+    tx: Tx;
+  },
+): Promise<void> {
+  if (source.kind !== KIND) return;
+  const channel = channelOf({
+    id: source.id,
+    metadata: (source.metadata ?? {}) as Record<string, unknown>,
+  });
+  if (channel === null) return;
+
+  // Only re-open a genuinely COMPLETE walk whose frontier the new target crosses.
+  // An incomplete walk continues deepening on its own next tick (no reset needed).
+  const state = await getTelegramWalkState(channel, ctx.tx);
+  if (!state.backfillComplete) return;
+  if (
+    state.backfillOldestAt !== null &&
+    ctx.newTarget.getTime() >= state.backfillOldestAt.getTime()
+  ) {
+    // The widened target is still shallower-or-equal to what we already walked —
+    // nothing deeper to fetch.
+    return;
+  }
+
+  const resetCount = await resetTelegramWalkState(channel, ctx.tx);
+  if (resetCount === 0) {
+    logger.debug(
+      { channel, triggerUserId: ctx.triggerUserId },
+      "telegram.resetWalkerStateOnWidening: channel-state not in complete state; no-op",
+    );
+    return;
+  }
+
+  // Kick an immediate user_source backfill_page (origin="user") so the deep walk
+  // restarts now; continuation pages drain on the service lane afterwards.
+  await ctx.tx.insert(adapterRefreshQueue).values({
+    adapterKind: KIND,
+    queueName: "user_source",
+    type: "backfill_page",
+    payload: { channel },
+    userId: ctx.triggerUserId,
+    priority: -10,
+  });
 }
 
 /** validateEventInput — a telegram_post event requires a t.me post URL. */
@@ -498,6 +577,7 @@ export const telegramAdapter: SourceAdapter & typeof telegramChannelAdapterCore 
   backfillSource,
   normalizeSourceOnCreate,
   onSourceCreated,
+  resetWalkerStateOnWidening,
   validateEventInput,
   fetchEventPreviewMetadata,
   // Telegram is FREE (no canRun gate, mirrors Reddit's gate-less syncStats).
