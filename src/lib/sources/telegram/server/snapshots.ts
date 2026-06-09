@@ -47,8 +47,8 @@ import type { ParsedTelegramChannelHeader } from "./parse.js";
 export type TelegramSnapshotStatus = "ok" | "not_found" | "private" | "rate_limited";
 
 export interface WriteTelegramSnapshotArgs {
-  /** telegram_posts.post_id ("<channel>/<messageId>") — keys the UPSERT + the
-   *  snapshot INSERT. */
+  /** telegram_posts.post_id ("<channelKey>/<messageId>" — the rename-proof
+   *  channelKey-based id, NOT the slug) — keys the UPSERT + the snapshot INSERT. */
   postId: string;
   /** Intrinsic numeric channel id (rename-proof anchor). Nullable. */
   channelKey?: string | null;
