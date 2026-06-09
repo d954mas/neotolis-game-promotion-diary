@@ -73,15 +73,17 @@ export type KindMatrixEntry = {
 const UI_KINDS: ReadonlyArray<{
   value: AddSourceUiKind;
   labelKey: KindLabelKey;
-  statusKey: KindStatusKey;
+  // null for kinds that are always enabled (no disabled-state rationale to show);
+  // a real key only for kinds that can render disabled (not-built / not-configured).
+  statusKey: KindStatusKey | null;
   probeKind: SourceKind;
 }> = [
   {
     value: "youtube_channel",
     labelKey: "source_kind_label_youtube_channel",
-    // YouTube has no disabled status string of its own (always functional +
-    // no operator-config gate); statusKey is unused when disabled is false.
-    statusKey: "source_kind_status_telegram_channel",
+    // YouTube is always functional + no operator-config gate, so it never renders
+    // disabled → no status string of its own (null, not a borrowed placeholder).
+    statusKey: null,
     probeKind: "youtube_channel",
   },
   {
