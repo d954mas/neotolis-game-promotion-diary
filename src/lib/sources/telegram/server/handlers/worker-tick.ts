@@ -24,6 +24,7 @@
 // listing, one page, one post), and a tick only acquires one pacer slot.
 
 import { AdapterError } from "$lib/sources/errors.js";
+import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import {
   createAdapterBatchLaneWorker,
@@ -37,6 +38,10 @@ import { acquireTelegramPacerSlotWith } from "../pacer.js";
 import { fetchTelegramPost } from "../http.js";
 import { parseTelegramPost } from "../parse.js";
 import { writeTelegramSnapshot, type TelegramSnapshotStatus } from "../snapshots.js";
+import {
+  resolveTelegramOperatorUserId,
+  __resetTelegramOperatorIdCacheForTest,
+} from "../operator-resolver.js";
 import { handleTelegramListingPoll } from "./listing-poll.js";
 import { handleTelegramBackfillWalker } from "./backfill-walker.js";
 
@@ -84,6 +89,16 @@ const telegramLaneWorker = createAdapterBatchLaneWorker<TelegramQueueName, Teleg
   staleRecoveryIntervalMs: STALE_RECOVERY_INTERVAL_MS,
   claimGate: claimTelegramPacerSlot,
   dispatch: dispatchByLane,
+  emitDrained(stats) {
+    // Fire-and-forget audit row so the /admin/quota Telegram observability
+    // (getDailyStats SUMs metadata.entries_processed across
+    // audit_log.action='telegram.queue_drained' rows) reflects real lane work.
+    // Without this emit the daily Telegram stat + recent-audit feed would stay
+    // permanently 0 regardless of worker activity (G1/A1). Best-effort: a
+    // failed audit write never blocks the worker. Mirrors reddit emitDrained →
+    // emitQueueDrainedAudit.
+    void emitQueueDrainedAudit(stats);
+  },
 });
 
 export async function telegramWorkerTick(): Promise<AdapterBatchLaneWorkerTickResult> {
@@ -217,7 +232,48 @@ async function handleWarmPostFetch(
   }
 }
 
-/** Test-only — reset the tick counter so each case starts from slot 1. */
+/** Emit a `telegram.queue_drained` audit row (best-effort). Fired once per
+ *  non-empty tick by the lane worker's emitDrained hook. Telegram is FREE (no
+ *  per-user cap row, unlike reddit/IG) — this is the Reddit free-lane accounting
+ *  model: the row exists purely so observability.getDailyStats /
+ *  getRecentAudit see real activity. Failed audit writes are logged at WARN and
+ *  never thrown.
+ *
+ *  Requires a non-empty ADMIN_EMAIL_ALLOWLIST so the operator user_id resolves
+ *  (audit_log.user_id is NOT NULL); without it this is a silent no-op. */
+export async function emitQueueDrainedAudit(stats: {
+  queueName: string;
+  entriesProcessed: number;
+  durationMs: number;
+}): Promise<void> {
+  if (stats.entriesProcessed === 0) return;
+  try {
+    const operatorId = await resolveTelegramOperatorUserId();
+    if (operatorId === null) {
+      logger.debug({ stats }, "telegram.queue_drained: no operator resolvable; skipping audit");
+      return;
+    }
+    await writeAudit({
+      userId: operatorId,
+      action: "telegram.queue_drained",
+      ipAddress: "127.0.0.1",
+      metadata: {
+        queue_name: stats.queueName,
+        entries_processed: stats.entriesProcessed,
+        duration_ms: stats.durationMs,
+      },
+    });
+  } catch (err) {
+    logger.warn(
+      { err: String((err as Error)?.message ?? err) },
+      "telegram.queue_drained audit emit failed",
+    );
+  }
+}
+
+/** Test-only — reset the tick counter + cached operator id so each case starts
+ *  from slot 1 with a cold resolver. */
 export function __resetTelegramTickCounterForTest(): void {
   telegramLaneWorker.resetForTest();
+  __resetTelegramOperatorIdCacheForTest();
 }

@@ -1,0 +1,12 @@
+-- Phase 9 Telegram — add the `telegram.queue_drained` audit verb (worker-emitted,
+-- mirrors reddit.queue_drained) so /admin/quota Telegram observability reflects
+-- real lane activity instead of staying permanently 0.
+--
+-- Forward-only (AGENTS.md). ALTER TYPE ADD VALUE is non-transactional in older
+-- PG and cannot be DROPped from an enum; emergency rollback (if ever needed)
+-- recreates the type without the value + rewrites the column:
+--   1. CREATE TYPE audit_action_new AS ENUM (<all values except telegram.queue_drained>);
+--   2. ALTER TABLE audit_log ALTER COLUMN action TYPE audit_action_new USING action::text::audit_action_new;
+--   3. DROP TYPE audit_action; ALTER TYPE audit_action_new RENAME TO audit_action;
+-- (only safe after deleting any rows that use the value).
+ALTER TYPE "public"."audit_action" ADD VALUE 'telegram.queue_drained';

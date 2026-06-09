@@ -29,7 +29,7 @@
 // claimGate before claiming a row, so multi-replica workers don't burn attempts
 // when no slot is available.
 
-import { sql, desc, like } from "drizzle-orm";
+import { sql, desc } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import type {
@@ -67,7 +67,9 @@ async function getDailyStats(_date: Date): Promise<ObservabilityDailyStats> {
 }
 
 /** Last N audit rows with action LIKE 'telegram.%'. Operator-facing view; empty
- *  until a telegram audit verb is emitted. */
+ *  until a telegram audit verb is emitted. The action column is the audit_action
+ *  pgEnum, so the LIKE casts it to text first (a bare enum ~~ text has no
+ *  operator in Postgres). */
 async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]> {
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- /admin/quota observability is allowlist-gated; cross-tenant audit aggregation is the intended operator view. Mirrors reddit/observability.ts getRecentAudit.
   const rows = await db
@@ -77,7 +79,7 @@ async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]>
       metadata: auditLog.metadata,
     })
     .from(auditLog)
-    .where(like(auditLog.action, "telegram.%"))
+    .where(sql`${auditLog.action}::text LIKE 'telegram.%'`)
     .orderBy(desc(auditLog.createdAt))
     .limit(limit);
   return rows.map((r) => ({

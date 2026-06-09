@@ -794,6 +794,7 @@
   "audit_action_wishlist_imported": "Wishlist CSV imported",
   "audit_action_social_provider_throttled": "Provider budget throttled",
   "audit_action_social_budget_exhausted": "Provider budget exhausted",
+  "audit_action_telegram_queue_drained": "Telegram queue drained",
 
   "axis_row_show_label": "Show",
   "axis_row_game_label": "Game",
