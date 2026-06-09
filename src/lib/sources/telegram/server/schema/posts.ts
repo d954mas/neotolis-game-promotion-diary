@@ -1,19 +1,27 @@
 // telegram_posts — our local copy of a public Telegram channel post's metadata
 // + polling state. Sourced from the free t.me/s listing scrape (Phase 9).
 //
-// One row per post, keyed on `post_id` (PK = "<channel>/<messageId>" — the full
-// data-post attr value). PUBLIC-DATA — no `user_id` column by design. A
-// channel post's view count is identical regardless of which tenant looked it
-// up, so per-tenant copies would waste disk for no privacy benefit (mirrors the
-// youtube_videos / instagram_posts public-data semantics). ESLint
+// One row per post, keyed on `post_id` (PK = "<channelKey>/<messageId>" — the
+// rename-proof numeric channelKey decoded from the post block's base64 data-view
+// payload, NOT the renameable @username slug). PUBLIC-DATA — no `user_id` column
+// by design. A channel post's view count is identical regardless of which tenant
+// looked it up, so per-tenant copies would waste disk for no privacy benefit
+// (mirrors the youtube_videos / instagram_posts public-data semantics). ESLint
 // TENANT_TABLES allowlist extends `telegramPosts` with an explicit "public
 // external data, no tenant scope" comment (added in Plan 01) so the
 // no-unfiltered-tenant-query rule does not trip on legitimate
 // `db.select().from(telegramPosts)` calls.
 //
 // Message ids are per-channel sequential — NOT globally unique — so the channel
-// slug is part of the key (RESEARCH Q3). events.external_id carries the SAME
-// "<channel>/<messageId>" value (set by parseUrl).
+// id is part of the key (RESEARCH Q3). The id is the rename-proof numeric
+// channelKey (parse.ts decodeChannelKey), NOT the @username slug: keying on the
+// slug would re-key the SAME physical post on a channel rename (duplicate events
+// + split metric history). events.external_id carries the SAME
+// "<channelKey>/<messageId>" value — NOT the URL-derived slug id. The post-URL
+// parser (url.ts) emits a slug-based id, but events-mutation excludes
+// telegram_post from URL-derivation; the single-post preview overrides it with
+// this channelKey-based id, and resolveCachedExternalId re-derives it from this
+// cache by external_url.
 //
 // Polling state lives here (not on `events`):
 //   - `last_polled_at` / `last_poll_status` — last successful or failed attempt
@@ -59,10 +67,12 @@ export interface TelegramReaction {
 export const telegramPosts = pgTable(
   "telegram_posts",
   {
-    // PK = "<channel>/<messageId>" (the full data-post attr value). Message
-    // ids are per-channel sequential — NOT globally unique — so the channel
-    // slug is part of the key (RESEARCH Q3). events.external_id carries the
-    // SAME "<channel>/<messageId>" value (set by parseUrl).
+    // PK = "<channelKey>/<messageId>" — channelKey is the rename-proof numeric
+    // channel id decoded from the post block's data-view (parse.ts), NOT the
+    // renameable @username slug. Message ids are per-channel sequential — NOT
+    // globally unique — so the channel id is part of the key (RESEARCH Q3).
+    // events.external_id carries the SAME "<channelKey>/<messageId>" value; the
+    // slug-based id the URL parser emits is never stored (see header).
     postId: text("post_id").primaryKey(),
     // Intrinsic numeric channel id from the data-view base64 payload — the
     // rename-proof anchor. The @username handle is renameable → held on
