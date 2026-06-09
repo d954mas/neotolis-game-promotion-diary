@@ -40,7 +40,6 @@ export async function materializeTelegramEvents(
   // user's source; a service poll fans out to every auto-import subscriber of
   // the channel (cross-tenant by design — a telegram_channel has no single
   // owning user; the events INSERT below pins user_id per subscriber row).
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out: one t.me fetch serves every subscriber; per-row user_id is set on the events INSERT below
   const subscribers = await db
     .select({
       id: dataSources.id,
