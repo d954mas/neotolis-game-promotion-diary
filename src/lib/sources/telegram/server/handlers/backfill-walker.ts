@@ -53,8 +53,11 @@ import type { ParsedTelegramPost } from "../parse.js";
 const ADAPTER_KIND = "telegram_channel";
 const TELEGRAM_BASE = "https://t.me";
 
-function externalUrlForPost(postId: string): string {
-  return `${TELEGRAM_BASE}/${postId}`;
+/** Canonical per-post t.me URL from the renameable slug + messageId. The stored
+ *  post_id is channelKey-based (rename-proof) but the channelKey is not a valid
+ *  t.me path segment — the real link is t.me/<slug>/<messageId>. */
+function externalUrlForPost(slug: string, messageId: string): string {
+  return `${TELEGRAM_BASE}/${slug}/${messageId}`;
 }
 
 /** Resolve the DEEPEST backfillTargetSince across the channel's active
@@ -170,13 +173,17 @@ export async function handleTelegramBackfillWalker(args: {
       crossedWindow = true;
       break;
     }
+    // Skip a post whose channelKey couldn't be decoded → externalId is null. We
+    // NEVER snapshot/materialize a slug-keyed id (the rename bug); the next walk
+    // /poll re-parses the block (data-view present on every live block).
+    if (post.externalId === null) continue;
     await writeTelegramSnapshot({
       postId: post.externalId,
       channelKey: post.channelKey,
       textSnippet: post.textSnippet,
       mediaKind: post.mediaKind,
       thumbnailUrl: post.thumbnailUrl,
-      externalUrl: externalUrlForPost(post.externalId),
+      externalUrl: externalUrlForPost(post.slug, post.messageId),
       publishedAt: post.publishedAt,
       viewCount: post.viewCount,
       reactionsTotal: post.reactionsTotal,

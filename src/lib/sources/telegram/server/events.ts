@@ -42,6 +42,16 @@ export async function materializeTelegramEvents(
 ): Promise<number> {
   if (posts.length === 0) return 0;
 
+  // Only materialize posts with a resolved channelKey-based externalId. A
+  // null-externalId post (the block's data-view couldn't be decoded) is
+  // recognition-only — we NEVER materialize a slug-keyed id for it (the rename
+  // bug). It is dropped here; the next poll re-parses it (the data-view is
+  // present on every live block) and materializes it then.
+  const keyedPosts = posts.filter(
+    (p): p is ParsedTelegramPost & { externalId: string } => p.externalId !== null,
+  );
+  if (keyedPosts.length === 0) return 0;
+
   // Channel subscribers — ALWAYS every auto-import subscriber of the channel,
   // cross-tenant by design (a telegram_channel listing is public content with no
   // single owning user; one fetch serves every subscriber). No per-user filter:
@@ -70,7 +80,7 @@ export async function materializeTelegramEvents(
 
   // Bulk idempotency pre-check (one SELECT). inArray(userId) carries the tenant
   // filter; the multi-tenant span is the channel fan-out (mirrors reddit/IG).
-  const externalIds = posts.map((p) => p.externalId);
+  const externalIds = keyedPosts.map((p) => p.externalId);
   const userIds = subscribers.map((s) => s.userId);
   const sourceIds = subscribers.map((s) => s.id);
   const existing = await db
@@ -93,13 +103,17 @@ export async function materializeTelegramEvents(
 
   type EventInsert = typeof events.$inferInsert;
   const candidates: EventInsert[] = [];
-  for (const post of posts) {
+  for (const post of keyedPosts) {
     // publishedAt is the post's t.me <time> (the user-meaningful timestamp);
     // a missing one is rare — fall back to now so the row still surfaces.
     const occurredAt = post.publishedAt ?? new Date();
     const snippet = post.textSnippet.trim();
-    const title = snippet !== "" ? snippet.slice(0, 200) : `Telegram post ${post.externalId}`;
-    const url = `${TELEGRAM_BASE}/${post.externalId}`;
+    // external_id is the channelKey-based stable key; the human-facing URL +
+    // title use the renameable SLUG (the channelKey is not a valid t.me path
+    // segment — t.me/<slug>/<id> is the real link).
+    const title =
+      snippet !== "" ? snippet.slice(0, 200) : `Telegram post ${post.slug}/${post.messageId}`;
+    const url = `${TELEGRAM_BASE}/${post.slug}/${post.messageId}`;
     for (const sub of subscribers) {
       // Per-subscriber backfill window (chosen at /sources/new time).
       if (sub.backfillTargetSince !== null && occurredAt < sub.backfillTargetSince) continue;

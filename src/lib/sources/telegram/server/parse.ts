@@ -16,10 +16,22 @@
 //      (very new post or views disabled) — null is a chart GAP downstream,
 //      never coerced to 0.
 //
-// externalId carries the FULL "<channel>/<messageId>" data-post value, NOT the
-// bare message id: Telegram message ids are per-channel sequential and are NOT
-// globally unique (RESEARCH Q3), so the composite is the stable PK every
-// downstream plan + the telegram_posts.post_id column depend on.
+// externalId is the STABLE composite "<channelKey>/<messageId>", where channelKey
+// is the rename-proof numeric channel id decoded from each post block's base64
+// `data-view` payload (`{"c":<channelId>,...}`) and messageId is the part after
+// the slash in `data-post`. The @username SLUG in `data-post` is renameable —
+// keying a post on `<slug>/<messageId>` would re-key the SAME physical post on a
+// channel rename (duplicate events + split metric history). channelKey survives
+// renames, so it is the canonical PK every downstream plan + the
+// telegram_posts.post_id column depend on (mirrors Instagram's stable media-id
+// override of the renameable shortcode, normalize.ts).
+//
+// externalId is NULL when the block's data-view cannot be decoded to a numeric
+// `c` (no channelKey): we NEVER fall back to a slug-based id (that is the
+// rename-bug we are eliminating). A null-externalId post is RECOGNIZED but not
+// materialized (the IG recognition-only rule, issue #69) — the caller skips it.
+// The renameable @username is kept separately as `slug` for callers that need
+// the handle (the canonical t.me URL, title fallback), but it is NEVER the key.
 
 import { parse, type HTMLElement } from "node-html-parser";
 import type { TelegramReaction } from "./schema/posts.js";
@@ -27,12 +39,26 @@ import type { TelegramReaction } from "./schema/posts.js";
 export type { TelegramReaction } from "./schema/posts.js";
 
 export interface ParsedTelegramPost {
-  externalId: string; // "<channel>/<messageId>" — full data-post value (RESEARCH Q3)
+  // The STABLE composite "<channelKey>/<messageId>" — channelKey is the
+  // rename-proof numeric channel id, NOT the @username slug (which a rename
+  // would change, re-keying the same post). NULL when the block carries no
+  // decodable data-view `c` (no channelKey): the caller treats a null-externalId
+  // post as recognition-only and does NOT materialize a slug-keyed id for it.
+  externalId: string | null;
+  // The renameable @username from the data-post value (e.g. "durov"), kept for
+  // callers that need the handle (canonical t.me URL, title fallback). NEVER the
+  // post key — the key is channelKey-based (see externalId).
+  slug: string;
+  // The per-channel sequential message id (the part after the slash in
+  // data-post). Numeric, globally NON-unique (RESEARCH Q3) — only the
+  // <channelKey>/<messageId> composite is a stable PK.
+  messageId: string;
   // Intrinsic numeric channel id from the post block's base64 `data-view`
   // payload (`{"c":<channelId>,...}`), as a STRING (to match
-  // telegram_posts.channel_key). Rename-proof — the group key for future
-  // per-channel analytics. null only when the block carries no decodable
-  // data-view (defensive; every live t.me/s block carries one).
+  // telegram_posts.channel_key). Rename-proof — the prefix of externalId AND
+  // the group key for per-channel analytics. null only when the block carries no
+  // decodable data-view (defensive; every live t.me/s block carries one) — in
+  // which case externalId is also null (no slug fallback).
   channelKey: string | null;
   publishedAt: Date | null; // <time datetime>
   viewCount: number | null; // normalized; null when the views span is absent
@@ -131,10 +157,20 @@ export function parseTelegramPost(html: string): ParsedTelegramPost | null {
 }
 
 function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
-  const externalId = el.getAttribute("data-post"); // "durov/503" — keep FULL (RESEARCH Q3)
-  if (!externalId) return null;
+  // data-post is "<slug>/<messageId>" (e.g. "durov/503"). The slug is the
+  // RENAMEABLE @username; split it out but NEVER key on it.
+  const dataPost = el.getAttribute("data-post");
+  if (!dataPost) return null;
+  const slash = dataPost.indexOf("/");
+  if (slash <= 0 || slash === dataPost.length - 1) return null;
+  const slug = dataPost.slice(0, slash);
+  const messageId = dataPost.slice(slash + 1);
 
+  // channelKey is the rename-proof prefix of the stable post id. When it cannot
+  // be decoded, externalId is NULL — we do NOT fall back to a slug-based id (the
+  // rename bug). A null-externalId post is recognized but not materialized.
   const channelKey = decodeChannelKey(el.getAttribute("data-view"));
+  const externalId = channelKey !== null ? `${channelKey}/${messageId}` : null;
 
   const timeEl = el.querySelector("a.tgme_widget_message_date time[datetime]");
   const datetime = timeEl?.getAttribute("datetime");
@@ -161,6 +197,8 @@ function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
 
   return {
     externalId,
+    slug,
+    messageId,
     channelKey,
     publishedAt,
     viewCount,

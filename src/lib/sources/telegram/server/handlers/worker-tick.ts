@@ -23,7 +23,10 @@
 // Each lane is maxBatchSize 1: every t.me path is a single-resource GET (one
 // listing, one page, one post), and a tick only acquires one pacer slot.
 
+import { eq } from "drizzle-orm";
 import { AdapterError } from "$lib/sources/errors.js";
+import { db } from "$lib/server/db/client.js";
+import { telegramPosts } from "$lib/server/db/schema/index.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import {
@@ -46,8 +49,6 @@ import { handleTelegramListingPoll } from "./listing-poll.js";
 import { handleTelegramBackfillWalker } from "./backfill-walker.js";
 
 type TelegramPacerPermit = { pacer: "already-acquired" };
-
-const TELEGRAM_BASE = "https://t.me";
 
 export const TELEGRAM_SLOT_MAPPING = [
   "service_source",
@@ -168,25 +169,58 @@ async function dispatchByLane(
   });
 }
 
+/** Resolve the renameable fetch slug + messageId for a channelKey-based post_id
+ *  from the stored telegram_posts.external_url (the canonical t.me/<slug>/<id>
+ *  link written on every snapshot). The post_id prefix is the rename-proof
+ *  channelKey — NOT a t.me path segment — so the slug must come from the cached
+ *  URL. Returns null when the post has no cached row / external_url (it can't be
+ *  warm-refreshed without a known link). */
+async function resolveTelegramFetchTarget(
+  postId: string,
+): Promise<{ channel: string; messageId: string; externalUrl: string } | null> {
+  const [row] = await db
+    .select({ externalUrl: telegramPosts.externalUrl })
+    .from(telegramPosts)
+    .where(eq(telegramPosts.postId, postId))
+    .limit(1);
+  const externalUrl = row?.externalUrl ?? null;
+  if (externalUrl === null) return null;
+  // external_url is t.me/<slug>/<messageId> — pull the trailing slug/messageId.
+  const m = /\/([A-Za-z0-9_]+)\/(\d+)\/?$/.exec(externalUrl);
+  if (m === null) return null;
+  return { channel: m[1]!, messageId: m[2]!, externalUrl };
+}
+
 /** Single-post ?embed=1 fetch → parse → writeTelegramSnapshot. post_id is the
- *  "<channel>/<messageId>" composite. On a fetch/parse failure write a non-ok
- *  snapshot (stamps last_polled_at — the Refresh button settles, the warm
- *  poll_failure_count bound advances) and NEVER throw (the lane marks the row
- *  done; no batch-wide retry that would re-fetch). A pacer/rate-limit denial
- *  IS re-thrown so the lane worker defers + retries (the slot was the gate). */
+ *  STABLE "<channelKey>/<messageId>" composite — channelKey is NOT a fetchable
+ *  t.me path segment, so the renameable SLUG to fetch with is resolved from the
+ *  stored telegram_posts.external_url (the canonical t.me/<slug>/<id> URL written
+ *  on every snapshot). On a fetch/parse failure write a non-ok snapshot (stamps
+ *  last_polled_at — the Refresh button settles, the warm poll_failure_count bound
+ *  advances) and NEVER throw (the lane marks the row done; no batch-wide retry).
+ *  A pacer/rate-limit denial IS re-thrown so the lane worker defers + retries
+ *  (the slot was the gate). */
 async function handleWarmPostFetch(
   postId: string,
   pacer: "acquire" | "already-acquired" = "acquire",
 ): Promise<void> {
   const slash = postId.indexOf("/");
   if (slash <= 0 || slash === postId.length - 1) {
-    throw new AdapterError(`post_stats post_id is not "<channel>/<messageId>": ${postId}`, {
+    throw new AdapterError(`post_stats post_id is not "<channelKey>/<messageId>": ${postId}`, {
       category: "permanent",
     });
   }
-  const channel = postId.slice(0, slash);
-  const messageId = postId.slice(slash + 1);
-  const externalUrl = `${TELEGRAM_BASE}/${postId}`;
+  // Resolve the fetchable slug from external_url (t.me/<slug>/<messageId>) — the
+  // post_id prefix is the channelKey, which t.me cannot serve. external_url is
+  // written on every snapshot (preview / listing / backfill), so a warm post
+  // already in telegram_posts always has it.
+  const target = await resolveTelegramFetchTarget(postId);
+  if (target === null) {
+    throw new AdapterError(`post_stats no fetchable external_url for ${postId}`, {
+      category: "permanent",
+    });
+  }
+  const { channel, messageId, externalUrl } = target;
 
   try {
     const html = await fetchTelegramPost(channel, messageId, pacer);

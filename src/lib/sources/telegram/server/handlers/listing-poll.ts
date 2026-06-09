@@ -29,10 +29,11 @@ import { materializeTelegramEvents } from "../events.js";
 
 const TELEGRAM_BASE = "https://t.me";
 
-/** Build the canonical per-post t.me URL from the "<channel>/<messageId>"
- *  post_id. */
-function externalUrlForPost(postId: string): string {
-  return `${TELEGRAM_BASE}/${postId}`;
+/** Build the canonical per-post t.me URL from the renameable slug + messageId.
+ *  The stored post_id is channelKey-based (rename-proof), but the channelKey is
+ *  NOT a valid t.me path segment — the real link is t.me/<slug>/<messageId>. */
+function externalUrlForPost(slug: string, messageId: string): string {
+  return `${TELEGRAM_BASE}/${slug}/${messageId}`;
 }
 
 export async function handleTelegramListingPoll(args: {
@@ -63,13 +64,17 @@ export async function handleTelegramListingPoll(args: {
 
   let written = 0;
   for (const post of listing.posts) {
+    // Skip a post whose channelKey couldn't be decoded → externalId is null. We
+    // NEVER snapshot a slug-keyed id (the rename bug); the next poll re-parses
+    // the block (the data-view is present on every live block) and writes it.
+    if (post.externalId === null) continue;
     await writeTelegramSnapshot({
       postId: post.externalId,
       channelKey: post.channelKey,
       textSnippet: post.textSnippet,
       mediaKind: post.mediaKind,
       thumbnailUrl: post.thumbnailUrl,
-      externalUrl: externalUrlForPost(post.externalId),
+      externalUrl: externalUrlForPost(post.slug, post.messageId),
       publishedAt: post.publishedAt,
       viewCount: post.viewCount,
       reactionsTotal: post.reactionsTotal,
