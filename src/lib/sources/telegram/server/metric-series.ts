@@ -1,5 +1,9 @@
-// Telegram VIZ-05 metric-series reader (mirrors instagram/metric-series.ts,
-// single view_count series — Telegram exposes ONLY a view count, D-04).
+// Telegram VIZ-05 metric-series reader. Telegram's public t.me/s listing
+// exposes TWO chartable metrics: a view count AND a per-post reaction tally (E1
+// — Phase 9 UAT second metric); no likes/comments/shares (D-04). This returns
+// [viewSeries, reactionsSeries] in the EXACT multi-metric YouTube shape
+// (youtube/server/metric-series.ts:67-71 — one EventMetricSeries per snapshot
+// column, each filtered out when all-null).
 //
 // Implements SourceAdapter.fetchEventMetricSeries for the Telegram adapter.
 // Self-filters to kind=telegram_post; returns [] for every other kind (the
@@ -14,14 +18,13 @@
 // comes from the caller's upstream events SELECT, exactly as the IG reader
 // documents.
 //
-// Metrics-by-presence (D-05): a NULL view_count means views were hidden /
-// absent at poll time (very new post or views disabled). Keep it null so the
+// Metrics-by-presence (D-05): a NULL value means that metric was hidden / absent
+// at poll time (views disabled, or no reactions block). Keep it null so the
 // chart draws a GAP (connectNulls:false), NEVER coerced to 0 (a false drop). A
-// post whose snapshots are ALL null-views (or has no snapshot rows at all)
-// yields an EMPTY series array — the views line is omitted, not a flat dead
-// legend toggle. (snapshots.ts never writes a null-view snapshot row, so in
-// practice a null-only history is just an empty row set; the .filter() below is
-// the belt-and-suspenders guard.)
+// metric whose every point is null (or a post with no snapshot rows at all)
+// yields NO series for that metric — the line is omitted, not a flat dead legend
+// toggle. So a post with views-only reactions-never returns just the view_count
+// series; a post with both returns both.
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -38,18 +41,28 @@ export async function telegramFetchEventMetricSeries(
     .select({
       polledAt: telegramPostSnapshots.polledAt,
       viewCount: telegramPostSnapshots.viewCount,
+      reactionsTotal: telegramPostSnapshots.reactionsTotal,
     })
     .from(telegramPostSnapshots)
     .where(eq(telegramPostSnapshots.postId, event.externalId))
     .orderBy(asc(telegramPostSnapshots.polledAt));
   if (rows.length === 0) return [];
 
-  // bigint column comes back as `number` via mode:"number"; null stays null.
+  // bigint columns come back as `number` via mode:"number"; null stays null.
+  // One series per metric column, each dropped when all-null — the EXACT
+  // multi-metric YouTube shape (view/like/comment → here view/reactions).
+  const build = (
+    metricKey: string,
+    labelKey: string,
+    pick: (r: { viewCount: number | null; reactionsTotal: number | null }) => number | null,
+  ): EventMetricSeries => ({
+    metricKey,
+    labelKey,
+    points: rows.map((r) => ({ polledAt: r.polledAt.toISOString(), value: pick(r) })),
+  });
+
   return [
-    {
-      metricKey: "view_count",
-      labelKey: "chart_metric_views",
-      points: rows.map((r) => ({ polledAt: r.polledAt.toISOString(), value: r.viewCount })),
-    },
+    build("view_count", "chart_metric_views", (r) => r.viewCount),
+    build("reaction_count", "chart_metric_reactions", (r) => r.reactionsTotal),
   ].filter((s) => s.points.some((p) => p.value !== null));
 }

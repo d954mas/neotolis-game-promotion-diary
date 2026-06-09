@@ -260,6 +260,7 @@ describe("paraglide i18n", () => {
       "chart_metric_comments",
       "chart_metric_likes",
       "chart_metric_num_comments",
+      "chart_metric_reactions",
       "chart_metric_score",
       "chart_metric_views",
       "chart_no_wishlist_cta",

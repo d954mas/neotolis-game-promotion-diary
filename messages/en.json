@@ -394,6 +394,7 @@
   "chart_metric_comments": "Comments",
   "chart_metric_score": "Upvotes",
   "chart_metric_num_comments": "Comments",
+  "chart_metric_reactions": "Reactions",
   "chart_history_title": "History",
   "viz_wishlist_updated_ago": "updated {hours}h ago",
   "viz_delta_24h": "{value} in 24h",
