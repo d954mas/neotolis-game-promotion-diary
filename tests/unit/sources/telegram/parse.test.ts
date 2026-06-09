@@ -178,4 +178,59 @@ describe("parseTelegramPost — single-post ?embed=1 page (Pitfall 2: embed carr
   it("returns null when the page has no message block", () => {
     expect(parseTelegramPost("<html><body>nothing</body></html>")).toBeNull();
   });
+
+  it("embed path carries NO reactions (the ?embed=1 page omits the reactions block)", () => {
+    const post = parseTelegramPost(fixture("single-post-embed.html"));
+    // The embed widget does not render .tgme_widget_message_reactions →
+    // reactionsTotal null, reactionsTop empty (E1).
+    expect(post!.reactionsTotal).toBeNull();
+    expect(post!.reactionsTop).toEqual([]);
+  });
+});
+
+describe("parseTelegramListing — reactions (E1, LISTING-only second metric)", () => {
+  const listing = parseTelegramListing(fixture("album-post.html"));
+  const post = listing.posts[0]!;
+
+  it("reactionsTotal sums every reaction count across all three kinds (K/M-normalized)", () => {
+    // album-post block carries 5 reactions:
+    //   paid 8.19K=8190, custom 29.8K=29800, standard 🫡 8.6K=8600,
+    //   custom 5.87K=5870, custom 3.41K=3410 → total 55870.
+    expect(post.reactionsTotal).toBe(55870);
+  });
+
+  it("reactionsTop is desc-sorted and capped at 5", () => {
+    expect(post.reactionsTop.map((r) => r.count)).toEqual([29800, 8600, 8190, 5870, 3410]);
+    expect(post.reactionsTop.length).toBeLessThanOrEqual(5);
+  });
+
+  it("classifies the three reaction kinds: standard carries the unicode emoji, custom/paid carry null emoji", () => {
+    const standard = post.reactionsTop.find((r) => r.kind === "standard");
+    expect(standard).toBeDefined();
+    expect(standard!.emoji).toBe("🫡");
+    expect(standard!.count).toBe(8600);
+
+    const paid = post.reactionsTop.find((r) => r.kind === "paid");
+    expect(paid).toBeDefined();
+    expect(paid!.emoji).toBeNull();
+    expect(paid!.count).toBe(8190);
+
+    const custom = post.reactionsTop.find((r) => r.kind === "custom");
+    expect(custom).toBeDefined();
+    expect(custom!.emoji).toBeNull();
+  });
+
+  it("a post with no reactions block → reactionsTotal null, reactionsTop []", () => {
+    // Real channels reaction nearly every popular post, so synthesize the
+    // no-reactions case the same way the end-of-history test synthesizes
+    // exhaustion: strip the .tgme_widget_message_reactions container from a real
+    // block. A post with no reactions block → null total, empty top (E1).
+    const stripped = fixture("album-post.html").replace(
+      /<div class="tgme_widget_message_reactions[\s\S]*?<\/div>/,
+      "",
+    );
+    const noReact = parseTelegramListing(stripped).posts[0]!;
+    expect(noReact.reactionsTotal).toBeNull();
+    expect(noReact.reactionsTop).toEqual([]);
+  });
 });

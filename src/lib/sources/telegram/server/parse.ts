@@ -22,6 +22,9 @@
 // downstream plan + the telegram_posts.post_id column depend on.
 
 import { parse, type HTMLElement } from "node-html-parser";
+import type { TelegramReaction } from "./schema/posts.js";
+
+export type { TelegramReaction } from "./schema/posts.js";
 
 export interface ParsedTelegramPost {
   externalId: string; // "<channel>/<messageId>" — full data-post value (RESEARCH Q3)
@@ -30,6 +33,14 @@ export interface ParsedTelegramPost {
   textSnippet: string; // first line of .tgme_widget_message_text, truncated
   mediaKind: "photo" | "video" | "album" | null;
   thumbnailUrl: string | null; // hotlink (photo background-image or video poster)
+  // E1 second metric — reactions live ONLY on the t.me/s LISTING markup; the
+  // ?embed=1 single-post page omits the reactions block (parseTelegramPost
+  // returns reactionsTotal null / reactionsTop []). reactionsTotal is the sum
+  // of every reaction count (standard + custom + paid), null when the post has
+  // no reactions block (→ chart GAP, never 0). reactionsTop is the top-5
+  // most-popular reactions (desc by count), [] when none.
+  reactionsTotal: number | null;
+  reactionsTop: TelegramReaction[];
 }
 
 export interface ParsedTelegramListing {
@@ -61,12 +72,23 @@ export function parseTelegramListing(html: string): ParsedTelegramListing {
 
 /** Parse the single message widget served by `t.me/<channel>/<id>?embed=1`
  *  (the warm-lane per-post path — this embed DOES carry the view span,
- *  RESEARCH Pitfall 2). Returns null when the page has no message block. */
+ *  RESEARCH Pitfall 2). Returns null when the page has no message block.
+ *
+ *  REACTIONS are deliberately NULLED on this path (E1): the t.me/s LISTING is
+ *  the single source of truth for the reaction tally, polled on the free
+ *  page-1 cadence. The warm-lane embed exists only to keep an off-listing
+ *  post's VIEW count fresh; letting it also write reactions would fork the
+ *  reactions metric across two cadences (and the embed's tally can lag the
+ *  listing's). So the embed path drops reactions even when the markup is
+ *  present — only the listing path (parseBlock via parseTelegramListing)
+ *  carries them downstream. */
 export function parseTelegramPost(html: string): ParsedTelegramPost | null {
   const root = parse(html);
   const block = root.querySelector("div.tgme_widget_message[data-post]");
   if (block === null) return null;
-  return parseBlock(block);
+  const parsed = parseBlock(block);
+  if (parsed === null) return null;
+  return { ...parsed, reactionsTotal: null, reactionsTop: [] };
 }
 
 function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
@@ -90,11 +112,74 @@ function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
 
   const thumbnailUrl = extractFirstMediaUrl(el);
 
+  const { reactionsTotal, reactionsTop } = parseReactions(el);
+
   // Empty-shell defense (D-01): a block with no views, no text, no media is a
   // service row the /s/ view never actually emits — skip it if it slips through.
   if (viewCount === null && textSnippet === "" && mediaKind === null) return null;
 
-  return { externalId, publishedAt, viewCount, textSnippet, mediaKind, thumbnailUrl };
+  return {
+    externalId,
+    publishedAt,
+    viewCount,
+    textSnippet,
+    mediaKind,
+    thumbnailUrl,
+    reactionsTotal,
+    reactionsTop,
+  };
+}
+
+const TOP_REACTIONS_CAP = 5;
+
+/** Parse the LISTING-only reactions block (E1). The ?embed=1 single-post page
+ *  has no reactions container → returns total=null, top=[]. Three kinds:
+ *    - standard: `<i class="emoji"><b>😁</b></i>4` → emoji char from <b>,
+ *      kind="standard".
+ *    - custom/premium: `<tg-emoji emoji-id="…"></tg-emoji>5.87K` → no unicode
+ *      char (sticker by id), kind="custom", emoji=null.
+ *    - paid (Telegram Stars): `<span class="tgme_reaction tgme_reaction_paid">
+ *      <i class="icon icon-telegram-stars"></i>8.19K</span>` → kind="paid",
+ *      emoji=null.
+ *  Counts are the trailing text node (the same K/M abbreviation as views →
+ *  reuse normalizeViewCount). A reactions block with zero parseable counts
+ *  (defensive) yields total=null, top=[]. */
+function parseReactions(el: HTMLElement): {
+  reactionsTotal: number | null;
+  reactionsTop: TelegramReaction[];
+} {
+  const container = el.querySelector(".tgme_widget_message_reactions");
+  if (container === null) return { reactionsTotal: null, reactionsTop: [] };
+
+  const reactions: TelegramReaction[] = [];
+  for (const span of container.querySelectorAll(".tgme_reaction")) {
+    // The count is the trailing text of the span AFTER its leading emoji/icon
+    // child. node-html-parser's `.text` concatenates a standard emoji's <b> char
+    // into the span text ("😁4"), so strip a present emoji char before
+    // normalizing; custom/paid spans carry only the count text.
+    const isPaid = span.classList.contains("tgme_reaction_paid");
+    const emojiBold = span.querySelector("i.emoji > b");
+    const emoji = emojiBold?.text?.trim() || null;
+    const kind: TelegramReaction["kind"] = isPaid
+      ? "paid"
+      : emoji !== null
+        ? "standard"
+        : "custom";
+
+    const rawText = span.text;
+    const countText = emoji !== null ? rawText.replace(emoji, "") : rawText;
+    const count = normalizeViewCount(countText.trim());
+    if (count === null) continue;
+    reactions.push({ emoji, kind, count });
+  }
+
+  if (reactions.length === 0) return { reactionsTotal: null, reactionsTop: [] };
+
+  const reactionsTotal = reactions.reduce((sum, r) => sum + r.count, 0);
+  const reactionsTop = [...reactions]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, TOP_REACTIONS_CAP);
+  return { reactionsTotal, reactionsTop };
 }
 
 export function normalizeViewCount(s: string): number | null {
