@@ -97,7 +97,10 @@ export async function getTelegramWalkState(
     })
     .from(dataSourceChannelState)
     .where(
-      and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelSlug)),
+      and(
+        eq(dataSourceChannelState.kind, KIND),
+        eq(dataSourceChannelState.channelKey, channelSlug),
+      ),
     )
     .limit(1);
   const md =
