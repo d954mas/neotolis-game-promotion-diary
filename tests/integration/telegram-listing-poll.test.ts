@@ -17,9 +17,10 @@
 //     row per post-with-views, idempotent within the same minute.
 
 import { describe, it, expect, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
 import { telegramPosts, telegramPostSnapshots } from "../../src/lib/server/db/schema/index.js";
+import { events } from "../../src/lib/server/db/schema/events.js";
 import { writeTelegramSnapshot } from "../../src/lib/sources/telegram/server/snapshots.js";
 import { telegramChannelAdapterCore } from "../../src/lib/sources/telegram/server/adapter.js";
 import { handleTelegramListingPoll } from "../../src/lib/sources/telegram/server/handlers/listing-poll.js";
@@ -285,6 +286,87 @@ describe("telegram listing-poll handler (registered — Plan 09-05)", () => {
     const r = await handleTelegramListingPoll({ channel });
     expect(r.status).toBe("not_found");
     expect(r.written).toBe(0);
+
+    vi.restoreAllMocks();
+  });
+});
+
+// A2 — the listing-poll handler materializes feed events from its page (the
+// steady-state newest-page owner), one events row per post per subscriber.
+describe("telegram listing-poll event materialization (A2)", () => {
+  async function telegramEventCount(userId: string, externalId: string): Promise<number> {
+    const rows = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(
+        and(
+          eq(events.userId, userId),
+          eq(events.kind, "telegram_post"),
+          eq(events.externalId, externalId),
+        ),
+      );
+    return rows.length;
+  }
+
+  it("creates ONE events row per post for an auto-import subscriber (idempotent re-run)", async () => {
+    const user = await seedUserDirectly({ email: `tg-mat-${uniq()}@test.local` });
+    const channel = `mat_${uniq()}`;
+    await createSource(
+      user.id,
+      {
+        kind: "telegram_channel",
+        handleUrl: `https://t.me/${channel}`,
+        isOwnedByMe: true,
+        autoImport: true,
+        backfillTargetSince: new Date("2026-01-01T00:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+
+    const posts = [
+      { externalId: `${channel}/30`, publishedAt: new Date("2026-06-05T00:00:00Z"), viewCount: 200 },
+      { externalId: `${channel}/29`, publishedAt: new Date("2026-06-04T00:00:00Z"), viewCount: 150 },
+    ];
+    vi.spyOn(telegramChannelAdapterCore, "pollListing").mockResolvedValue(listing(posts));
+
+    await handleTelegramListingPoll({ channel });
+    expect(await telegramEventCount(user.id, `${channel}/30`)).toBe(1);
+    expect(await telegramEventCount(user.id, `${channel}/29`)).toBe(1);
+
+    // A second poll must NOT duplicate events ((user, kind, source, externalId)
+    // dedup in materializeTelegramEvents + onConflictDoNothing).
+    await handleTelegramListingPoll({ channel });
+    expect(await telegramEventCount(user.id, `${channel}/30`)).toBe(1);
+
+    vi.restoreAllMocks();
+  });
+
+  it("skips posts older than the subscriber's backfillTargetSince window", async () => {
+    const user = await seedUserDirectly({ email: `tg-matwin-${uniq()}@test.local` });
+    const channel = `matwin_${uniq()}`;
+    await createSource(
+      user.id,
+      {
+        kind: "telegram_channel",
+        handleUrl: `https://t.me/${channel}`,
+        isOwnedByMe: false,
+        autoImport: true,
+        backfillTargetSince: new Date("2026-06-01T00:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+
+    const posts = [
+      { externalId: `${channel}/40`, publishedAt: new Date("2026-06-05T00:00:00Z"), viewCount: 9 },
+      { externalId: `${channel}/20`, publishedAt: new Date("2025-12-01T00:00:00Z"), viewCount: 8 },
+    ];
+    vi.spyOn(telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(listing(posts));
+
+    await handleTelegramListingPoll({ channel });
+    // In-window post → event; out-of-window post → skipped by the per-subscriber
+    // window check in materializeTelegramEvents.
+    expect(await telegramEventCount(user.id, `${channel}/40`)).toBe(1);
+    expect(await telegramEventCount(user.id, `${channel}/20`)).toBe(0);
 
     vi.restoreAllMocks();
   });

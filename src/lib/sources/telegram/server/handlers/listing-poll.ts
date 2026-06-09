@@ -24,6 +24,7 @@
 import { logger } from "$lib/server/logger.js";
 import { telegramChannelAdapterCore } from "../adapter.js";
 import { writeTelegramSnapshot } from "../snapshots.js";
+import { materializeTelegramEvents } from "../events.js";
 
 const TELEGRAM_BASE = "https://t.me";
 
@@ -66,6 +67,16 @@ export async function handleTelegramListingPoll(args: {
     });
     written += 1;
   }
+
+  // Materialize feed events from the newest page (source_id set) so steady-state
+  // new posts land in /feed + count on /sources — parity with YT/Reddit/IG. The
+  // listing-poll owns the STEADY-STATE newest page; the backfill walker owns
+  // historical + the initial page. The cron picker (index.ts) skips
+  // listing-polling a channel that still has an in-flight backfill_page, so a
+  // newly-onboarded channel's newest page is materialized by the walker, not
+  // double-fanned here (A2). The fan-out filters per-subscriber by their own
+  // backfillTargetSince.
+  await materializeTelegramEvents(args.channel, listing.posts, { userId: args.userId });
 
   logger.debug(
     { channel: args.channel, written, userId: args.userId ?? null },

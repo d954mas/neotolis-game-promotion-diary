@@ -41,7 +41,9 @@ import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
 import { telegramChannelAdapterCore } from "../adapter.js";
 import { writeTelegramSnapshot } from "../snapshots.js";
+import { materializeTelegramEvents } from "../events.js";
 import { getTelegramWalkState, persistTelegramWalkProgress } from "../walker-state.js";
+import type { ParsedTelegramPost } from "../parse.js";
 
 const ADAPTER_KIND = "telegram_channel";
 const TELEGRAM_BASE = "https://t.me";
@@ -158,6 +160,7 @@ export async function handleTelegramBackfillWalker(args: {
   let oldestPublishedAt: Date | null = null;
   let crossedWindow = false;
   let capReached = false;
+  const inWindowPosts: ParsedTelegramPost[] = [];
   for (const post of listing.posts) {
     if (
       target !== null &&
@@ -177,6 +180,7 @@ export async function handleTelegramBackfillWalker(args: {
       viewCount: post.viewCount,
       status: "ok",
     });
+    inWindowPosts.push(post);
     written += 1;
     collected += 1;
     if (post.publishedAt !== null) {
@@ -189,6 +193,16 @@ export async function handleTelegramBackfillWalker(args: {
       break;
     }
   }
+
+  // Materialize feed events from THIS page's in-window posts (source_id set) so
+  // the backfilled + initial history lands in /feed and counts on /sources. The
+  // backfill walker owns historical + the initial newest page; the steady-state
+  // newest page is owned by listing-poll. The cron picker (index.ts) skips
+  // listing-polling a channel with an in-flight backfill_page so the two never
+  // double-fan the same page (A2). The materialize fan-out itself filters each
+  // post per-subscriber by their own backfillTargetSince — a shallower
+  // subscriber on a deep-walked channel doesn't get out-of-window events.
+  await materializeTelegramEvents(channel, inWindowPosts, { userId: args.userId });
 
   // The walk is complete when ANY bound is hit:
   //   - end-of-history (empty page OR null more-anchor cursor),

@@ -16,11 +16,11 @@
 //     still exists in the feed (enrichFeedDtos attaches telegramEnrichment with
 //     stats=null so the card renders text/thumbnail but no views chip).
 //
-// Telegram has NO event auto-creation in Phase 9 (the listing/backfill handlers
-// write telegram_posts / telegram_post_snapshots — a public-data snapshot
-// cache — NOT events; events come from manual paste / feed surfacing). So these
-// tests seed an `events` row + the snapshot cache directly, then exercise the
-// read-path machinery the /games/[id] chart + /feed surface use.
+// These tests seed an `events` row + the snapshot cache directly (rather than
+// driving the listing/backfill handlers) so they exercise ONLY the read-path
+// machinery the /games/[id] chart + /feed surface use. (The handlers DO
+// auto-create events now via materializeTelegramEvents — covered by the
+// listing-poll / backfill-walker tests; here we isolate the read path.)
 
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
