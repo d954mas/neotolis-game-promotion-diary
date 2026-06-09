@@ -102,18 +102,25 @@ export interface CardEventLite {
   };
   /** Telegram public-data decoration attached by
    *  sources/telegram/server/feed-enrichment.ts (mirrors instagramEnrichment).
-   *  Telegram is VIEWS-ONLY (D-04) — a single nullable view count, never likes
-   *  / comments. metrics-by-presence (D-05): a very-new / views-hidden post
-   *  carries null views, NEVER coerced to 0. thumbnailUrl is the fresh t.me
-   *  hotlink (D-06), mediaKind ("photo" | "video" | "album" | null) drives the
-   *  adaptive media-vs-text card layout — null = text-only post. */
+   *  Telegram exposes TWO metrics (D-04 + E1): a nullable view count AND a
+   *  nullable reaction total, never likes / comments. metrics-by-presence
+   *  (D-05): a very-new / views-hidden / no-reactions post carries null,
+   *  NEVER coerced to 0. thumbnailUrl is the fresh t.me hotlink (D-06),
+   *  mediaKind ("photo" | "video" | "album" | null) drives the adaptive
+   *  media-vs-text card layout — null = text-only post. reactionsTop is the
+   *  top-5 most-popular reactions (E1) the card renders as an emoji+count list;
+   *  null/[] → no reactions row. */
   telegramEnrichment?: {
     stats: {
       viewCount: number | null;
+      reactionsTotal: number | null;
       polledAt: Date | string;
     } | null;
     thumbnailUrl: string | null;
     mediaKind: string | null;
+    reactionsTop:
+      | { emoji: string | null; kind: "standard" | "custom" | "paid"; count: number }[]
+      | null;
   };
 }
 

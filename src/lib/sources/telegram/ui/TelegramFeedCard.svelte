@@ -23,9 +23,11 @@
   //     a same-origin thumbnail proxy is the deferred upgrade).
   //   - stats: telegramEnrichment.stats.viewCount — the post's own polling
   //     data (owned by telegram_post_snapshots), not denormalized. Telegram
-  //     is VIEWS-ONLY (D-04): one views chip, rendered ONLY when non-null
-  //     (D-05). A null-views post (very new / views hidden) renders NO chip
-  //     but still appears in the feed.
+  //     exposes TWO metrics (D-04 + E1): a views chip, rendered ONLY when
+  //     non-null (D-05), PLUS a top-5 reactions LIST (emoji + per-reaction
+  //     count) from telegramEnrichment.reactionsTop. A null-views post renders
+  //     NO views chip, a null/empty reactionsTop renders NO reactions row — both
+  //     still appear in the feed (mirror the null→no-chip rule).
   //
   //   - ADAPTIVE D-06 layout: a post WITH media (mediaKind = photo / video /
   //     album) renders thumbnail-on-top + text-below (the default BaseFeedCard
@@ -101,6 +103,21 @@
 
   const stats = $derived(event.telegramEnrichment?.stats ?? null);
 
+  // E1: top-5 reactions list (emoji + count). null/[] → no reactions row
+  // (mirror the null-views → no-chip rule). The per-kind glyph: a standard
+  // reaction carries its unicode emoji char; a paid (Telegram-Stars) reaction
+  // renders a ⭐ glyph; a custom/premium sticker (no unicode char available)
+  // renders a generic 💬-style fallback so the count still reads in context.
+  const reactions = $derived(event.telegramEnrichment?.reactionsTop ?? null);
+  function reactionGlyph(r: {
+    emoji: string | null;
+    kind: "standard" | "custom" | "paid";
+  }): string {
+    if (r.emoji) return r.emoji;
+    if (r.kind === "paid") return "⭐";
+    return "💬"; // custom/premium sticker — no unicode char on the listing
+  }
+
   // Media-type pill (video / carousel). A photo / text-only post maps to null →
   // no pill. The kind→pill decision lives in ONE shared place
   // (deriveMediaTypeOverlay) used by the feed cards AND the event detail.
@@ -152,4 +169,41 @@
       </span>
     </div>
   {/if}
+  {#if reactions && reactions.length > 0}
+    <!-- E1: top-5 reactions list — one chip per reaction (glyph + count). A
+         null/empty list renders nothing (mirror the null-views → no-chip rule). -->
+    <div class="card-stats reactions-line">
+      {#each reactions as r (r.kind + (r.emoji ?? "") + r.count)}
+        <span class="reaction" title={r.kind === "paid" ? "Telegram Stars" : undefined}>
+          <span class="reaction-glyph" aria-hidden="true">{reactionGlyph(r)}</span>
+          <span class="num">{formatStat(r.count)}</span>
+        </span>
+      {/each}
+    </div>
+  {/if}
 {/snippet}
+
+<style>
+  /* Top-5 reactions row (E1) — sits under the views chip. Wraps so 5 chips fit
+     on a narrow card; matches the views stats-line spacing/weight. */
+  .reactions-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+  .reaction {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.8125rem;
+    color: var(--color-text-muted, #9aa0aa);
+  }
+  .reaction-glyph {
+    font-size: 0.9375rem;
+    line-height: 1;
+  }
+  .reaction .num {
+    font-variant-numeric: tabular-nums;
+  }
+</style>

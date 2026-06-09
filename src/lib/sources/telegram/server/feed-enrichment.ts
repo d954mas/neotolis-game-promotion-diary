@@ -46,17 +46,25 @@ import { db } from "$lib/server/db/client.js";
 import { telegramPosts } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
+import type { TelegramReaction } from "./schema/posts.js";
 
 export interface TelegramEnrichment {
-  /** Latest view count + poll time from the most-recent
+  /** Latest view count + reaction total + poll time from the most-recent
    *  telegram_post_snapshots row. NULL when no snapshot exists yet (worker
-   *  hasn't polled, or every poll had views hidden). viewCount is INDEPENDENTLY
-   *  nullable: metrics-by-presence (D-05) — null for a views-hidden / very-new
-   *  post, NEVER coerced to 0. */
+   *  hasn't polled, or every poll had views hidden). Each count is
+   *  INDEPENDENTLY nullable: metrics-by-presence (D-05) — null for a
+   *  views-hidden / no-reactions / very-new post, NEVER coerced to 0. */
   stats: {
     viewCount: number | null;
+    reactionsTotal: number | null;
     polledAt: Date;
   } | null;
+  /** Top-5 most-popular reactions (E1) from telegram_posts.reactions_top
+   *  (current-state, parallels thumbnailUrl). null until first resolved; []
+   *  for a resolved post with no reactions. The card renders a per-kind glyph
+   *  (emoji char for standard, a stars glyph for paid, a generic glyph for
+   *  custom) + count for each entry, or NO reactions row when null/empty. */
+  reactionsTop: TelegramReaction[] | null;
   /** The fresh t.me hotlink thumbnail (D-06) from telegram_posts.thumbnail_url.
    *  Refreshed every poll by the snapshot writer. NULL until the post is
    *  resolved or for a text-only post. */
@@ -97,9 +105,10 @@ export async function telegramEnrichFeedDtos(
       post_id: string;
       polled_at: Date;
       view_count: number | null;
+      reactions_total: number | null;
     }>(sql`
       SELECT DISTINCT ON (post_id)
-        post_id, polled_at, view_count
+        post_id, polled_at, view_count, reactions_total
       FROM telegram_post_snapshots
       WHERE post_id IN (${idsSql})
       ORDER BY post_id, polled_at DESC
@@ -108,28 +117,42 @@ export async function telegramEnrichFeedDtos(
     for (const s of latestRows.rows) {
       // db.execute returns raw pg driver shapes — bigint columns come back as
       // strings; Number() coerces a present value, null STAYS null
-      // (metrics-by-presence D-05: a views-hidden post's count is null, never 0).
+      // (metrics-by-presence D-05: a views-hidden / no-reactions post's count is
+      // null, never 0).
       latest.set(s.post_id, {
         viewCount: s.view_count === null ? null : Number(s.view_count),
+        reactionsTotal: s.reactions_total === null ? null : Number(s.reactions_total),
         polledAt:
           s.polled_at instanceof Date ? s.polled_at : new Date(s.polled_at as unknown as string),
       });
     }
 
-    // 2. Thumbnail + media_kind from telegram_posts (post-keyed public-data). NO
-    //    channel display name read here — the @-handle lives on data_sources and
-    //    the card reads it from the `source` prop (no-denorm rule).
+    // 2. Thumbnail + media_kind + reactions_top from telegram_posts (post-keyed
+    //    public-data). NO channel display name read here — the @-handle lives on
+    //    data_sources and the card reads it from the `source` prop (no-denorm).
     const postRows = await db
       .select({
         postId: telegramPosts.postId,
         thumbnailUrl: telegramPosts.thumbnailUrl,
         mediaKind: telegramPosts.mediaKind,
+        reactionsTop: telegramPosts.reactionsTop,
       })
       .from(telegramPosts)
       .where(inArray(telegramPosts.postId, externalIds));
-    const postMeta = new Map<string, { thumbnailUrl: string | null; mediaKind: string | null }>();
+    const postMeta = new Map<
+      string,
+      {
+        thumbnailUrl: string | null;
+        mediaKind: string | null;
+        reactionsTop: TelegramReaction[] | null;
+      }
+    >();
     for (const r of postRows) {
-      postMeta.set(r.postId, { thumbnailUrl: r.thumbnailUrl, mediaKind: r.mediaKind });
+      postMeta.set(r.postId, {
+        thumbnailUrl: r.thumbnailUrl,
+        mediaKind: r.mediaKind,
+        reactionsTop: r.reactionsTop ?? null,
+      });
     }
 
     // In-place decoration. Iterate the filtered subset and attach
@@ -142,6 +165,7 @@ export async function telegramEnrichFeedDtos(
         stats: latest.get(eid) ?? null,
         thumbnailUrl: meta?.thumbnailUrl ?? null,
         mediaKind: meta?.mediaKind ?? null,
+        reactionsTop: meta?.reactionsTop ?? null,
       };
     }
   } catch (err) {
