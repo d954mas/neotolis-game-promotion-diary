@@ -111,9 +111,14 @@ async function claimTelegramPacerSlot(
  *  rows always carries exactly one row. Route by type. */
 async function dispatchByLane(
   rows: AdapterLaneWorkerRow[],
-  _ctx: AdapterLaneDispatchContext<TelegramPacerPermit>,
+  ctx: AdapterLaneDispatchContext<TelegramPacerPermit>,
 ): Promise<void> {
   if (rows.length === 0) return;
+  // The claimGate already acquired the global pacer slot for this tick — tell
+  // the fetch path NOT to re-acquire (a second acquire would always be denied
+  // by the slot just taken, dead-lettering every row). Sync paths default to
+  // "acquire".
+  const pacer = ctx.permit?.pacer ?? "acquire";
   const first = rows[0]!;
 
   if (first.type === "listing_poll") {
@@ -121,7 +126,7 @@ async function dispatchByLane(
     if (typeof channel !== "string") {
       throw new AdapterError("listing_poll payload missing 'channel'", { category: "permanent" });
     }
-    await handleTelegramListingPoll({ channel, userId: first.userId });
+    await handleTelegramListingPoll({ channel, userId: first.userId, pacer });
     return;
   }
 
@@ -130,7 +135,7 @@ async function dispatchByLane(
     if (typeof channel !== "string") {
       throw new AdapterError("backfill_page payload missing 'channel'", { category: "permanent" });
     }
-    await handleTelegramBackfillWalker({ channel, userId: first.userId });
+    await handleTelegramBackfillWalker({ channel, userId: first.userId, pacer });
     return;
   }
 
@@ -139,7 +144,7 @@ async function dispatchByLane(
     if (typeof postId !== "string") {
       throw new AdapterError("post_stats payload missing 'post_id'", { category: "permanent" });
     }
-    await handleWarmPostFetch(postId);
+    await handleWarmPostFetch(postId, pacer);
     return;
   }
 
@@ -154,7 +159,10 @@ async function dispatchByLane(
  *  poll_failure_count bound advances) and NEVER throw (the lane marks the row
  *  done; no batch-wide retry that would re-fetch). A pacer/rate-limit denial
  *  IS re-thrown so the lane worker defers + retries (the slot was the gate). */
-async function handleWarmPostFetch(postId: string): Promise<void> {
+async function handleWarmPostFetch(
+  postId: string,
+  pacer: "acquire" | "already-acquired" = "acquire",
+): Promise<void> {
   const slash = postId.indexOf("/");
   if (slash <= 0 || slash === postId.length - 1) {
     throw new AdapterError(`post_stats post_id is not "<channel>/<messageId>": ${postId}`, {
@@ -166,7 +174,7 @@ async function handleWarmPostFetch(postId: string): Promise<void> {
   const externalUrl = `${TELEGRAM_BASE}/${postId}`;
 
   try {
-    const html = await fetchTelegramPost(channel, messageId);
+    const html = await fetchTelegramPost(channel, messageId, pacer);
     const parsed = parseTelegramPost(html);
     if (parsed === null) {
       // The embed page carried no message block — deleted / private.

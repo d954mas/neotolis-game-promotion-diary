@@ -91,7 +91,7 @@ describe("telegram backfill walker (Phase 9)", () => {
     expect(r1.status).toBe("ok");
     expect(r1.written).toBe(2);
     expect(r1.backfillComplete).toBe(false);
-    expect(pollSpy).toHaveBeenNthCalledWith(1, channel, null);
+    expect(pollSpy).toHaveBeenNthCalledWith(1, channel, null, "acquire");
 
     // Cursor 509 persisted on the channel-state row.
     const state1 = await getTelegramWalkState(channel);
@@ -105,7 +105,7 @@ describe("telegram backfill walker (Phase 9)", () => {
     // PAGE 2 — driven by the persisted cursor 509 (NOT re-fetching page 1 / null).
     const r2 = await handleTelegramBackfillWalker({ channel });
     expect(r2.written).toBe(2);
-    expect(pollSpy).toHaveBeenNthCalledWith(2, channel, "509");
+    expect(pollSpy).toHaveBeenNthCalledWith(2, channel, "509", "acquire");
 
     const state2 = await getTelegramWalkState(channel);
     expect(state2.beforeCursor).toBe("489");

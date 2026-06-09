@@ -36,8 +36,13 @@ function externalUrlForPost(postId: string): string {
 export async function handleTelegramListingPoll(args: {
   channel: string;
   userId?: string | null;
+  pacer?: "acquire" | "already-acquired";
 }): Promise<{ status: "ok" | "not_found"; written: number }> {
-  const listing = await telegramChannelAdapterCore.pollListing(args.channel);
+  const listing = await telegramChannelAdapterCore.pollListing(
+    args.channel,
+    null,
+    args.pacer ?? "acquire",
+  );
 
   if (listing.status === "not_found") {
     logger.info(

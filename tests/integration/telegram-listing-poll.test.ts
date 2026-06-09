@@ -241,7 +241,9 @@ describe("telegram listing-poll handler (registered — Plan 09-05)", () => {
     const r = await handleTelegramListingPoll({ channel });
     expect(r.status).toBe("ok");
     expect(r.written).toBe(2);
-    expect(pollSpy).toHaveBeenCalledWith(channel);
+    // Sync default pacer "acquire" (no claimGate slot threaded) — page 1 is the
+    // newest page, so beforeCursor is null.
+    expect(pollSpy).toHaveBeenCalledWith(channel, null, "acquire");
 
     for (const p of posts) {
       const post = await readPost(p.externalId);

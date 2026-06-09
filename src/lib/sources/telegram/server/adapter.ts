@@ -51,7 +51,11 @@ interface TelegramChannelAdapterCore {
    * thin and tests can mock this single method to drive the walker against
    * fixture pages with no network.
    */
-  pollListing(channel: string, beforeCursor?: string | null): Promise<ParsedTelegramListing>;
+  pollListing(
+    channel: string,
+    beforeCursor?: string | null,
+    pacer?: "acquire" | "already-acquired",
+  ): Promise<ParsedTelegramListing>;
   enrichFeedDtos(userId: string, dtos: EventDto[]): Promise<void>;
   fetchEventMetricSeries(
     userId: string,
@@ -77,8 +81,9 @@ export const telegramChannelAdapterCore: TelegramChannelAdapterCore = {
   async pollListing(
     channel: string,
     beforeCursor?: string | null,
+    pacer: "acquire" | "already-acquired" = "acquire",
   ): Promise<ParsedTelegramListing> {
-    const html = await fetchTelegramListing(channel, beforeCursor);
+    const html = await fetchTelegramListing(channel, beforeCursor, pacer);
     return parseTelegramListing(html);
   },
 

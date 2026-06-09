@@ -43,37 +43,52 @@ const TELEGRAM_FETCH_TIMEOUT_MS = 30_000;
 export async function fetchTelegramListing(
   channel: string,
   beforeCursor?: string | null,
+  pacer: "acquire" | "already-acquired" = "acquire",
 ): Promise<string> {
   const path = `/s/${channel}${beforeCursor != null && beforeCursor !== "" ? `?before=${beforeCursor}` : ""}`;
-  return fetchTelegramHtml(`${TELEGRAM_BASE}${path}`);
+  return fetchTelegramHtml(`${TELEGRAM_BASE}${path}`, pacer);
 }
 
 /** GET a single post's embed widget. ALWAYS appends ?embed=1 — the bare
  *  t.me/<channel>/<id> page does NOT carry the view count; the ?embed=1
  *  widget does (Pitfall 2). Returns the raw HTML for parseTelegramPost. */
-export async function fetchTelegramPost(channel: string, messageId: string): Promise<string> {
-  return fetchTelegramHtml(`${TELEGRAM_BASE}/${channel}/${messageId}?embed=1`);
+export async function fetchTelegramPost(
+  channel: string,
+  messageId: string,
+  pacer: "acquire" | "already-acquired" = "acquire",
+): Promise<string> {
+  return fetchTelegramHtml(`${TELEGRAM_BASE}/${channel}/${messageId}?embed=1`, pacer);
 }
 
 /** Shared fetch core: pacer-acquire-first, browser UA, 30s timeout, and the
  *  AdapterError 5-category mapping. Returns res.text() on any 2xx. */
-async function fetchTelegramHtml(url: string): Promise<string> {
+async function fetchTelegramHtml(
+  url: string,
+  pacer: "acquire" | "already-acquired" = "acquire",
+): Promise<string> {
   // Global pacer — every telegram fetch goes through one DB-side token so the
   // politeness ceiling holds across worker + sync user paths uniformly.
   // Denial (slot taken OR adapter paused after a 403/429) surfaces as
   // rate-limited; the caller decides retry policy from category + retryAfterMs.
-  const slot = await acquireTelegramPacerSlot();
-  if (!slot.acquired) {
-    throw new AdapterError(`Telegram pacer denied -- ${slot.waitMs}ms until next slot`, {
-      category: "rate-limited",
-      retryAfterMs: slot.waitMs,
-      context: {
-        httpStatus: 0,
-        source: slot.paused ? "adapter-pause" : "global-pacer",
-        pauseReason: slot.pauseReason,
-        pausedUntil: slot.pausedUntil?.toISOString() ?? null,
-      },
-    });
+  //
+  // The lane worker already holds a slot (its claimGate acquired one in the
+  // claim tx), so it passes "already-acquired" — re-acquiring here would ALWAYS
+  // be denied by the slot the claimGate just took (3s apart), dead-lettering
+  // every lane row. Sync user paths (preview/paste) pass the default "acquire".
+  if (pacer !== "already-acquired") {
+    const slot = await acquireTelegramPacerSlot();
+    if (!slot.acquired) {
+      throw new AdapterError(`Telegram pacer denied -- ${slot.waitMs}ms until next slot`, {
+        category: "rate-limited",
+        retryAfterMs: slot.waitMs,
+        context: {
+          httpStatus: 0,
+          source: slot.paused ? "adapter-pause" : "global-pacer",
+          pauseReason: slot.pauseReason,
+          pausedUntil: slot.pausedUntil?.toISOString() ?? null,
+        },
+      });
+    }
   }
 
   const controller = new AbortController();

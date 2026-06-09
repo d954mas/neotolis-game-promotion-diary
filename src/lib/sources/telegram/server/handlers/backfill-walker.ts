@@ -53,6 +53,7 @@ async function enqueueBackfillContinuation(channel: string, dbCtx: DbOrTx): Prom
 export async function handleTelegramBackfillWalker(args: {
   channel: string;
   userId?: string | null;
+  pacer?: "acquire" | "already-acquired";
 }): Promise<{
   status: "ok" | "not_found";
   written: number;
@@ -69,7 +70,11 @@ export async function handleTelegramBackfillWalker(args: {
     return { status: "ok", written: 0, backfillComplete: true, nextBeforeCursor: null };
   }
 
-  const listing = await telegramChannelAdapterCore.pollListing(channel, state.beforeCursor);
+  const listing = await telegramChannelAdapterCore.pollListing(
+    channel,
+    state.beforeCursor,
+    args.pacer ?? "acquire",
+  );
 
   if (listing.status === "not_found") {
     // A not_found mid-walk (channel renamed/deleted) — mark complete so we stop
