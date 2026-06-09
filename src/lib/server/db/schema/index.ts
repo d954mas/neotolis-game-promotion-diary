@@ -33,3 +33,7 @@ export * from "$lib/sources/reddit/server/schema/index.js";
 // call sites (`import { instagramPosts } from
 // "$lib/server/db/schema/index.js"`) compiling.
 export * from "$lib/sources/instagram/server/schema/index.js";
+// Telegram schemas — same per-source plugin layout. Drizzle's schema glob
+// discovers telegram_posts / telegram_post_snapshots / telegram_pacer for
+// migrate; the re-export keeps cross-source call sites compiling.
+export * from "$lib/sources/telegram/server/schema/index.js";

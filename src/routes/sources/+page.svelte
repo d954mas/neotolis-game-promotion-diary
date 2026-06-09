@@ -340,9 +340,8 @@
   <AddSourceModal
     open={addOpen}
     kindMatrix={data.kindMatrix}
-    redditOperatorConfigured={data.redditOperatorConfigured}
-    instagramConfigured={data.instagramConfigured}
     socialBackfillMaxPosts={data.socialBackfillMaxPosts}
+    telegramBackfillMaxPosts={data.telegramBackfillMaxPosts}
     defaultIsOwnedByMe={data.defaultIsOwnedByMe}
     defaultAutoImport={data.defaultAutoImport}
     onClose={() => (addOpen = false)}

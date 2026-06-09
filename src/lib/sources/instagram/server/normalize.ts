@@ -16,6 +16,7 @@
 
 import { z } from "zod";
 import type {
+  FeedOwner,
   NormalizedPost,
   NormalizedSinglePost,
   ProviderPage,
@@ -87,17 +88,61 @@ const MEDIA_ITEM = z.object({
 
 type MediaItem = z.infer<typeof MEDIA_ITEM>;
 
+// ---- Feed-level owner object (the account whose feed this is) ----
+// The posts response carries a TOP-LEVEL `user` object (08-SPIKE.md Call 1
+// top-level keys include `user`). It is the FREE owner of the feed — captured so
+// the walker can refresh instagram_accounts with NO extra credit. The exact
+// inner field set was not pinned by the spike beyond id/username, so this schema
+// is tolerant (everything `.nullable().optional()`): an absent/renamed field
+// just yields null and the COALESCE-preserving UPSERT keeps prior good values.
+// `pk` is the IG-graphql alias for the user id on some shapes; `profile_pic_url`
+// / `profile_pic_url_hd` are the avatar candidates. The reels response was not
+// observed to carry a top-level `user` (its top-level keys are success /
+// credits_remaining / items / paging_info / status) → owner is null there, which
+// is harmless (the posts feed refreshes the entity each tick).
+const FEED_USER = z
+  .object({
+    id: z.string().nullable().optional(),
+    pk: z.union([z.string(), z.number()]).nullable().optional(),
+    username: z.string().nullable().optional(),
+    profile_pic_url: z.string().nullable().optional(),
+    profile_pic_url_hd: z.string().nullable().optional(),
+  })
+  .nullable()
+  .optional();
+
+type FeedUser = z.infer<typeof FEED_USER>;
+
+/** Map a feed-level `user` object → FeedOwner (the always-free owner fields the
+ *  walker UPSERTs onto instagram_accounts). Returns null when there is nothing
+ *  to anchor an account row on (no id AND no username). */
+function pickFeedOwner(user: FeedUser): FeedOwner | null {
+  if (user === null || user === undefined) return null;
+  const accountId = user.id ?? (user.pk !== null && user.pk !== undefined ? String(user.pk) : null);
+  const username = user.username ?? null;
+  if (accountId === null && username === null) return null;
+  return {
+    accountId,
+    username,
+    avatarUrl: user.profile_pic_url ?? user.profile_pic_url_hd ?? null,
+  };
+}
+
 // ---- POSTS endpoint response (08-SPIKE.md Call 1) ----
-// Cursor `next_max_id` + end signal `more_available` are BOTH top-level.
+// Cursor `next_max_id` + end signal `more_available` are BOTH top-level; the
+// FREE top-level `user` owner object rides along.
 const POSTS_RESPONSE = z.object({
   items: z.array(MEDIA_ITEM),
   next_max_id: z.string().nullable().optional(),
   more_available: z.boolean().nullable().optional(),
+  user: FEED_USER,
 });
 
 // ---- REELS endpoint response (08-SPIKE.md Call 2) ----
 // Cursor `max_id` + end signal `more_available` are NESTED under `paging_info`;
-// each item wraps the media object under `.media`.
+// each item wraps the media object under `.media`. A top-level `user` is parsed
+// tolerantly too (null when absent — the reels response was not observed to
+// carry one).
 const REELS_RESPONSE = z.object({
   items: z.array(z.object({ media: MEDIA_ITEM })),
   paging_info: z
@@ -107,6 +152,7 @@ const REELS_RESPONSE = z.object({
     })
     .nullable()
     .optional(),
+  user: FEED_USER,
 });
 
 function pickThumbnail(item: MediaItem): string | null {
@@ -167,6 +213,7 @@ export function normalizePostsResponse(json: unknown): ProviderPage {
     nextCursor: parsed.next_max_id ?? null,
     endOfFeed: parsed.more_available === false,
     creditsUsed: 1,
+    owner: pickFeedOwner(parsed.user),
   };
 }
 
@@ -182,6 +229,7 @@ export function normalizeReelsResponse(json: unknown): ProviderPage {
     nextCursor: parsed.paging_info?.max_id ?? null,
     endOfFeed: parsed.paging_info?.more_available === false,
     creditsUsed: 1,
+    owner: pickFeedOwner(parsed.user),
   };
 }
 

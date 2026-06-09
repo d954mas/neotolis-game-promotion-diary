@@ -21,6 +21,7 @@ import { eventKindToSourceKind } from "./event-to-source-kind.js";
 import * as youtubeUiClient from "./youtube/ui/index.js";
 import * as redditUiClient from "./reddit/ui/index.js";
 import * as instagramUiClient from "./instagram/ui/index.js";
+import * as telegramUiClient from "./telegram/ui/index.js";
 
 /** Card-component contract — adapters that override /feed rendering must
  *  ship a Svelte component with the same props as the universal FeedCard.
@@ -57,6 +58,7 @@ const uiClientRegistry = new Map<SourceKind, AdapterUiClient>([
   ["reddit_account", redditUiClient as unknown as AdapterUiClient],
   ["reddit_subreddit", redditUiClient as unknown as AdapterUiClient],
   ["instagram_account", instagramUiClient as unknown as AdapterUiClient],
+  ["telegram_channel", telegramUiClient as unknown as AdapterUiClient],
 ]);
 
 /**

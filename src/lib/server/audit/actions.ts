@@ -130,6 +130,12 @@ export const AUDIT_ACTIONS = [
   // works unchanged — no new per-user-cap verbs.
   "social.provider_throttled",
   "social.budget_exhausted",
+  // Phase 9 Telegram (free t.me/s scrape). Worker-emitted, mirrors
+  // reddit.queue_drained: the lane worker writes ONE row per non-empty tick so
+  // /admin/quota Telegram observability (getDailyStats SUMs
+  // metadata.entries_processed) reflects real activity. Telegram is free — no
+  // per-user cap verbs. metadata: { queue_name, entries_processed, duration_ms }.
+  "telegram.queue_drained",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -54,6 +54,13 @@ export interface ProviderPage {
   endOfFeed: boolean;
   /** 1 per request (D-18) — feeds OBS + the operator spend counter. */
   creditsUsed: number;
+  /**
+   * The account whose feed this page is (the top-level owner object the feed
+   * response already carries — FREE). The walker UPSERTs the subject entity
+   * (instagram_accounts) from this with NO extra credit. `null` when the
+   * response omits the owner (or the provider doesn't surface it).
+   */
+  owner?: FeedOwner | null;
 }
 
 /** Which prepaid budget pool a provider request reserves against (BUDGET-02).
@@ -93,6 +100,46 @@ export interface NormalizedSinglePost {
   ownerUsername: string | null;
 }
 
+/**
+ * Resolved account profile (the resolveAccount result). The provider reads
+ * these off the ONE profile response it already pays for on source-resolve — no
+ * extra fetch. `accountId` + `displayName` are the load-bearing create-time
+ * fields (the channelKey + the data_sources.display_name seed); the remaining
+ * fields are the richer subject-entity metadata (instagram_accounts) populated
+ * from the same response. Any field the provider response omits is `null`.
+ */
+export interface ResolvedAccount {
+  /** Stable platform-native account id (the channelKey). */
+  accountId: string;
+  /** full_name (fallback username) — the data_sources.display_name seed. */
+  displayName: string | null;
+  /** Current @handle / username (without the leading '@'). */
+  username: string | null;
+  /** Upstream account name (full_name) — entity source-of-truth metadata. */
+  fullName: string | null;
+  /** Avatar / profile-pic URL (expires; refreshed on each resolve). */
+  avatarUrl: string | null;
+  /** Follower count when the profile response exposes it; else null. */
+  followerCount: number | null;
+}
+
+/**
+ * Owner of a feed page — the account whose feed was fetched. Read from the FREE
+ * feed response (the posts/reels endpoint carries a top-level owner object), so
+ * the walker can refresh the subject entity (instagram_accounts) opportunistically
+ * with NO extra credit. The richer fields (avatar / follower count) come from the
+ * PAID profile resolve; the feed owner carries only the always-present id +
+ * @handle (+ avatar when present). `null` when the response omits the owner.
+ */
+export interface FeedOwner {
+  /** Stable platform-native account id. */
+  accountId: string | null;
+  /** Current @handle / username. */
+  username: string | null;
+  /** Avatar / profile-pic URL when the feed owner carries one; else null. */
+  avatarUrl: string | null;
+}
+
 export interface SocialProvider {
   /** "scrapecreators" — the `provider` OBS label. */
   readonly name: string;
@@ -102,10 +149,7 @@ export interface SocialProvider {
     cursor: string | null,
     opts: { kindFilter?: "posts" | "reels"; origin?: ProviderOrigin },
   ): Promise<ProviderPage>;
-  resolveAccount(
-    platform: SocialPlatform,
-    handle: string,
-  ): Promise<{ accountId: string; displayName: string | null } | null>;
+  resolveAccount(platform: SocialPlatform, handle: string): Promise<ResolvedAccount | null>;
   /**
    * Fetch ONE post/reel by its public permalink (paste-preview path). The
    * `mediaType` is resolved from the response media kind combined with the URL

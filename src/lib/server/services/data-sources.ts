@@ -63,23 +63,36 @@ export type DataSourceRow = typeof dataSources.$inferSelect;
 // SCRAPECREATORS_API_KEY). When unconfigured the create degrades to a clean
 // 422 `kind_not_configured` (SOC-05) — distinct from the schema-only
 // `kind_not_yet_functional` — see the createSource gate below.
-const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
+// EXPORTED as the single source of truth for "is this kind wired end-to-end".
+// Both the createSource gate below AND the /sources Add-Source kindMatrix
+// (src/lib/sources/kind-matrix.ts buildKindMatrix) read from it, so a kind
+// that flips functional lights up the UI and passes the create gate from ONE
+// edit here — no parallel literal to keep in sync.
+export const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
   "youtube_channel",
   "reddit_account",
   "reddit_subreddit",
   "instagram_account",
+  // telegram_channel is functional (Plan 09-05) AND needs NO provider-config
+  // gate — t.me/s scraping is free, always available (the structural contrast
+  // with instagram_account's isInstagramConfigured branch below).
+  "telegram_channel",
 ]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata.
 // The /sources page renders the user-facing string from the response
 // code; this map supplies the kind-specific "why not yet" hint without
 // forcing the UI to hard-code the policy.
-const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
+// EXPORTED: per-kind "why not yet / what state" copy. Source of truth for the
+// kind_not_yet_functional error metadata AND the Add-Source kindMatrix status
+// hint (buildKindMatrix). "available" means functional-and-no-config-gate; the
+// other strings are the disabled-chip rationale.
+export const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   youtube_channel: "available",
   reddit_account: "available",
   reddit_subreddit: "available",
   twitter_account: "out of scope - Twitter API is paid",
-  telegram_channel: "coming soon",
+  telegram_channel: "available",
   discord_server: "coming soon",
   instagram_account: "not configured by operator",
 };

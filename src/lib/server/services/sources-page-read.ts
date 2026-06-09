@@ -63,7 +63,8 @@ export async function loadSourcesPage(userId: string): Promise<SourcesPageData> 
   const sourceIds = dtos.map((s) => s.id);
 
   await enrichDataSourceDtosWithYoutubeChannelTitles(dtos);
-  await enrichWithChannelState(dtos, channelIds);
+  await enrichWithChannelState(dtos);
+  await enrichWithChannelState(dtos, telegramChannelKey);
   await enrichRedditSourcesWithLastPolled(dtos);
   await enrichWithEventStats(dtos, userId, sourceIds);
 
@@ -94,7 +95,8 @@ export async function loadSourceDetailPage(
   const channelIds = dto.channelId === null ? [] : [dto.channelId];
 
   await enrichDataSourceDtosWithYoutubeChannelTitles([dto]);
-  await enrichWithChannelState([dto], channelIds);
+  await enrichWithChannelState([dto]);
+  await enrichWithChannelState([dto], telegramChannelKey);
   await enrichRedditSourcesWithLastPolled([dto]);
 
   const [quotaPlatforms, cooldownBySource, pullingBySource] = await Promise.all([
@@ -192,8 +194,37 @@ async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise
   }
 }
 
-async function enrichWithChannelState(dtos: DataSourceDto[], channelIds: string[]): Promise<void> {
-  if (channelIds.length === 0) return;
+/**
+ * The channel-state key for a DTO. YouTube keys on the dto.channelId column
+ * (the default); Telegram has no channelId — it keys on metadata.channel (the
+ * @slug, which IS the data_source_channel_state.channel_key for a
+ * telegram_channel row, mirroring how the walker stamps it). Returns null when
+ * the DTO carries no key for its kind (skip — no enrichment).
+ */
+function telegramChannelKey(dto: DataSourceDto): string | null {
+  const md = (dto.metadata ?? {}) as { channel?: unknown };
+  return typeof md.channel === "string" && md.channel !== "" ? md.channel : null;
+}
+
+/**
+ * Stamp last_polled_at / backfill state from data_source_channel_state onto the
+ * DTOs, joining on a per-kind key accessor. YouTube joins on dto.channelId (the
+ * default keyOf); Telegram joins on metadata.channel (its @slug), which is the
+ * SAME table's channel_key — so both kinds flow through ONE query + one map
+ * instead of a per-kind copy. Reddit stays separate (two caches, different
+ * columns — enrichRedditSourcesWithLastPolled).
+ *
+ * Without this for Telegram, a telegram_channel DTO would carry lastPolledAt=null
+ * and SourceRow would render "Queued" forever even after the walker has polled
+ * (the bug this guards). The map is keyed `${kind}:${key}` so a YouTube channelId
+ * and a Telegram slug can never cross-resolve.
+ */
+async function enrichWithChannelState(
+  dtos: DataSourceDto[],
+  keyOf: (dto: DataSourceDto) => string | null = (d) => d.channelId,
+): Promise<void> {
+  const keys = dtos.map(keyOf).filter((k): k is string => k !== null);
+  if (keys.length === 0) return;
   const stateRows = await db
     .select({
       channelKey: dataSourceChannelState.channelKey,
@@ -203,7 +234,7 @@ async function enrichWithChannelState(dtos: DataSourceDto[], channelIds: string[
       backfillComplete: dataSourceChannelState.backfillComplete,
     })
     .from(dataSourceChannelState)
-    .where(inArray(dataSourceChannelState.channelKey, channelIds));
+    .where(inArray(dataSourceChannelState.channelKey, keys));
   const stateByKey = new Map<
     string,
     { lastPolledAt: Date | null; backfillOldestAt: Date | null; backfillComplete: boolean }
@@ -216,8 +247,9 @@ async function enrichWithChannelState(dtos: DataSourceDto[], channelIds: string[
     });
   }
   for (const s of dtos) {
-    if (!s.channelId) continue;
-    const st = stateByKey.get(`${s.kind}:${s.channelId}`);
+    const key = keyOf(s);
+    if (key === null) continue;
+    const st = stateByKey.get(`${s.kind}:${key}`);
     if (!st) continue;
     s.lastPolledAt = st.lastPolledAt;
     s.backfillOldestAt = st.backfillOldestAt;

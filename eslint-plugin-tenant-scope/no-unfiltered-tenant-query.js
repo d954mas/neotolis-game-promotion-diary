@@ -123,10 +123,17 @@ export const ALLOWLIST_TABLES = new Set([
   // a post's play/like/comment counts are identical regardless of which
   // tenant looked them up; the operator spend/balance rows are operator-side
   // state keyed by platform/provider, not tenant data).
+  "instagramAccounts", // public external data, no tenant scope (account subject entity)
   "instagramPosts", // public external data, no tenant scope
   "instagramPostSnapshots", // public external data, no tenant scope (time-series)
   "socialProviderSpend", // operator-side spend counter, no tenant scope
   "socialProviderBalance", // operator prepaid-balance ceiling row, keyed by platform/provider — quota.ts queries it un-tenant-scoped
+  // Phase 9 Telegram public-data tables (no user_id by design — a channel
+  // post's view count is identical regardless of which tenant looked it up).
+  "telegramChannels", // public external data, no tenant scope (channel subject entity)
+  "telegramPosts", // public external data, no tenant scope
+  "telegramPostSnapshots", // public external data, no tenant scope (time-series)
+  "telegramPacer", // singleton rate-limit-token row, no tenant scope
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({

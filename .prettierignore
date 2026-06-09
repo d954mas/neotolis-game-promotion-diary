@@ -13,6 +13,12 @@ pnpm-lock.yaml
 # byte-exact test oracles (intentional BOM / CRLF / preamble); never reformat.
 *.csv
 
+# Captured HTML fixtures (Phase 9 Telegram t.me/s parser oracles). These are
+# real upstream markup snapshots the parser keys on; Prettier's HTML parser
+# both errors on hand-trimmed/synthesized blocks AND would rewrite the exact
+# structure under test. Same "byte-exact oracle, never reformat" rule as *.csv.
+tests/fixtures/**/*.html
+
 # Documentation and planning — managed manually
 .planning/
 docs/

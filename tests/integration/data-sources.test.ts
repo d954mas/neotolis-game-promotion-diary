@@ -18,6 +18,7 @@ import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { redditUsersCache } from "../../src/lib/sources/reddit/server/schema/index.js";
+import { dataSourceChannelState } from "../../src/lib/server/db/schema/data-source-channel-state.js";
 import * as Audit from "../../src/lib/server/audit.js";
 import { NotFoundError, AppError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
@@ -129,6 +130,32 @@ describe("register data sources via POST /api/sources", () => {
     expect(detail.source.lastPolledAt?.toISOString()).toBe(lastMetadataRefreshAt.toISOString());
   });
 
+  it("source detail read-model enriches telegram_channel lastPolledAt from channel-state", async () => {
+    const userA = await seedUserDirectly({ email: "ds2tgdetail@test.local" });
+    const created = await createSource(
+      userA.id,
+      {
+        kind: "telegram_channel",
+        handleUrl: "https://t.me/detailpolledtg",
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+    const lastPolledAt = new Date("2026-05-19T10:00:00.000Z");
+    await db.insert(dataSourceChannelState).values({
+      kind: "telegram_channel",
+      channelKey: "detailpolledtg",
+      lastPolledAt,
+    });
+
+    const detail = await loadSourceDetailPage(userA.id, created.id);
+
+    // Without the telegram lastPolled enrichment the DTO would carry
+    // lastPolledAt=null → SourceRow renders "Queued" forever even after polls
+    // (the bug this guards). channelKey here is the @slug.
+    expect(detail.source.lastPolledAt?.toISOString()).toBe(lastPolledAt.toISOString());
+  });
+
   it("duplicate kind=reddit_account uses Reddit-specific duplicate_source message", async () => {
     const userA = await seedUserDirectly({ email: "ds2dup@test.local" });
     await createSource(
@@ -154,9 +181,13 @@ describe("register data sources via POST /api/sources", () => {
     });
   });
 
-  it("kinds twitter_account / telegram_channel / discord_server reject with 'kind_not_yet_functional'", async () => {
+  it("kinds twitter_account / discord_server reject with 'kind_not_yet_functional'", async () => {
+    // telegram_channel was in this list pre-Phase-9; Plan 09-05 made it
+    // functional (free t.me/s scrape, no operator config), so it now CREATES
+    // rather than rejecting and is excluded here. Only the still-schema-only
+    // kinds (Twitter — paid API; Discord — coming soon) reject.
     const userA = await seedUserDirectly({ email: "ds3@test.local" });
-    const rejectedKinds = ["twitter_account", "telegram_channel", "discord_server"] as const;
+    const rejectedKinds = ["twitter_account", "discord_server"] as const;
     for (const kind of rejectedKinds) {
       await expect(
         createSource(userA.id, { kind, handleUrl: `https://example.test/${kind}` }, "127.0.0.1"),

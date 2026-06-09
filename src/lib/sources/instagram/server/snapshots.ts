@@ -20,7 +20,11 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { instagramPosts, instagramPostSnapshots } from "$lib/server/db/schema/index.js";
+import {
+  instagramAccounts,
+  instagramPosts,
+  instagramPostSnapshots,
+} from "$lib/server/db/schema/index.js";
 
 export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
 
@@ -106,4 +110,78 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         .onConflictDoNothing();
     }
   });
+}
+
+export interface UpsertInstagramAccountArgs {
+  /** instagram_accounts.account_id PK — the stable IG user id (= the channelKey
+   *  / instagram_posts.account_id). Required; the row anchors on it. */
+  accountId: string;
+  /** Current @handle / username (without the leading '@'). A change appends the
+   *  old value to handle_aliases. Nullable on a partial source. */
+  username?: string | null;
+  /** Upstream account name (full_name) — OUR truth, NOT data_sources.display_name. */
+  fullName?: string | null;
+  /** Avatar / profile-pic URL. Refreshed when present; COALESCE-preserved when null. */
+  avatarUrl?: string | null;
+  /** Follower count when the profile response exposed it; else null. */
+  followerCount?: number | null;
+}
+
+/** UPSERT the account subject entity (instagram_accounts) from data ALREADY
+ *  fetched — the source-of-truth for the account's OWN scraped metadata.
+ *
+ *  Two callers, ZERO additional provider credits:
+ *   - resolveHandleToAccountId (the PAID create-time profile call): passes the
+ *     richer fields (full_name / avatar / follower_count / username) it read off
+ *     the profile response it already paid for.
+ *   - the account walker (the FREE feed owner object): passes account_id +
+ *     username (+ avatar when the feed owner carries one); the richer profile
+ *     fields are COALESCE-preserved (a null arg keeps the prior good value), so
+ *     the cheap feed refresh never blanks the metadata the profile call set.
+ *
+ *  - INSERT sets account_id (PK) + first_seen_at + the supplied metadata, and
+ *    seeds handle_aliases with the username.
+ *  - UPDATE refreshes the non-null supplied fields + last_refreshed_at, and
+ *    APPENDS the username to handle_aliases when it changed (a rename —
+ *    array_append only when the new username is non-null and not already present,
+ *    so the list never accumulates duplicates).
+ *  - COALESCE-preserve: a null field keeps the prior good value instead of
+ *    blanking it (same rule as instagram_posts.thumbnail_url — a transient miss
+ *    / a cheaper feed refresh must not erase richer metadata, #69 P1-A).
+ *
+ *  Idempotent + public-data (no userId scope; allowlisted). */
+export async function upsertInstagramAccount(args: UpsertInstagramAccountArgs): Promise<void> {
+  const now = new Date();
+  const username = args.username ?? null;
+  await db
+    .insert(instagramAccounts)
+    .values({
+      accountId: args.accountId,
+      username,
+      fullName: args.fullName ?? null,
+      avatarUrl: args.avatarUrl ?? null,
+      followerCount: args.followerCount ?? null,
+      handleAliases: username === null ? [] : [username],
+      firstSeenAt: now,
+      lastRefreshedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: instagramAccounts.accountId,
+      set: {
+        username: sql`COALESCE(${username}, ${instagramAccounts.username})`,
+        fullName: sql`COALESCE(${args.fullName ?? null}, ${instagramAccounts.fullName})`,
+        avatarUrl: sql`COALESCE(${args.avatarUrl ?? null}, ${instagramAccounts.avatarUrl})`,
+        followerCount: sql`COALESCE(${args.followerCount ?? null}, ${instagramAccounts.followerCount})`,
+        // Append the username on a rename: only when the new value is non-null AND
+        // not already in the array (array_append would otherwise grow duplicates
+        // on every poll). NULL username → no change.
+        handleAliases: sql`CASE
+          WHEN ${username}::text IS NOT NULL AND NOT (${username}::text = ANY(${instagramAccounts.handleAliases}))
+          THEN array_append(${instagramAccounts.handleAliases}, ${username}::text)
+          ELSE ${instagramAccounts.handleAliases}
+        END`,
+        lastRefreshedAt: now,
+        updatedAt: now,
+      },
+    });
 }

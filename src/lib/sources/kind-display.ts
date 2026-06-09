@@ -29,19 +29,19 @@ export interface EventKindDisplay {
   /** Paraglide resolver for the human label (e.g. "Instagram"). */
   label: () => string;
   /** Surfaces the PollingBadge (freshness / operator-paused / refresh-now).
-   *  true for the API-polled kinds (youtube_video / reddit_post /
-   *  instagram_post); false for free-form (post/conference/talk/press/other)
-   *  and the not-yet-functional kinds (twitter/telegram/discord). */
+   *  true for the polled kinds (youtube_video / reddit_post / instagram_post /
+   *  telegram_post); false for free-form (post/conference/talk/press/other)
+   *  and the not-yet-functional kinds (twitter/discord). */
   pollable: boolean;
   /** Mounts the per-event metric-history chart (and game-chart markers).
    *  Matches the kinds whose adapter implements fetchEventMetricSeries. */
   chartable: boolean;
   /** Appears as a chip in the Add Event manual kind picker
    *  (AddEventForm). true for the kinds a user can manually log today —
-   *  the API-polled kinds with a paste flow (youtube_video / reddit_post /
-   *  instagram_post) PLUS the free-form kinds (press / post / conference /
-   *  talk / other). false for the not-yet-functional kinds (twitter_post /
-   *  telegram_post / discord_drop), which have no adapter, no paste flow,
+   *  the polled kinds with a paste flow (youtube_video / reddit_post /
+   *  instagram_post / telegram_post) PLUS the free-form kinds (press / post /
+   *  conference / talk / other). false for the not-yet-functional kinds
+   *  (twitter_post / discord_drop), which have no adapter, no paste flow,
    *  and are filtered out of the /feed KIND axis — letting a user create
    *  events they can't then filter to would be a footgun.
    *
@@ -89,9 +89,9 @@ export const EVENT_KIND_DISPLAY = {
   },
   telegram_post: {
     label: () => m.event_kind_label_telegram_post(),
-    pollable: false,
-    chartable: false,
-    manualCreatable: false,
+    pollable: true,
+    chartable: true,
+    manualCreatable: true,
   },
   discord_drop: {
     label: () => m.event_kind_label_discord_drop(),
@@ -185,12 +185,15 @@ export const CHARTABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
  *  loudly until the kind is either placed here or marked manualCreatable:false.
  *
  *  instagram_post sits right after reddit_post (Phase 08 — Instagram joins the
- *  paste-flow kinds). twitter_post / telegram_post / discord_drop are excluded
- *  (manualCreatable:false) — no adapter, no paste flow, filtered from /feed. */
+ *  paste-flow kinds); telegram_post sits right after instagram_post (Phase 09 —
+ *  Telegram joins the paste-flow kinds). twitter_post / discord_drop remain
+ *  excluded (manualCreatable:false) — no adapter, no paste flow, filtered from
+ *  /feed. */
 export const MANUAL_EVENT_KINDS = [
   "youtube_video",
   "reddit_post",
   "instagram_post",
+  "telegram_post",
   "press",
   "post",
   "conference",

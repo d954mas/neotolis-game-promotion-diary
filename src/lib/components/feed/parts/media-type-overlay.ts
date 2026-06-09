@@ -78,6 +78,7 @@ export function mediaTypeOverlay(mediaType: string | null | undefined): OverlayP
 export interface MediaTypeOverlayEvent {
   kind: string;
   instagramEnrichment?: { mediaType?: string | null } | null;
+  telegramEnrichment?: { mediaKind?: string | null } | null;
 }
 
 /**
@@ -87,6 +88,11 @@ export interface MediaTypeOverlayEvent {
  *     Short from a full video yet; Shorts detection is deferred).
  *   - instagram_post → the post's media_type (short / video / carousel → pill;
  *     image / missing → null).
+ *   - telegram_post  → the post's media_kind, translated to the shared pill
+ *     vocabulary (video → "Video", album → "Carousel"; photo / text-only →
+ *     null). The telegram_posts table speaks photo/video/album (D-06); the pill
+ *     vocabulary speaks short/carousel/video, so the translation lives here in
+ *     the single kind→pill home, not in the card.
  *   - any other kind → null (no pill).
  * Pure; the caller renders <MediaTypePill> only when this is non-null (and a
  * thumbnail image is actually shown).
@@ -95,6 +101,12 @@ export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPil
   if (event.kind === "youtube_video") return mediaTypeOverlay("video");
   if (event.kind === "instagram_post") {
     return mediaTypeOverlay(event.instagramEnrichment?.mediaType ?? "");
+  }
+  if (event.kind === "telegram_post") {
+    const mediaKind = event.telegramEnrichment?.mediaKind ?? "";
+    if (mediaKind === "album") return mediaTypeOverlay("carousel");
+    if (mediaKind === "video") return mediaTypeOverlay("video");
+    return null; // photo / text-only → no pill (a photo needs no marker)
   }
   return null;
 }

@@ -39,20 +39,30 @@
     maxDate?: string;
     /** The source kind the picker is registering. Drives the
      *  social-source honesty notes (BACK-01): the snapshot-not-history
-     *  note + the post-cap note render only for `instagram_account`
-     *  (social sources import a current snapshot, not per-post history).
+     *  note + the post-cap note render for both `instagram_account` and
+     *  `telegram_channel` (social sources import a current snapshot, not
+     *  per-post history, and each caps the imported posts per window).
      *  Omitted → no social notes (YouTube/Reddit). */
     kind?: string;
-    /** The SOCIAL_BACKFILL_MAX_POSTS ceiling, surfaced in the post-cap
-     *  honesty note on wide presets. Only used when kind is a social
-     *  source. */
+    /** The backfill post-count ceiling, surfaced in the post-cap honesty
+     *  note on wide presets. The consumer passes the kind-appropriate cap
+     *  (instagram → SOCIAL_BACKFILL_MAX_POSTS, telegram →
+     *  TELEGRAM_BACKFILL_MAX_POSTS). Only used when kind is a social source. */
     postCap?: number;
   } = $props();
 
   // BACK-01: social sources import a CURRENT snapshot, not per-post history
-  // (D-14), and cap the number of imported posts per window (D-10). Gate both
-  // honesty notes on instagram_account; the post-cap note only on wide presets.
-  const isSocialSource = $derived(kind === "instagram_account");
+  // (D-14) → the snapshot note renders for both instagram_account AND
+  // telegram_channel (older Telegram posts also import as a current snapshot;
+  // per-post view history only accrues once tracking begins).
+  //
+  // The POST-CAP note renders for BOTH too: IG caps the imported posts per
+  // window via SOCIAL_BACKFILL_MAX_POSTS, and Telegram has its OWN cap
+  // (TELEGRAM_BACKFILL_MAX_POSTS, default 100) the resumable ?before walker
+  // stops at (Plan 04 capReached / collected >= maxPosts). Each consumer passes
+  // the kind-appropriate cap as `postCap`, so the "up to N posts" note is honest
+  // for both — no false "no cap" claim for telegram_channel.
+  const isSocialSource = $derived(kind === "instagram_account" || kind === "telegram_channel");
   const showPostCapNote = $derived(
     isSocialSource &&
       postCap !== undefined &&

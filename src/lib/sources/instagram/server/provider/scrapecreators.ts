@@ -26,6 +26,7 @@ import type {
   NormalizedSinglePost,
   ProviderOrigin,
   ProviderPage,
+  ResolvedAccount,
   SocialPlatform,
   SocialProvider,
 } from "$lib/sources/social-provider.js";
@@ -54,6 +55,15 @@ const REEL_PERMALINK_RE = /\/reels?\//i;
 // first and keep a top-level `user` as a defensive fallback. An empty/missing
 // body or absent user → null (the caller reads that as missing/private —
 // Pitfall 4 belt-and-suspenders alongside the HTTP-404 mapping in http.ts).
+//
+// The avatar + follower-count fields are read OPPORTUNISTICALLY off the SAME
+// response (no extra fetch) to populate the instagram_accounts subject entity:
+// the web-profile shape carries "many IG-graphql fields" (08-SPIKE.md addendum)
+// of which `profile_pic_url` / `profile_pic_url_hd` and `follower_count` /
+// `edge_followed_by.count` are the standard avatar + follower paths. They were
+// not separately pinned by the spike, so they are tolerant (`?` / null) — an
+// absent field just yields null and the COALESCE-preserving entity UPSERT keeps
+// any prior good value. The accountId / displayName parse is UNCHANGED.
 interface ProfileBody {
   data?: { user?: ProfileUser | null } | null;
   user?: ProfileUser | null;
@@ -64,6 +74,10 @@ interface ProfileUser {
   user_id?: string | null;
   full_name?: string | null;
   username?: string | null;
+  profile_pic_url?: string | null;
+  profile_pic_url_hd?: string | null;
+  follower_count?: number | null;
+  edge_followed_by?: { count?: number | null } | null;
 }
 
 interface CreditBalanceBody {
@@ -121,10 +135,7 @@ export const scrapeCreatorsProvider: SocialProvider = {
     return normalizeSinglePostResponse(json, REEL_PERMALINK_RE.test(url));
   },
 
-  async resolveAccount(
-    platform: SocialPlatform,
-    handle: string,
-  ): Promise<{ accountId: string; displayName: string | null } | null> {
+  async resolveAccount(platform: SocialPlatform, handle: string): Promise<ResolvedAccount | null> {
     const url = new URL(`${env.SCRAPECREATORS_BASE_URL}${PROFILE_PATH}`);
     url.searchParams.set("handle", handle);
 
@@ -143,6 +154,12 @@ export const scrapeCreatorsProvider: SocialProvider = {
     return {
       accountId,
       displayName: user.full_name ?? user.username ?? null,
+      // Richer subject-entity metadata read off the SAME response (no extra
+      // fetch) — populates instagram_accounts. Tolerant: any absent field → null.
+      username: user.username ?? null,
+      fullName: user.full_name ?? null,
+      avatarUrl: user.profile_pic_url ?? user.profile_pic_url_hd ?? null,
+      followerCount: user.follower_count ?? user.edge_followed_by?.count ?? null,
     };
   },
 

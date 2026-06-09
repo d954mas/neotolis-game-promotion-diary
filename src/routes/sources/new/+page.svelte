@@ -1,23 +1,23 @@
 <script lang="ts">
-  // /sources/new — full-page form for registering a data_source. NOT an
-  // inline dialog: the 5-chip kind picker (4 disabled with availability
-  // tooltips) earns its own page surface.
+  // /sources/new — full-page, non-JS fallback for the AddSourceModal. The
+  // primary affordance is the modal launched from /sources; this page exists
+  // for direct-link / no-JS entry and is kept in the SAME URL-first
+  // interaction model as the modal (F2 — the two Add-Source surfaces must not
+  // diverge). Both consume the SAME derived kindMatrix (buildKindMatrix), and
+  // both treat the chips as an INFORMATIONAL legend, not a selector: the
+  // pasted URL decides the kind (user 2026-06-09: «тип понятен из URL, кнопки
+  // выбора не нужны»).
   //
-  // Submit flow:
-  //   - POST /api/sources with {kind, handleUrl, displayName?, isOwnedByMe,
-  //     autoImport}.
-  //   - 201 Created → goto("/sources").
-  //   - 422 kind_not_yet_functional → InlineError with
-  //     m.sources_error_kind_not_yet_functional({kind, status}) sourced from
-  //     the response metadata (the service throws AppError with
-  //     metadata.kind + metadata.status).
-  //   - 422 duplicate_source → InlineError with m.sources_error_duplicate().
-  //   - other failures → InlineError with the response body.error or a
-  //     generic copy.
+  // Submit flow (mirrors AddSourceModal):
+  //   - POST /api/sources with {kind, handleUrl, isOwnedByMe, autoImport, …}.
+  //     `kind` is the URL-derived synthetic UI kind ("reddit" / "youtube_channel"
+  //     / "telegram_channel" / "instagram_account"); the server resolves the
+  //     real DB kind. The DB column never stores "reddit".
+  //   - 201 → goto("/sources").
+  //   - typed errors map to the same InlineError copy as the modal.
   //
-  // Cancel returns to /sources via m.common_cancel() — non-destructive close
-  // (the typed input is not at risk because navigating back to /sources is
-  // the equivalent).
+  // Cancel returns to /sources — non-destructive (navigating away is the
+  // equivalent of dropping the local form draft).
 
   import { untrack } from "svelte";
   import { goto } from "$app/navigation";
@@ -25,172 +25,83 @@
   import InlineError from "$lib/components/InlineError.svelte";
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
   import { inferSourceKindFromUrl } from "$lib/components/sources/infer-source-kind.js";
+  import type {
+    AddSourceUiKind,
+    KindLabelKey,
+    KindStatusKey,
+    KindMatrixEntry,
+  } from "$lib/sources/kind-matrix.js";
   import type { PageData } from "./$types";
 
-  // `"reddit"` is a synthetic, UI-only kind. The /sources/new chip picker
-  // exposes a single "Reddit" entry; on submit, POST /api/sources receives
-  // `kind: "reddit"` and the route handler dispatches to
-  // redditAdapter.parseSourceUrl to resolve the real DB kind
-  // (reddit_account vs reddit_subreddit) from the URL shape. The DB
-  // column never stores "reddit".
-  type SourceKind =
-    | "youtube_channel"
-    | "reddit"
-    | "instagram_account"
-    | "twitter_account"
-    | "telegram_channel"
-    | "discord_server";
-
-  type KindLabelKey =
-    | "source_kind_label_youtube_channel"
-    | "source_kind_label_twitter_account"
-    | "source_kind_label_telegram_channel"
-    | "source_kind_label_discord_server"
-    | "source_kind_label_instagram_account"
-    | "common_kind_reddit";
-
-  type KindStatusKey =
-    | "source_kind_status_reddit_account"
-    | "source_kind_status_twitter_account"
-    | "source_kind_status_telegram_channel"
-    | "source_kind_status_discord_server"
-    | "source_kind_status_instagram_account";
-
-  // disabledReason distinguishes "adapter built, operator env unset"
-  // (Reddit / Instagram unconfigured) from "not built yet" (Twitter /
-  // Telegram / Discord) so the tooltip is accurate (issue #64). null when
-  // the chip is enabled.
-  type DisabledReason = "not-configured" | "not-built";
-
-  type KindEntry = {
-    value: SourceKind;
-    labelKey: KindLabelKey;
-    statusKey: KindStatusKey | null;
-    disabled: boolean;
-    disabledReason: DisabledReason | null;
-  };
-
   let { data }: { data: PageData } = $props();
-  const kindMatrix = $derived(data.kindMatrix as KindEntry[]);
-  const redditOperatorConfigured = $derived(data.redditOperatorConfigured ?? false);
-  const instagramConfigured = $derived(data.instagramConfigured ?? false);
+  const kindMatrix = $derived(data.kindMatrix as KindMatrixEntry[]);
 
-  // Form defaults are seeded from the loader on the initial render. The
-  // form is one-shot, so reading `data.default*` once at init is
-  // intentional — there is no parent re-mount path that would change the
-  // defaults mid-form. `untrack` decouples the read from the reactive graph
-  // so Svelte 5's state_referenced_locally warning recognises the intent.
-  const initialIsOwnedByMe = untrack(() => data.defaultIsOwnedByMe);
-  const initialAutoImport = untrack(() => data.defaultAutoImport);
-
-  let selectedKind = $state<SourceKind>("youtube_channel");
-  // displayName is intentionally not in this onboarding form. Source name
-  // comes from the platform (YouTube channel title, Reddit account name,
-  // etc.) — that's more identifiable than a user-typed label. Custom rename
-  // lives on /sources/[id] detail page. Description (free-form note)
-  // replaces it — optional drop-down for additional context the user wants
-  // to remember about this source.
+  // One-shot form: seed defaults once at init (no re-mount path changes them
+  // mid-form). untrack decouples the read from the reactive graph so Svelte 5's
+  // state_referenced_locally warning recognises the intent.
   let description = $state("");
   let handleUrl = $state("");
-  let isOwnedByMe = $state(initialIsOwnedByMe);
-  let autoImport = $state(initialAutoImport);
+  let isOwnedByMe = $state(untrack(() => data.defaultIsOwnedByMe));
+  let autoImport = $state(untrack(() => data.defaultAutoImport));
   let submitting = $state(false);
   let formError = $state<string | null>(null);
 
-  // Initial-backfill window. Defaults to '30d'. Safety feature — without
-  // a hard cap, registering an active source with auto-import ON could
-  // pull "everything" into the user's feed accidentally.
-  //
-  // The picker is rendered for ANY enabled, ingestable kind (driven by
-  // kindMatrix; disabled kinds without an adapter aren't pickable).
-  // Toggling auto_import off OR switching to a disabled kind collapses
-  // the picker and resets the value to '30d' so the form-state stays
-  // clean if the user toggles back on.
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   let backfillWindow = $state<BackfillWindow>("30d");
   let backfillCustomDate = $state<string | null>(null);
-  const selectedKindEnabled = $derived(
-    kindMatrix.find((k) => k.value === selectedKind)?.disabled !== true,
-  );
-  const showPicker = $derived(selectedKindEnabled && autoImport);
 
-  // No auto-link between is_owned_by_me and auto_import — auto-import is
-  // available for any channel, not just owned ones. Both checkboxes are
-  // fully independent. An earlier "soft-default reset" effect had a
-  // self-resetting bug (autoImport === initialAutoImport could become true
-  // again after user re-checked, causing the effect to re-fire and uncheck
-  // it).
-
-  // Picker collapse → reset value. Toggling auto_import off OR switching
-  // kind collapses the picker AND resets its value to '30d'.
-  $effect(() => {
-    if (!showPicker && backfillWindow !== "30d") {
-      backfillWindow = "30d";
-    }
-  });
-
-  // Reddit-specific hint visibility (Phase 03.1 plan 08). Shown when EITHER
-  // the user has picked a reddit_* chip OR the typed URL contains "reddit"
-  // (substring, case-insensitive). The latter catches the paste-flow case
-  // where the user pastes reddit.com/r/X before clicking any chip — the
-  // form-action's parseSourceUrl iterator will auto-detect the kind on
-  // submit; the hint signals "we recognize this and will do the right thing".
-  const showRedditHint = $derived.by(() => {
-    if (selectedKind === "reddit") return true;
-    return handleUrl.toLowerCase().includes("reddit");
-  });
-
-  // SOC-05: env-var hint when Instagram is not configured and the user is
-  // looking at it (disabled chip selected OR an IG URL typed). Mirror
-  // showRedditHint. Disabled-chip + this hint is the COMPLETE key UI (D-03).
-  const showInstagramHint = $derived.by(() => {
-    if (instagramConfigured) return false;
-    if (selectedKind === "instagram_account") return true;
-    return handleUrl.toLowerCase().includes("instagram");
-  });
-
-  // "Paste a link → we figure out the kind." Client-side hostname
-  // heuristic (the real parsers are server-only). Returns the synthetic
-  // UI kind the chip picker uses ("reddit", not reddit_account); null for
-  // unknown/garbage. The server's parseSourceUrl iterator remains the
-  // source of truth on submit — this is a UX convenience only.
+  // URL-first: the pasted link decides the kind. The chips below are an
+  // informational legend, NOT selectors. Client infer is a preview; the
+  // server's parseSourceUrl iterator stays the source of truth on submit.
   const inferredKind = $derived(inferSourceKindFromUrl(handleUrl));
   const inferredEntry = $derived(
     inferredKind ? (kindMatrix.find((k) => k.value === inferredKind) ?? null) : null,
   );
 
-  // Auto-select the matched chip when it's ENABLED (has a configured
-  // adapter). We never auto-select a disabled chip — those surface a hint
-  // instead (showRedditHint / showInstagramHint / showComingSoonHint). The
-  // effect fires on handleUrl change (via inferredEntry); a later paste can
-  // re-point the selection, which is the intended "don't fight the user,
-  // just follow the link" behaviour. untrack(selectedKind) keeps the effect
-  // from depending on its own write (no thrash loop).
-  $effect(() => {
-    const entry = inferredEntry;
-    if (entry && !entry.disabled && untrack(() => selectedKind) !== entry.value) {
-      selectedKind = entry.value;
-    }
+  // Legend = every kind EXCEPT "not-built" ones (Twitter / Discord hidden).
+  // "not-configured" kinds (Reddit / Instagram without operator keys) stay
+  // visible but greyed.
+  const visibleKinds = $derived(kindMatrix.filter((k) => k.disabledReason !== "not-built"));
+
+  // The kind we POST — purely URL-derived. null when the link is empty,
+  // unrecognized, or resolves to a kind that isn't usable right now.
+  const submitKind = $derived<AddSourceUiKind | null>(
+    inferredEntry && !inferredEntry.disabled ? inferredEntry.value : null,
+  );
+  const hasUrl = $derived(handleUrl.trim().length > 0);
+
+  // Detection feedback shown under the input (same states as the modal).
+  type DetectState =
+    | { state: "idle" }
+    | { state: "ok"; label: string }
+    | { state: "needs-config"; entry: KindMatrixEntry }
+    | { state: "not-built"; label: string }
+    | { state: "unknown" };
+  const detect = $derived.by((): DetectState => {
+    if (!hasUrl) return { state: "idle" };
+    if (!inferredEntry) return { state: "unknown" };
+    if (!inferredEntry.disabled) return { state: "ok", label: labelFor(inferredEntry.labelKey) };
+    if (inferredEntry.disabledReason === "not-configured")
+      return { state: "needs-config", entry: inferredEntry };
+    return { state: "not-built", label: labelFor(inferredEntry.labelKey) };
   });
 
-  // Generic "coming soon / out of scope" hint for a matched-but-disabled
-  // kind that doesn't already have a dedicated inline hint (Reddit and
-  // Instagram own their copy above). Surfaces the not-built status so a
-  // user who pastes a Twitter / Telegram / Discord URL understands why no
-  // chip lit up, instead of silently doing nothing.
-  const showComingSoonHint = $derived.by(() => {
-    const entry = inferredEntry;
-    if (!entry || !entry.disabled) return false;
-    if (entry.value === "reddit" || entry.value === "instagram_account") return false;
-    return true;
-  });
-  const comingSoonHintText = $derived.by(() => {
-    const entry = inferredEntry;
-    if (!entry) return "";
-    return m.sources_kind_disabled_tooltip({
-      kind: labelFor(entry.labelKey),
-      status: statusFor(entry.statusKey) ?? "",
-    });
+  // Reddit's listing-limit caveat is useful whenever a Reddit link is detected.
+  const showRedditCaveat = $derived(inferredKind === "reddit");
+
+  const showPicker = $derived(submitKind !== null && autoImport);
+  const pickerKind: AddSourceUiKind = $derived(submitKind ?? "youtube_channel");
+  // Kind-appropriate post-cap ceiling for the picker honesty note: Telegram
+  // caps deeper (free t.me/s scrape) than IG. Read from the loader, not hardcoded.
+  const pickerPostCap = $derived(
+    pickerKind === "telegram_channel" ? data.telegramBackfillMaxPosts : data.socialBackfillMaxPosts,
+  );
+
+  // Picker collapse → reset value (same effect as the modal).
+  $effect(() => {
+    if (!showPicker && backfillWindow !== "30d") {
+      backfillWindow = "30d";
+    }
   });
 
   function labelFor(key: KindLabelKey): string {
@@ -214,7 +125,7 @@
   // single chip handles both subreddits and user profiles — the backend
   // resolves which by URL shape on submit. aria-hidden because the text
   // label already carries the meaning.
-  function chipPrefixFor(value: SourceKind): string {
+  function chipPrefixFor(value: AddSourceUiKind): string {
     if (value === "reddit") return "🧑🏛";
     return "";
   }
@@ -235,7 +146,7 @@
     }
   }
 
-  function disabledTooltip(entry: KindEntry): string {
+  function disabledTooltip(entry: KindMatrixEntry): string {
     const kindLabel = labelFor(entry.labelKey);
     // not-configured: adapter IS built, operator hasn't set the env. The
     // generic "schema ready, adapter isn't" tail would mislead a self-host
@@ -255,6 +166,10 @@
       formError = m.ingest_error_malformed_url();
       return;
     }
+    if (submitKind === null) {
+      formError = m.add_source_link_unrecognized();
+      return;
+    }
     submitting = true;
     formError = null;
     try {
@@ -262,7 +177,7 @@
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          kind: selectedKind,
+          kind: submitKind,
           handleUrl: handleUrl.trim(),
           // Description stored in metadata.description (no schema change
           // — jsonb column accepts arbitrary keys).
@@ -295,7 +210,7 @@
         // ignore body parse failures
       }
       if (res.status === 422 && body.error === "kind_not_yet_functional") {
-        const kindLabel = body.metadata?.kind ?? selectedKind;
+        const kindLabel = body.metadata?.kind ?? submitKind ?? "";
         const status = body.metadata?.status ?? "";
         formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, status });
         return;
@@ -346,7 +261,7 @@
         // channel / handle / video URL" from createSource. For Reddit
         // we surface `invalid_reddit_url` (above) before falling through.
         formError =
-          selectedKind === "reddit"
+          inferredKind === "reddit"
             ? m.sources_error_not_a_reddit_url()
             : m.sources_error_not_a_youtube_url();
         return;
@@ -370,39 +285,7 @@
   <h1>{m.sources_cta_new_source()}</h1>
 
   <form onsubmit={submit} class="form">
-    <fieldset class="kinds">
-      <legend>Kind</legend>
-      <div class="kind-chips">
-        {#each kindMatrix as entry (entry.value)}
-          {@const prefix = chipPrefixFor(entry.value)}
-          {#if entry.disabled}
-            <button
-              type="button"
-              class="chip disabled"
-              disabled
-              aria-disabled="true"
-              tabindex="-1"
-              title={disabledTooltip(entry)}
-            >
-              {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
-              {labelFor(entry.labelKey)}
-              <small class="status">{statusFor(entry.statusKey)}</small>
-            </button>
-          {:else}
-            <button
-              type="button"
-              class="chip"
-              class:active={selectedKind === entry.value}
-              aria-pressed={selectedKind === entry.value}
-              onclick={() => (selectedKind = entry.value)}
-            >
-              {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
-              {labelFor(entry.labelKey)}
-            </button>
-          {/if}
-        {/each}
-      </div>
-    </fieldset>
+    <p class="url-first-hint">{m.add_source_url_first_hint()}</p>
 
     <label class="field">
       <span class="label">Handle URL *</span>
@@ -411,25 +294,51 @@
         type="url"
         bind:value={handleUrl}
         required
-        placeholder="https://www.youtube.com/@handle"
+        placeholder="https://t.me/channel · youtube.com/@handle · reddit.com/r/sub"
       />
     </label>
 
-    {#if showRedditHint}
+    {#if detect.state === "ok"}
+      <p class="detect-ok">✓ {m.add_source_detected({ kind: detect.label })}</p>
+    {:else if detect.state === "needs-config"}
+      {#if detect.entry.value === "instagram_account"}
+        <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
+      {:else if detect.entry.value === "reddit"}
+        <p class="hint">{m.sources_new_reddit_disabled()}</p>
+      {:else}
+        <p class="hint">{disabledTooltip(detect.entry)}</p>
+      {/if}
+    {:else if detect.state === "not-built"}
+      <p class="hint">{m.add_source_not_supported_yet({ kind: detect.label })}</p>
+    {:else if detect.state === "unknown"}
+      <p class="hint">{m.add_source_link_unrecognized()}</p>
+    {/if}
+
+    {#if showRedditCaveat}
       <p class="hint">{m.sources_new_reddit_input_hint()}</p>
       <p class="hint hint-warning">⚠ {m.sources_new_reddit_listing_limit()}</p>
-      {#if !redditOperatorConfigured}
-        <p class="hint hint-warning">{m.sources_new_reddit_disabled()}</p>
-      {/if}
     {/if}
 
-    {#if showInstagramHint}
-      <p class="hint">{m.sources_new_instagram_disabled_hint()}</p>
-    {/if}
-
-    {#if showComingSoonHint}
-      <p class="hint">{comingSoonHintText}</p>
-    {/if}
+    <div class="legend">
+      <span class="legend-label">{m.add_source_supported_legend()}</span>
+      <ul class="kind-legend">
+        {#each visibleKinds as entry (entry.value)}
+          {@const prefix = chipPrefixFor(entry.value)}
+          {@const isMatch = inferredKind === entry.value}
+          <li
+            class="chip"
+            class:active={isMatch && !entry.disabled}
+            class:muted={entry.disabled}
+            class:matched={isMatch}
+            title={entry.disabled ? disabledTooltip(entry) : undefined}
+          >
+            {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
+            <span class="chip-label">{labelFor(entry.labelKey)}</span>
+            {#if entry.disabled}<small class="status">{statusFor(entry.statusKey)}</small>{/if}
+          </li>
+        {/each}
+      </ul>
+    </div>
 
     <label class="toggle">
       <input type="checkbox" bind:checked={isOwnedByMe} />
@@ -459,8 +368,8 @@
       <BackfillPicker
         bind:value={backfillWindow}
         bind:customDate={backfillCustomDate}
-        kind={selectedKind}
-        postCap={data.socialBackfillMaxPosts}
+        kind={pickerKind}
+        postCap={pickerPostCap}
       />
     {/if}
 
@@ -470,7 +379,7 @@
 
     <div class="actions">
       <a class="cancel" href="/sources">{m.common_cancel()}</a>
-      <button type="submit" class="submit" disabled={submitting || handleUrl.trim().length === 0}>
+      <button type="submit" class="submit" disabled={submitting || submitKind === null}>
         {m.sources_cta_save_source()}
       </button>
     </div>
@@ -525,17 +434,34 @@
     border: 1px solid var(--border);
     border-radius: var(--r-md);
   }
-  .kinds {
-    border: none;
-    padding: 0;
+  /* URL-first model (mirrors AddSourceModal). The pasted link decides the
+     kind; the chips below are an INFORMATIONAL legend, not selectors — no
+     pointer / hover affordance, no per-chip click handler. */
+  .url-first-hint {
     margin: 0;
+    color: var(--text-2);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
   }
-  .kinds legend {
+  .detect-ok {
+    margin: 0;
+    color: var(--accent);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+  }
+  .legend {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-1);
+  }
+  .legend-label {
     font-size: var(--t-13);
     color: var(--text-2);
-    margin-bottom: var(--s-1);
   }
-  .kind-chips {
+  .kind-legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-wrap: wrap;
     gap: var(--s-1);
@@ -550,39 +476,44 @@
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
-    cursor: pointer;
     font-family: var(--f-sans);
     font-size: var(--t-13);
     transition:
       background var(--m-fast) var(--m-ease),
       border-color var(--m-fast) var(--m-ease);
   }
-  .chip:hover:not(:disabled) {
-    background: var(--accent-soft);
-    border-color: var(--accent-strong);
-  }
+  /* The matched-from-URL kind, when usable. */
   .chip.active {
     background: var(--accent-soft);
     color: var(--accent);
     border-color: var(--accent-strong);
     font-weight: var(--w-sb);
   }
-  .chip.disabled {
+  /* not-configured kinds (Reddit / Instagram without operator keys): visible
+     but greyed, so the user sees they exist but need setup. */
+  .chip.muted {
     opacity: 0.55;
-    cursor: not-allowed;
+  }
+  /* a greyed chip the URL points at — accent the border so it reads
+     "this is what you pasted, but it isn't configured yet". */
+  .chip.muted.matched {
+    opacity: 0.85;
+    border-color: var(--accent-strong);
   }
   .chip-prefix {
     font-size: 1em;
     line-height: 1;
     margin-right: 4px;
   }
+  .chip-label {
+    line-height: 1;
+  }
   .status {
     font-size: var(--t-12);
     color: var(--text-3);
   }
-  /* Reddit-specific hint under the URL input — neutral by default,
-   * warning-coloured when REDDIT_USER_AGENT is empty (D-RDT-AUTH-EMPTY).
-   * Sits between the URL input and the owner/auto-import toggles. */
+  /* Detection / caveat hints under the URL input — neutral by default,
+   * warning-coloured for the Reddit listing-limit caveat. */
   .hint {
     margin: 0;
     color: var(--text-3);

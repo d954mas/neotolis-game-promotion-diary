@@ -28,7 +28,7 @@ import { instagramParseUrl, instagramParseSourceUrl } from "./url.js";
 import { instagramEnrichFeedDtos } from "./feed-enrichment.js";
 import { instagramFetchEventMetricSeries } from "./metric-series.js";
 import { instagramFetchPollStateMap } from "./poll-state.js";
-import { writeSnapshot } from "./snapshots.js";
+import { writeSnapshot, upsertInstagramAccount } from "./snapshots.js";
 import { logger } from "$lib/server/logger.js";
 import type {
   AdapterObservability,
@@ -41,7 +41,7 @@ import type {
   RawEvent,
 } from "$lib/sources/adapter.js";
 import type { EventDto } from "$lib/server/dto.js";
-import type { NormalizedPost, ProviderOrigin } from "$lib/sources/social-provider.js";
+import type { FeedOwner, NormalizedPost, ProviderOrigin } from "$lib/sources/social-provider.js";
 
 /** Which feed this page reads. The walker drives both feeds (posts then reels),
  *  each its own cursor stream + its own end-of-feed sub-state. */
@@ -63,6 +63,10 @@ export interface InstagramPollResult {
    *  the divergence died in the provider seam). null at end of feed. */
   nextCursor: string | null;
   endOfFeed: boolean;
+  /** The FREE feed owner object (the account whose feed this page is) — the
+   *  walker UPSERTs instagram_accounts from it with NO extra credit. null when
+   *  the response omitted the owner (e.g. the reels feed). */
+  owner: FeedOwner | null;
 }
 
 /** D-09: the event title is the caption's FIRST line. Falls back to the IG
@@ -157,7 +161,7 @@ export const instagramAccountAdapterCore: InstagramAccountAdapterCore = {
         { sourceId: source.id, userId: source.userId },
         "instagram.pollContent: provider not configured; degrading to empty",
       );
-      return { events: [], unitsUsed: 0, nextCursor: null, endOfFeed: true };
+      return { events: [], unitsUsed: 0, nextCursor: null, endOfFeed: true, owner: null };
     }
 
     const handle = (source.metadata as { handle?: string })?.handle;
@@ -166,7 +170,7 @@ export const instagramAccountAdapterCore: InstagramAccountAdapterCore = {
         { sourceId: source.id, userId: source.userId },
         "instagram.pollContent: source.metadata.handle missing; cannot poll",
       );
-      return { events: [], unitsUsed: 0, nextCursor: null, endOfFeed: true };
+      return { events: [], unitsUsed: 0, nextCursor: null, endOfFeed: true, owner: null };
     }
 
     const feed: InstagramFeed = ctx?.feed ?? "posts";
@@ -208,6 +212,7 @@ export const instagramAccountAdapterCore: InstagramAccountAdapterCore = {
       unitsUsed: page.creditsUsed,
       nextCursor: page.nextCursor,
       endOfFeed: page.endOfFeed,
+      owner: page.owner ?? null,
     };
   },
 
@@ -216,7 +221,28 @@ export const instagramAccountAdapterCore: InstagramAccountAdapterCore = {
   ): Promise<{ accountId: string; displayName: string | null } | null> {
     const provider = getSocialProvider("instagram");
     if (provider === null) return null;
-    return provider.resolveAccount("instagram", handle);
+    const resolved = await provider.resolveAccount("instagram", handle);
+    if (resolved === null) return null;
+    // Populate the account subject entity from the SAME profile response we just
+    // paid for (no extra credit) — full_name / avatar / follower_count /
+    // username. The COALESCE-preserving UPSERT means a later cheap feed refresh
+    // never blanks these richer fields. Best-effort: a failed entity write must
+    // not block source creation (the caller only needs accountId/displayName).
+    try {
+      await upsertInstagramAccount({
+        accountId: resolved.accountId,
+        username: resolved.username,
+        fullName: resolved.fullName,
+        avatarUrl: resolved.avatarUrl,
+        followerCount: resolved.followerCount,
+      });
+    } catch (err) {
+      logger.warn(
+        { handle, accountId: resolved.accountId, err: String((err as Error)?.message ?? err) },
+        "instagram.resolveHandleToAccountId: instagram_accounts UPSERT failed (non-fatal)",
+      );
+    }
+    return resolved;
   },
 
   parseUrl(url: string): ParsedUrl | null {

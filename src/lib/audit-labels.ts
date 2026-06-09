@@ -87,6 +87,9 @@ const LABELS: Record<AuditAction, () => string> = {
   // Phase 8 — Social provider cost guardrails (operator-side, admin-only).
   "social.provider_throttled": () => m.audit_action_social_provider_throttled(),
   "social.budget_exhausted": () => m.audit_action_social_budget_exhausted(),
+  // Phase 9 Telegram — worker-emitted free-lane drain verb (mirrors
+  // reddit.queue_drained). PG enum extension in drizzle/0058_sad_wonder_man.sql.
+  "telegram.queue_drained": () => m.audit_action_telegram_queue_drained(),
 };
 
 /**

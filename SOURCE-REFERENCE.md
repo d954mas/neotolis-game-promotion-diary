@@ -678,3 +678,35 @@ Derived helper sets — `POLLABLE_EVENT_KINDS`, `CHARTABLE_EVENT_KINDS`, `MANUAL
 **Deliberate exclusion** (still NOT config-driven, by design): the kind dropdown on the edit form (`events/[id]/edit`) carries its own allowlist — editing an existing event is a different surface from creating one, so it stays separate for now.
 
 **Threading a resolved display name at create time.** `CanonicalizeResult` (adapter.ts) carries an optional `displayName?: string | null`. When an adapter already fetched the account's display name while resolving the handle (Instagram `resolveAccount` returns full_name/username), it returns it here; `createSource` persists it on `data_sources.display_name` ONLY when the caller didn't supply an explicit `displayName` (a user-typed name always wins). This is why a newly-added Instagram source shows its real account name instead of the bare account id. YouTube omits it (the channel title is resolved later on the worker).
+
+## 13. Subject entity + full historical storage (foundation for channel-level analytics)
+
+*Pattern established by YouTube + Reddit; required for any analytics-capable adapter. Telegram added `telegram_channels` in Phase 9 as the FOUNDATION for future per-channel pages + percentile analytics (the percentiles / baselines themselves are NOT built yet — designed for, not implemented).*
+
+An auto-import adapter that wants channel-level / account-level analytics later MUST capture three things on the write path now. Designing the subject entity up front is what makes percentile baselines cheap to add later — retrofitting an entity onto an adapter that only ever stored per-post rows means backfilling the subject id across the entire post history.
+
+**(a) Subject entity table — source of truth, NOT a denorm.** A public-data table (no `user_id`) keyed on the platform's INTRINSIC, rename-proof id, holding the subject's OWN upstream metadata:
+
+| Adapter | Entity table | PK (rename-proof id) | Holds |
+| ------- | ------------ | -------------------- | ----- |
+| YouTube | `youtube_channels` | `channel_id` (UC…) | channel title, uploads playlist id, handle aliases |
+| Reddit | `reddit_subreddits_cache` | `name` (lowercase slug) | subscribers, description, submission metadata |
+| Instagram | `instagram_accounts` | `account_id` (stable IG user id, = `instagram_posts.account_id`) | full name, @handle username, avatar, follower count, handle aliases |
+| Telegram | `telegram_channels` | `channel_key` (numeric id from each post's base64 `data-view` payload `{"c":…}`) | title, @username slug, avatar, subscriber count, description, handle aliases |
+
+The entity row's `title` / `name` is the upstream-scraped value — OUR truth for the subject's own metadata (see the "this IS our truth" comment in `youtube_channels.ts`). It is **not** a copy of `data_sources.display_name`, which is the user-facing label a tenant may rename freely. The two coexist by design and never alias each other (AGENTS.md no-denorm rule forbids caching `data_sources.display_name` onto the entity, and equally forbids caching the entity title onto a `data_sources` / per-post row). The renameable @username / handle still lives on `data_sources` for feed enrichment; the entity carries a `handle_aliases` history so a future channel page can resolve any historical handle to the rename-proof id. Populate via UPSERT on each poll, COALESCE-preserving prior good values on a partial / failed parse so a transient miss never blanks working metadata (same rule as a per-post thumbnail, IG #69 P1-A).
+
+**(b) Full per-post + per-post-snapshot historical storage.** Public-data, retained FOREVER (no GC, even when the last referencing event / source is deleted — the row IS the historical record). Each per-post row carries the rename-proof subject id as a column (`youtube_videos.channel_id`, `reddit_posts.subreddit`, `telegram_posts.channel_key`) so per-subject analytics can `GROUP BY` it. The snapshot table (`*_video_snapshots` / `*_post_snapshots`) is the immutable time-series the baselines aggregate over.
+
+**(c) Per-subject baselines (future / optional).** A separate public-data aggregate table keyed by the subject key, computed by a nightly cron, surfaced in `/feed` enrichment as percentile context ("your post in r/X underperforms median — 16% of typical score"). Build only when the read-path needs it. The canonical pattern is `reddit_subreddit_baselines`: median / p75 over a rolling window via `PERCENTILE_CONT`, a `sample_size >= N` gate so a thin sample never publishes misleading numbers, JOIN `*_posts` against `*_post_snapshots` at the ~24h-after-publish mark. **No Telegram baselines table / cron / channel page exists yet** — `telegram_channels` is the entity foundation those will read. Note: the Telegram backfill depth cap (`TELEGRAM_BACKFILL_MAX_POSTS`, currently 100) will be revisited when percentiles land, since a meaningful per-channel baseline may want a deeper historical sample than the steady-state feed needs.
+
+**Current adapter coverage:**
+
+| Adapter | (a) entity | (b) post + snapshot history | (c) baselines |
+| ------- | ---------- | --------------------------- | ------------- |
+| YouTube | ✅ `youtube_channels` | ✅ | — (not built; analytics live on the per-game chart) |
+| Reddit | ✅ `reddit_subreddits_cache` | ✅ | ✅ `reddit_subreddit_baselines` (the canonical reference) |
+| Instagram | ✅ `instagram_accounts` | ✅ `instagram_posts` + snapshots | — (designed-for; not built) |
+| Telegram | ✅ `telegram_channels` (Phase 9) | ✅ `telegram_posts` + snapshots | — (designed-for; not built) |
+
+`instagram_accounts` is populated from data the adapter ALREADY pays for — the create-time profile resolve (`resolveHandleToAccountId`, the richer full_name / avatar / follower_count) and the FREE feed owner object the walker page carries (account_id + @handle + avatar), COALESCE-preserving the richer profile fields. ZERO additional provider credits: the entity refreshes from data in hand, so it adds the subject-entity anchor without touching the IG cost guardrails or the backfill cap.

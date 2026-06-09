@@ -1,8 +1,8 @@
 // SourceRegistry — Map<SourceKind, SourceAdapter> populated by
 // explicit per-source barrel imports.
 //
-// YouTube and Reddit are wired today; future per-platform adapters add
-// entries here.
+// YouTube, Reddit, Instagram, and Telegram are wired today; future
+// per-platform adapters add entries here.
 //
 // reddit_account and reddit_subreddit BOTH map to the SAME redditAdapter
 // instance — the adapter dispatches internally on source.metadata
@@ -14,17 +14,20 @@ import type { SourceAdapter, SourceKind } from "./adapter.js";
 import { youtubeAdapter } from "./youtube/server/index.js";
 import { redditAdapter } from "./reddit/server/index.js";
 import { instagramAdapter } from "./instagram/server/index.js";
+import { telegramAdapter } from "./telegram/server/index.js";
 
 // Registration ORDER is load-bearing for the first-match-wins parseAnyUrl
 // iterator. YouTube first → wins on youtube.com / youtu.be host claims;
 // Reddit after → wins on reddit.com / redd.it host claims; Instagram after →
-// wins on instagram.com host claims. There's no host overlap between any of
-// the three adapters today, so order between them is symbolic but stable.
+// wins on instagram.com host claims; Telegram after → wins on t.me host
+// claims. There's no host overlap between any of the four adapters today, so
+// order between them is symbolic but stable.
 const registry = new Map<SourceKind, SourceAdapter>([
   ["youtube_channel", youtubeAdapter],
   ["reddit_account", redditAdapter],
   ["reddit_subreddit", redditAdapter],
   ["instagram_account", instagramAdapter],
+  ["telegram_channel", telegramAdapter],
 ]);
 
 export function getAdapter(kind: SourceKind): SourceAdapter {
