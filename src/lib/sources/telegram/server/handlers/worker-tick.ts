@@ -198,6 +198,12 @@ async function handleWarmPostFetch(
     }
     await writeTelegramSnapshot({
       postId,
+      // The ?embed=1 page also carries the post block's data-view → channel_key
+      // is decoded here too, keeping the rename-proof group key fresh for
+      // off-listing (warm-lane) posts. The embed page has no channel header, so
+      // there is no telegram_channels UPSERT on this path (the 24h listing poll
+      // owns the channel-entity refresh).
+      channelKey: parsed.channelKey,
       textSnippet: parsed.textSnippet,
       mediaKind: parsed.mediaKind,
       thumbnailUrl: parsed.thumbnailUrl,

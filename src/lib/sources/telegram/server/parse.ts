@@ -28,6 +28,12 @@ export type { TelegramReaction } from "./schema/posts.js";
 
 export interface ParsedTelegramPost {
   externalId: string; // "<channel>/<messageId>" — full data-post value (RESEARCH Q3)
+  // Intrinsic numeric channel id from the post block's base64 `data-view`
+  // payload (`{"c":<channelId>,...}`), as a STRING (to match
+  // telegram_posts.channel_key). Rename-proof — the group key for future
+  // per-channel analytics. null only when the block carries no decodable
+  // data-view (defensive; every live t.me/s block carries one).
+  channelKey: string | null;
   publishedAt: Date | null; // <time datetime>
   viewCount: number | null; // normalized; null when the views span is absent
   textSnippet: string; // first line of .tgme_widget_message_text, truncated
@@ -45,9 +51,34 @@ export interface ParsedTelegramPost {
 
 export interface ParsedTelegramListing {
   channelTitle: string | null; // .tgme_channel_info_header_title (display name)
+  // The channel's OWN scraped metadata from the listing header — the
+  // source-of-truth for the telegram_channels subject entity (UPSERTed by the
+  // listing-poll + backfill handlers). null on a not_found listing (no header to
+  // parse) or when the header carries no decodable channel id. `channelTitle`
+  // above is retained as the back-compat shortcut for callers that only need the
+  // display name (materializeTelegramEvents); the full entity lives here.
+  channelHeader: ParsedTelegramChannelHeader | null;
   status: "ok" | "not_found"; // content-based, HTTP-200-safe
   posts: ParsedTelegramPost[];
   nextBeforeCursor: string | null; // ?before cursor; null = end-of-history
+}
+
+/** The channel's OWN scraped upstream metadata, parsed from the t.me/s listing
+ *  header (the source-of-truth for telegram_channels). Every field is nullable —
+ *  a header may be absent (single-post embed page, or a malformed/partial fetch)
+ *  or carry only some fields. The write-path UPSERTs this and COALESCE-preserves
+ *  prior good values on a partial parse, so a transient miss never blanks a
+ *  working channel row. */
+export interface ParsedTelegramChannelHeader {
+  // Numeric channel id (string) — from a post block's data-view payload when the
+  // listing carries posts (the header markup itself does not expose the id), the
+  // rename-proof PK of telegram_channels. null when no post block decodes a `c`.
+  channelKey: string | null;
+  slug: string | null; // current @username (without the leading '@')
+  title: string | null;
+  avatarUrl: string | null;
+  description: string | null;
+  subscriberCount: number | null; // normalized (K/M-expanded), null when absent
 }
 
 export function parseTelegramListing(html: string): ParsedTelegramListing {
@@ -57,13 +88,21 @@ export function parseTelegramListing(html: string): ParsedTelegramListing {
 
   // not_found: HTTP 200 but no widget markers at all (RESEARCH §Availability).
   if (header === null && blocks.length === 0) {
-    return { channelTitle: null, status: "not_found", posts: [], nextBeforeCursor: null };
+    return {
+      channelTitle: null,
+      channelHeader: null,
+      status: "not_found",
+      posts: [],
+      nextBeforeCursor: null,
+    };
   }
 
   const posts = blocks.map(parseBlock).filter((p): p is ParsedTelegramPost => p !== null);
   const nextBeforeCursor = extractBeforeCursor(root);
+  const channelHeader = parseChannelHeaderFromRoot(root, posts);
   return {
     channelTitle: header?.text?.trim() ?? null,
+    channelHeader,
     status: "ok",
     posts,
     nextBeforeCursor,
@@ -95,6 +134,8 @@ function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
   const externalId = el.getAttribute("data-post"); // "durov/503" — keep FULL (RESEARCH Q3)
   if (!externalId) return null;
 
+  const channelKey = decodeChannelKey(el.getAttribute("data-view"));
+
   const timeEl = el.querySelector("a.tgme_widget_message_date time[datetime]");
   const datetime = timeEl?.getAttribute("datetime");
   const publishedAt = datetime ? new Date(datetime) : null;
@@ -120,6 +161,7 @@ function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
 
   return {
     externalId,
+    channelKey,
     publishedAt,
     viewCount,
     textSnippet,
@@ -128,6 +170,105 @@ function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
     reactionsTotal,
     reactionsTop,
   };
+}
+
+/** Decode a post block's base64 `data-view` attribute to the intrinsic numeric
+ *  channel id (`c`), returned as a STRING (to match telegram_posts.channel_key).
+ *  The payload shape is `{"c":<channelId>,"p":<messageId>,"t":<ts>,"h":"…"}`;
+ *  `c` is a (often negative) integer that is stable across @username renames —
+ *  the rename-proof group key. Returns null on a missing/undecodable attr or a
+ *  payload without a numeric `c` (defensive — every live t.me/s block carries
+ *  one). */
+function decodeChannelKey(dataView: string | undefined): string | null {
+  if (!dataView) return null;
+  try {
+    const json = Buffer.from(dataView, "base64").toString("utf8");
+    const parsed: unknown = JSON.parse(json);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "c" in parsed &&
+      typeof (parsed as { c: unknown }).c === "number"
+    ) {
+      return String((parsed as { c: number }).c);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Parse the channel's own metadata from the t.me/s listing header — the
+ *  source-of-truth fields for telegram_channels (title / @username slug / avatar
+ *  / description / subscriber count). The numeric channelKey is NOT in the
+ *  header markup, so it is lifted from the first post block that decodes a
+ *  data-view `c` (the same id every block carries). Returns all-null fields when
+ *  the header is absent (single-post embed, or a partial/malformed fetch) — the
+ *  write-path COALESCE-preserves prior good values on a partial parse. */
+export function parseTelegramChannelHeader(html: string): ParsedTelegramChannelHeader {
+  return parseChannelHeaderFromRoot(parse(html), null);
+}
+
+/** Shared header extraction over an already-parsed root. `posts` (when known —
+ *  parseTelegramListing passes its parsed posts) supplies the channelKey from a
+ *  post block's data-view without re-querying; pass null to fall back to a fresh
+ *  DOM scan of the data-view blocks (the stand-alone parseTelegramChannelHeader
+ *  path). */
+function parseChannelHeaderFromRoot(
+  root: HTMLElement,
+  posts: ParsedTelegramPost[] | null,
+): ParsedTelegramChannelHeader {
+  const titleEl = root.querySelector(".tgme_channel_info_header_title");
+  const title = titleEl?.text?.trim() || null;
+
+  // @username lives in the header's username anchor (e.g. "@durov"); strip the
+  // leading '@' for the stored slug.
+  const usernameEl = root.querySelector(".tgme_channel_info_header_username a");
+  const usernameRaw = usernameEl?.text?.trim() ?? "";
+  const slug = usernameRaw.replace(/^@/, "") || null;
+
+  // og:image is the channel avatar on the listing page (a stable hotlink).
+  const ogImage = root.querySelector('meta[property="og:image"]')?.getAttribute("content")?.trim();
+  const avatarUrl = ogImage || null;
+
+  const descEl = root.querySelector(".tgme_channel_info_description");
+  const description = descEl?.text?.trim() || null;
+
+  const subscriberCount = extractSubscriberCount(root);
+
+  // channelKey: the header markup has no id, so lift it from a post block's
+  // data-view. Prefer the already-parsed posts (no re-query); else scan the DOM.
+  let channelKey: string | null = null;
+  if (posts !== null) {
+    channelKey = posts.find((p) => p.channelKey !== null)?.channelKey ?? null;
+  } else {
+    for (const block of root.querySelectorAll("div.tgme_widget_message[data-post]")) {
+      const key = decodeChannelKey(block.getAttribute("data-view"));
+      if (key !== null) {
+        channelKey = key;
+        break;
+      }
+    }
+  }
+
+  return { channelKey, slug, title, avatarUrl, description, subscriberCount };
+}
+
+/** Pull the "N subscribers" counter from the header's counters block. The
+ *  markup is a list of `.tgme_channel_info_counter` entries (subscribers /
+ *  photos / videos / links) — pick the one whose `.counter_type` is
+ *  "subscribers" and normalize its `.counter_value` (same K/M abbreviation as
+ *  view counts → reuse normalizeViewCount). null when no subscribers counter is
+ *  present (a private/empty channel header). */
+function extractSubscriberCount(root: HTMLElement): number | null {
+  for (const counter of root.querySelectorAll(".tgme_channel_info_counter")) {
+    const type = counter.querySelector(".counter_type")?.text?.trim().toLowerCase();
+    if (type === "subscribers") {
+      const value = counter.querySelector(".counter_value")?.text?.trim();
+      return value ? normalizeViewCount(value) : null;
+    }
+  }
+  return null;
 }
 
 const TOP_REACTIONS_CAP = 5;

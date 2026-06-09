@@ -16,14 +16,15 @@
 // listing path (we have no post ids on a not_found listing; per-post not_found
 // is the warm/single-post lane's job when a KNOWN post 404s).
 //
-// channelKey on the snapshot is left null here — the t.me/s listing markup does
-// not carry the intrinsic numeric channel id reliably across post blocks; the
-// post_id ("<channel>/<messageId>") already encodes the slug. The post_id is the
-// load-bearing key.
+// Each post's intrinsic numeric channel id is decoded from its data-view base64
+// payload (parse.ts) and threaded onto the snapshot as channel_key — the
+// rename-proof group key future per-channel analytics partition by. The channel
+// subject entity (telegram_channels) is UPSERTed once per poll from the listing
+// header (title / @username slug / avatar / subscriber count / description).
 
 import { logger } from "$lib/server/logger.js";
 import { telegramChannelAdapterCore } from "../adapter.js";
-import { writeTelegramSnapshot } from "../snapshots.js";
+import { writeTelegramSnapshot, upsertTelegramChannel } from "../snapshots.js";
 import { materializeTelegramEvents } from "../events.js";
 
 const TELEGRAM_BASE = "https://t.me";
@@ -53,10 +54,18 @@ export async function handleTelegramListingPoll(args: {
     return { status: "not_found", written: 0 };
   }
 
+  // UPSERT the channel subject entity from the listing header (source-of-truth
+  // for the channel's own scraped metadata). No-ops when the header carries no
+  // channel id. COALESCE-preserves prior good metadata on a partial parse.
+  if (listing.channelHeader !== null) {
+    await upsertTelegramChannel(listing.channelHeader);
+  }
+
   let written = 0;
   for (const post of listing.posts) {
     await writeTelegramSnapshot({
       postId: post.externalId,
+      channelKey: post.channelKey,
       textSnippet: post.textSnippet,
       mediaKind: post.mediaKind,
       thumbnailUrl: post.thumbnailUrl,

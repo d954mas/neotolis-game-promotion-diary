@@ -36,8 +36,13 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { telegramPosts, telegramPostSnapshots } from "$lib/server/db/schema/index.js";
+import {
+  telegramChannels,
+  telegramPosts,
+  telegramPostSnapshots,
+} from "$lib/server/db/schema/index.js";
 import type { TelegramReaction } from "./schema/posts.js";
+import type { ParsedTelegramChannelHeader } from "./parse.js";
 
 export type TelegramSnapshotStatus = "ok" | "not_found" | "private" | "rate_limited";
 
@@ -160,4 +165,61 @@ export async function writeTelegramSnapshot(args: WriteTelegramSnapshotArgs): Pr
       })
       .onConflictDoNothing();
   }
+}
+
+/** UPSERT the channel subject entity (telegram_channels) from a parsed listing
+ *  header — the source-of-truth for the channel's OWN scraped metadata. Called
+ *  by the listing-poll + backfill handlers on every OK poll.
+ *
+ *  - INSERT sets channel_key (PK) + first_seen_at + the parsed metadata, and
+ *    seeds handle_aliases with the parsed slug.
+ *  - UPDATE refreshes title/avatar/description/subscriber_count/slug +
+ *    last_refreshed_at, and APPENDS the slug to handle_aliases when it changed
+ *    (a rename — array_append only when the new slug is non-null and not already
+ *    present, so the list never accumulates duplicates).
+ *  - COALESCE-preserve on a partial parse: a null parsed field keeps the prior
+ *    good value instead of blanking it (same rule as telegram_posts.thumbnail_url
+ *    — a transient miss must not erase working metadata, IG #69 P1-A).
+ *
+ *  No-ops when the header carries no channelKey (the PK) — a single-post embed
+ *  page or a not_found listing has nothing to anchor a channel row on.
+ *  Idempotent + public-data (no userId scope; allowlisted). */
+export async function upsertTelegramChannel(header: ParsedTelegramChannelHeader): Promise<void> {
+  if (header.channelKey === null) return;
+
+  const now = new Date();
+  const slug = header.slug ?? null;
+  await db
+    .insert(telegramChannels)
+    .values({
+      channelKey: header.channelKey,
+      slug,
+      title: header.title ?? null,
+      avatarUrl: header.avatarUrl ?? null,
+      description: header.description ?? null,
+      subscriberCount: header.subscriberCount ?? null,
+      handleAliases: slug === null ? [] : [slug],
+      firstSeenAt: now,
+      lastRefreshedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: telegramChannels.channelKey,
+      set: {
+        slug: sql`COALESCE(${slug}, ${telegramChannels.slug})`,
+        title: sql`COALESCE(${header.title ?? null}, ${telegramChannels.title})`,
+        avatarUrl: sql`COALESCE(${header.avatarUrl ?? null}, ${telegramChannels.avatarUrl})`,
+        description: sql`COALESCE(${header.description ?? null}, ${telegramChannels.description})`,
+        subscriberCount: sql`COALESCE(${header.subscriberCount ?? null}, ${telegramChannels.subscriberCount})`,
+        // Append the slug on a rename: only when the new slug is non-null AND not
+        // already in the array (array_append would otherwise grow duplicates on
+        // every poll). NULL slug → no change.
+        handleAliases: sql`CASE
+          WHEN ${slug}::text IS NOT NULL AND NOT (${slug}::text = ANY(${telegramChannels.handleAliases}))
+          THEN array_append(${telegramChannels.handleAliases}, ${slug}::text)
+          ELSE ${telegramChannels.handleAliases}
+        END`,
+        lastRefreshedAt: now,
+        updatedAt: now,
+      },
+    });
 }

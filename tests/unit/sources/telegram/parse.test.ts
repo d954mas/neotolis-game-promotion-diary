@@ -25,6 +25,7 @@ import {
   normalizeViewCount,
   parseTelegramListing,
   parseTelegramPost,
+  parseTelegramChannelHeader,
 } from "$lib/sources/telegram/server/parse.js";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../fixtures/telegram");
@@ -94,6 +95,17 @@ describe("parseTelegramListing — healthy listing", () => {
     const withThumb = listing.posts.find((p) => p.thumbnailUrl !== null);
     expect(withThumb).toBeDefined();
     expect(withThumb!.thumbnailUrl).toMatch(/^https?:\/\//);
+  });
+
+  it("decodes the per-post channelKey from the data-view base64 payload (`c`)", () => {
+    // Every block's data-view base64 decodes to {"c":-1006503122,...}; `c` is the
+    // intrinsic numeric channel id (negative on this real durov fixture), stored
+    // as a STRING to match telegram_posts.channel_key. It is identical across all
+    // blocks of one listing (same channel).
+    expect(listing.posts[0]!.channelKey).toBe("-1006503122");
+    for (const post of listing.posts) {
+      expect(post.channelKey).toBe("-1006503122");
+    }
   });
 });
 
@@ -179,6 +191,13 @@ describe("parseTelegramPost — single-post ?embed=1 page (Pitfall 2: embed carr
     expect(parseTelegramPost("<html><body>nothing</body></html>")).toBeNull();
   });
 
+  it("decodes channelKey from the embed page's data-view (the embed has no header)", () => {
+    // The ?embed=1 page carries no channel header, but the single post block
+    // still carries the data-view → channelKey is decoded for the warm lane.
+    const post = parseTelegramPost(fixture("single-post-embed.html"));
+    expect(post!.channelKey).toBe("-1006503122");
+  });
+
   it("embed path carries NO reactions (the ?embed=1 page omits the reactions block)", () => {
     const post = parseTelegramPost(fixture("single-post-embed.html"));
     // The embed widget does not render .tgme_widget_message_reactions →
@@ -232,5 +251,61 @@ describe("parseTelegramListing — reactions (E1, LISTING-only second metric)", 
     const noReact = parseTelegramListing(stripped).posts[0]!;
     expect(noReact.reactionsTotal).toBeNull();
     expect(noReact.reactionsTop).toEqual([]);
+  });
+});
+
+describe("parseTelegramChannelHeader — the channel subject entity (Phase 9)", () => {
+  const header = parseTelegramChannelHeader(fixture("listing-healthy.html"));
+
+  it("extracts title / slug / avatar / description from the listing header", () => {
+    expect(header.title).toBe("Pavel Durov");
+    expect(header.slug).toBe("durov"); // @username with the leading '@' stripped
+    expect(header.avatarUrl).toMatch(/^https?:\/\//); // og:image hotlink
+    expect(header.description).toBe("Founder of Telegram.");
+  });
+
+  it("normalizes the 'N subscribers' counter via the K/M view logic", () => {
+    // The fixture header counter reads "11.1M subscribers".
+    expect(header.subscriberCount).toBe(11_100_000);
+  });
+
+  it("lifts channelKey from a post block's data-view (the header markup has no id)", () => {
+    expect(header.channelKey).toBe("-1006503122");
+  });
+
+  it("the listing surfaces the same channelHeader inline", () => {
+    const listing = parseTelegramListing(fixture("listing-healthy.html"));
+    expect(listing.channelHeader).not.toBeNull();
+    expect(listing.channelHeader!.title).toBe("Pavel Durov");
+    expect(listing.channelHeader!.slug).toBe("durov");
+    expect(listing.channelHeader!.channelKey).toBe("-1006503122");
+    expect(listing.channelHeader!.subscriberCount).toBe(11_100_000);
+  });
+
+  it("a not_found listing carries a null channelHeader", () => {
+    const listing = parseTelegramListing(fixture("channel-not-found.html"));
+    expect(listing.status).toBe("not_found");
+    expect(listing.channelHeader).toBeNull();
+  });
+
+  it("missing header markup → graceful all-null fields", () => {
+    const empty = parseTelegramChannelHeader("<html><body>no channel markup</body></html>");
+    expect(empty.channelKey).toBeNull();
+    expect(empty.slug).toBeNull();
+    expect(empty.title).toBeNull();
+    expect(empty.avatarUrl).toBeNull();
+    expect(empty.description).toBeNull();
+    expect(empty.subscriberCount).toBeNull();
+  });
+
+  it("a header with no subscribers counter → subscriberCount null (graceful)", () => {
+    // Strip the counters block; title/slug stay, subscriberCount degrades to null.
+    const stripped = fixture("listing-healthy.html").replace(
+      /<div class="tgme_channel_info_counters[\s\S]*?<\/div>\s*<\/div>/,
+      "",
+    );
+    const h = parseTelegramChannelHeader(stripped);
+    expect(h.title).toBe("Pavel Durov");
+    expect(h.subscriberCount).toBeNull();
   });
 });

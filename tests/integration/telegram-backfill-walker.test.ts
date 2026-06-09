@@ -39,16 +39,33 @@ interface FixturePost {
   externalId: string;
   publishedAt: Date | null;
   viewCount: number | null;
+  channelKey?: string | null;
   reactionsTotal?: number | null;
   reactionsTop?: { emoji: string | null; kind: "standard" | "custom" | "paid"; count: number }[];
 }
 
-function listing(posts: FixturePost[], nextBeforeCursor: string | null): ParsedTelegramListing {
+function listing(
+  posts: FixturePost[],
+  nextBeforeCursor: string | null,
+  channelKey: string | null = "-1009999",
+): ParsedTelegramListing {
   return {
     channelTitle: "Fixture Channel",
+    channelHeader:
+      channelKey === null
+        ? null
+        : {
+            channelKey,
+            slug: "fixture",
+            title: "Fixture Channel",
+            avatarUrl: null,
+            description: null,
+            subscriberCount: null,
+          },
     status: "ok",
     posts: posts.map((p) => ({
       externalId: p.externalId,
+      channelKey: p.channelKey ?? channelKey,
       publishedAt: p.publishedAt,
       viewCount: p.viewCount,
       textSnippet: "snip",

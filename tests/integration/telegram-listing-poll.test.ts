@@ -19,9 +19,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
-import { telegramPosts, telegramPostSnapshots } from "../../src/lib/server/db/schema/index.js";
+import {
+  telegramChannels,
+  telegramPosts,
+  telegramPostSnapshots,
+} from "../../src/lib/server/db/schema/index.js";
 import { events } from "../../src/lib/server/db/schema/events.js";
-import { writeTelegramSnapshot } from "../../src/lib/sources/telegram/server/snapshots.js";
+import {
+  writeTelegramSnapshot,
+  upsertTelegramChannel,
+} from "../../src/lib/sources/telegram/server/snapshots.js";
 import { telegramChannelAdapterCore } from "../../src/lib/sources/telegram/server/adapter.js";
 import { handleTelegramListingPoll } from "../../src/lib/sources/telegram/server/handlers/listing-poll.js";
 import { createSource } from "../../src/lib/server/services/data-sources.js";
@@ -36,16 +43,32 @@ interface FixturePost {
   externalId: string;
   publishedAt: Date | null;
   viewCount: number | null;
+  channelKey?: string | null;
   reactionsTotal?: number | null;
   reactionsTop?: { emoji: string | null; kind: "standard" | "custom" | "paid"; count: number }[];
 }
 
-function listing(posts: FixturePost[]): ParsedTelegramListing {
+function listing(
+  posts: FixturePost[],
+  channelKey: string | null = "-1009999",
+): ParsedTelegramListing {
   return {
     channelTitle: "Fixture Channel",
+    channelHeader:
+      channelKey === null
+        ? null
+        : {
+            channelKey,
+            slug: "fixture",
+            title: "Fixture Channel",
+            avatarUrl: null,
+            description: null,
+            subscriberCount: null,
+          },
     status: "ok",
     posts: posts.map((p) => ({
       externalId: p.externalId,
+      channelKey: p.channelKey ?? channelKey,
       publishedAt: p.publishedAt,
       viewCount: p.viewCount,
       textSnippet: "snip",
@@ -65,6 +88,14 @@ async function readPost(postId: string) {
 
 async function readSnapshots(postId: string) {
   return db.select().from(telegramPostSnapshots).where(eq(telegramPostSnapshots.postId, postId));
+}
+
+async function readChannel(channelKey: string) {
+  const [row] = await db
+    .select()
+    .from(telegramChannels)
+    .where(eq(telegramChannels.channelKey, channelKey));
+  return row;
 }
 
 describe("writeTelegramSnapshot — two-phase idempotent writer (Plan 09-03)", () => {
@@ -290,6 +321,7 @@ describe("telegram listing-poll handler (registered — Plan 09-05)", () => {
     const channel = `lpnf_${uniq()}`;
     vi.spyOn(telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce({
       channelTitle: null,
+      channelHeader: null,
       status: "not_found",
       posts: [],
       nextBeforeCursor: null,
@@ -300,6 +332,149 @@ describe("telegram listing-poll handler (registered — Plan 09-05)", () => {
     expect(r.written).toBe(0);
 
     vi.restoreAllMocks();
+  });
+});
+
+// Phase 9 channel entity — telegram_channels UPSERT + per-post channel_key.
+describe("telegram_channels — channel subject entity (Phase 9)", () => {
+  it("a listing poll UPSERTs telegram_channels (title/subscriber/slug) AND sets telegram_posts.channel_key", async () => {
+    const channel = `tgch_${uniq()}`;
+    const channelKey = `-100${Math.floor(Math.random() * 1e9)}`;
+    const posts = [
+      {
+        externalId: `${channel}/12`,
+        publishedAt: new Date("2026-06-01T00:00:00Z"),
+        viewCount: 1500,
+      },
+      {
+        externalId: `${channel}/11`,
+        publishedAt: new Date("2026-05-31T00:00:00Z"),
+        viewCount: 900,
+      },
+    ];
+    const lst = listing(posts, channelKey);
+    lst.channelHeader = {
+      channelKey,
+      slug: channel,
+      title: "Acme Channel",
+      avatarUrl: "https://cdn.telegram.org/avatar.jpg",
+      description: "We make games.",
+      subscriberCount: 11_100_000,
+    };
+    vi.spyOn(telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(lst);
+
+    await handleTelegramListingPoll({ channel });
+
+    const ch = await readChannel(channelKey);
+    expect(ch, "telegram_channels row").toBeDefined();
+    expect(ch!.title).toBe("Acme Channel");
+    expect(ch!.slug).toBe(channel);
+    expect(ch!.subscriberCount).toBe(11_100_000);
+    expect(ch!.avatarUrl).toBe("https://cdn.telegram.org/avatar.jpg");
+    expect(ch!.description).toBe("We make games.");
+    expect(ch!.handleAliases).toContain(channel);
+    expect(ch!.firstSeenAt).not.toBeNull();
+    expect(ch!.lastRefreshedAt).not.toBeNull();
+
+    // Per-post channel_key is persisted from the data-view-decoded id.
+    for (const p of posts) {
+      const post = await readPost(p.externalId);
+      expect(post!.channelKey).toBe(channelKey);
+    }
+
+    vi.restoreAllMocks();
+  });
+
+  it("a second poll refreshes metadata + last_refreshed_at; a partial parse COALESCE-preserves prior good values", async () => {
+    const channelKey = `-100${Math.floor(Math.random() * 1e9)}`;
+
+    // First poll — full metadata.
+    await upsertTelegramChannel({
+      channelKey,
+      slug: "acme",
+      title: "Acme v1",
+      avatarUrl: "https://cdn.telegram.org/v1.jpg",
+      description: "First desc.",
+      subscriberCount: 1000,
+    });
+    const first = await readChannel(channelKey);
+    expect(first!.title).toBe("Acme v1");
+    const firstRefreshed = first!.lastRefreshedAt!.getTime();
+
+    // Second poll — fresh title + subscriber bump, but a PARTIAL parse missed
+    // avatar + description (null) → those must be COALESCE-preserved.
+    await new Promise((r) => setTimeout(r, 5));
+    await upsertTelegramChannel({
+      channelKey,
+      slug: "acme",
+      title: "Acme v2",
+      avatarUrl: null,
+      description: null,
+      subscriberCount: 2000,
+    });
+    const second = await readChannel(channelKey);
+    expect(second!.title).toBe("Acme v2"); // refreshed
+    expect(second!.subscriberCount).toBe(2000); // refreshed
+    expect(second!.avatarUrl).toBe("https://cdn.telegram.org/v1.jpg"); // preserved
+    expect(second!.description).toBe("First desc."); // preserved
+    expect(second!.lastRefreshedAt!.getTime()).toBeGreaterThanOrEqual(firstRefreshed);
+    // firstSeenAt is immutable across polls.
+    expect(second!.firstSeenAt!.getTime()).toBe(first!.firstSeenAt!.getTime());
+  });
+
+  it("a slug change appends to handle_aliases (no duplicates on re-poll)", async () => {
+    const channelKey = `-100${Math.floor(Math.random() * 1e9)}`;
+
+    await upsertTelegramChannel({
+      channelKey,
+      slug: "oldname",
+      title: "T",
+      avatarUrl: null,
+      description: null,
+      subscriberCount: null,
+    });
+    let ch = await readChannel(channelKey);
+    expect(ch!.handleAliases).toEqual(["oldname"]);
+    expect(ch!.slug).toBe("oldname");
+
+    // Rename: new slug → appended to aliases + slug updated.
+    await upsertTelegramChannel({
+      channelKey,
+      slug: "newname",
+      title: "T",
+      avatarUrl: null,
+      description: null,
+      subscriberCount: null,
+    });
+    ch = await readChannel(channelKey);
+    expect(ch!.slug).toBe("newname");
+    expect(ch!.handleAliases).toEqual(["oldname", "newname"]);
+
+    // Re-poll with the same (current) slug → no duplicate append.
+    await upsertTelegramChannel({
+      channelKey,
+      slug: "newname",
+      title: "T",
+      avatarUrl: null,
+      description: null,
+      subscriberCount: null,
+    });
+    ch = await readChannel(channelKey);
+    expect(ch!.handleAliases).toEqual(["oldname", "newname"]);
+  });
+
+  it("a header with no channelKey is a no-op (no row created)", async () => {
+    const before = await db.select().from(telegramChannels);
+    await upsertTelegramChannel({
+      channelKey: null,
+      slug: "ghost",
+      title: "Ghost",
+      avatarUrl: null,
+      description: null,
+      subscriberCount: 5,
+    });
+    const after = await db.select().from(telegramChannels);
+    expect(after.length).toBe(before.length);
   });
 });
 

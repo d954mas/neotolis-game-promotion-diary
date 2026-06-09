@@ -41,7 +41,7 @@ import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
 import { telegramChannelAdapterCore } from "../adapter.js";
-import { writeTelegramSnapshot } from "../snapshots.js";
+import { writeTelegramSnapshot, upsertTelegramChannel } from "../snapshots.js";
 import { materializeTelegramEvents } from "../events.js";
 import { getTelegramWalkState, persistTelegramWalkProgress } from "../walker-state.js";
 import type { ParsedTelegramPost } from "../parse.js";
@@ -146,6 +146,14 @@ export async function handleTelegramBackfillWalker(args: {
     return { status: "not_found", written: 0, backfillComplete: true, nextBeforeCursor: null };
   }
 
+  // UPSERT the channel subject entity from this page's header (every page of the
+  // walk carries the same header — refresh the channel metadata regardless of
+  // whether this page's posts fall in-window). No-ops without a channel id;
+  // COALESCE-preserves prior good metadata on a partial parse.
+  if (listing.channelHeader !== null) {
+    await upsertTelegramChannel(listing.channelHeader);
+  }
+
   // Depth bound (B1): the deepest window any current subscriber asked for. null =
   // unbounded (an "everything" subscriber, or a direct test walk with no
   // subscriber row).
@@ -173,6 +181,7 @@ export async function handleTelegramBackfillWalker(args: {
     }
     await writeTelegramSnapshot({
       postId: post.externalId,
+      channelKey: post.channelKey,
       textSnippet: post.textSnippet,
       mediaKind: post.mediaKind,
       thumbnailUrl: post.thumbnailUrl,

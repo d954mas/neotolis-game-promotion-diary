@@ -4,6 +4,7 @@
 // cross-source barrel re-export keeps existing
 // `import { telegramPosts } from "$lib/server/db/schema/index.js"` call sites
 // compiling without edit.
+export * from "./channels.js";
 export * from "./posts.js";
 export * from "./post-snapshots.js";
 export * from "./pacer.js";
