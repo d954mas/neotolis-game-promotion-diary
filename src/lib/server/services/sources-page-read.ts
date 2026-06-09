@@ -65,6 +65,7 @@ export async function loadSourcesPage(userId: string): Promise<SourcesPageData> 
   await enrichDataSourceDtosWithYoutubeChannelTitles(dtos);
   await enrichWithChannelState(dtos, channelIds);
   await enrichRedditSourcesWithLastPolled(dtos);
+  await enrichTelegramSourcesWithLastPolled(dtos);
   await enrichWithEventStats(dtos, userId, sourceIds);
 
   const cooldownBySource = await loadRefreshContentCooldown(userId, sourceIds);
@@ -96,6 +97,7 @@ export async function loadSourceDetailPage(
   await enrichDataSourceDtosWithYoutubeChannelTitles([dto]);
   await enrichWithChannelState([dto], channelIds);
   await enrichRedditSourcesWithLastPolled([dto]);
+  await enrichTelegramSourcesWithLastPolled([dto]);
 
   const [quotaPlatforms, cooldownBySource, pullingBySource] = await Promise.all([
     loadQuotaPlatforms(userId),
@@ -189,6 +191,45 @@ async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise
     } else if (s.kind === "reddit_account" && typeof md.username === "string") {
       s.lastPolledAt = subByUsername.get(md.username) ?? null;
     }
+  }
+}
+
+/**
+ * Telegram sources have no channelId (they key on metadata.channel = the @slug),
+ * so `enrichWithChannelState` misses them — they would show "Queued" forever on
+ * /sources even after the worker has polled the channel (SourceRow renders
+ * "Queued" whenever lastPolledAt is null). The walker stamps last_polled_at on
+ * data_source_channel_state (kind='telegram_channel', channelKey=<slug>) on every
+ * successful poll; read it and stamp it onto the DTO. Mirrors
+ * enrichRedditSourcesWithLastPolled (same "no channelId" problem).
+ */
+async function enrichTelegramSourcesWithLastPolled(dtos: DataSourceDto[]): Promise<void> {
+  const channels: string[] = [];
+  for (const s of dtos) {
+    if (s.kind !== "telegram_channel") continue;
+    const md = (s.metadata ?? {}) as { channel?: unknown };
+    if (typeof md.channel === "string" && md.channel) channels.push(md.channel);
+  }
+  if (channels.length === 0) return;
+  const rows = await db
+    .select({
+      channelKey: dataSourceChannelState.channelKey,
+      lastPolledAt: dataSourceChannelState.lastPolledAt,
+    })
+    .from(dataSourceChannelState)
+    .where(
+      and(
+        eq(dataSourceChannelState.kind, "telegram_channel"),
+        inArray(dataSourceChannelState.channelKey, channels),
+      ),
+    );
+  const byChannel = new Map<string, Date | null>();
+  for (const r of rows) byChannel.set(r.channelKey, r.lastPolledAt);
+  for (const s of dtos) {
+    if (s.lastPolledAt !== null && s.lastPolledAt !== undefined) continue;
+    if (s.kind !== "telegram_channel") continue;
+    const md = (s.metadata ?? {}) as { channel?: unknown };
+    if (typeof md.channel === "string") s.lastPolledAt = byChannel.get(md.channel) ?? null;
   }
 }
 
