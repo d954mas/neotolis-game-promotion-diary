@@ -193,6 +193,66 @@ describe("telegram live paste-preview (single-post ?embed=1 fetch — Phase-9 C1
     expect(decorated.telegramEnrichment!.stats!.viewCount).toBe(3710000);
   });
 
+  it("slug reuse: 2 telegram_posts share one external_url → resolveCachedExternalId does NOT cross-resolve (live channelKey wins)", async () => {
+    const { telegramAdapter } = await import("../../src/lib/sources/telegram/server/index.js");
+
+    // Pre-seed a COLLIDING cache row: a DIFFERENT channel (channelKey -100999999)
+    // that previously held the @durov slug at message 505, plus the REAL durov
+    // post the fixture resolves to (-1006503122/505). Both carry the SAME
+    // external_url (t.me/durov/505) because messageIds are per-channel sequential
+    // (not globally unique) and a freed @slug can be reassigned — the exact
+    // P1-edge. We make the WRONG row the most-recently-updated so a recency
+    // (ORDER BY updated_at) guess would bind it; the harden must NOT.
+    const externalUrl = FIXTURE_URL; // https://t.me/durov/505
+    const WRONG_POST_ID = "-100999999/505";
+    await db
+      .insert(telegramPosts)
+      .values({ postId: WRONG_POST_ID, channelKey: "-100999999", externalUrl })
+      .onConflictDoNothing();
+    await db
+      .insert(telegramPosts)
+      .values({ postId: FIXTURE_POST_ID, channelKey: FIXTURE_CHANNEL_KEY, externalUrl })
+      .onConflictDoNothing();
+    // Make the WRONG row the freshest write (the recency trap).
+    await db
+      .update(telegramPosts)
+      .set({ updatedAt: new Date(Date.now() + 60_000) })
+      .where(eq(telegramPosts.postId, WRONG_POST_ID));
+
+    // The live ?embed=1 page is the durov fixture → channelKey -1006503122. The
+    // collision triggers a live disambiguation fetch; the data-view channelKey is
+    // the authoritative answer, NOT the recency-freshest cached row.
+    tg.next = SINGLE_POST_EMBED;
+    const resolved = await telegramAdapter.resolveCachedExternalId!(FIXTURE_URL);
+
+    expect(resolved).toBe(FIXTURE_POST_ID);
+    expect(resolved).not.toBe(WRONG_POST_ID);
+    // The disambiguation hit the live page exactly once (the collision-only path).
+    expect(tg.calls).toHaveLength(1);
+    expect(tg.calls[0]).toEqual({ channel: FIXTURE_CHANNEL, messageId: FIXTURE_MESSAGE_ID });
+  });
+
+  it("single cached row (no collision): resolveCachedExternalId returns it WITHOUT a live fetch", async () => {
+    const { telegramAdapter } = await import("../../src/lib/sources/telegram/server/index.js");
+
+    // Exactly ONE cache row for the external_url — the hot post-preview save path.
+    // The harden must short-circuit to that row with ZERO added t.me fetch.
+    await db
+      .insert(telegramPosts)
+      .values({
+        postId: FIXTURE_POST_ID,
+        channelKey: FIXTURE_CHANNEL_KEY,
+        externalUrl: FIXTURE_URL,
+      })
+      .onConflictDoNothing();
+
+    const resolved = await telegramAdapter.resolveCachedExternalId!(FIXTURE_URL);
+
+    expect(resolved).toBe(FIXTURE_POST_ID);
+    // No live fetch on the unambiguous single-row path (cost-preservation).
+    expect(tg.calls).toHaveLength(0);
+  });
+
   it("a deleted/private/nonexistent post (null parse) degrades gracefully (no 422 dead-end)", async () => {
     const user = await seedUserDirectly({
       email: `tg-preview-gone-${Math.random().toString(36).slice(2)}@t.io`,
