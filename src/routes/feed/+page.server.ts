@@ -11,7 +11,10 @@ import { listGames, deriveReleaseInfoForGames } from "$lib/server/services/games
 import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { allAdapters } from "$lib/sources/registry.js";
-import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
+import {
+  enrichDataSourceDtosWithYoutubeChannelTitles,
+  enrichTelegramSourcesWithChannelTitle,
+} from "$lib/server/services/sources-page-read.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 import { parseSearchParams } from "$lib/feed/url-state.js";
 import { dateRangeWindow, parseEventDate } from "$lib/feed/date-range.js";
@@ -215,9 +218,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     }
   }
 
-  // Enrich source DTOs with the YouTube channel_title from cache.
+  // Enrich source DTOs with the channel display name the feed cards read:
+  // YouTube channel_title + Telegram entity title (both via FK at read time, the
+  // no-denorm path). Instagram needs no enrichment — its account name is stored
+  // on data_sources.display_name at create, which the card reads directly.
   const sourceDtos = sourceRows.map(toDataSourceDto);
   await enrichDataSourceDtosWithYoutubeChannelTitles(sourceDtos);
+  await enrichTelegramSourcesWithChannelTitle(sourceDtos);
 
   // GameDto.releaseDate / .releaseTba derived via JOIN with
   // game_steam_listings — the games row no longer carries the columns

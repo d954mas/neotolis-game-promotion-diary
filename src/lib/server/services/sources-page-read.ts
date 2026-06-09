@@ -13,7 +13,7 @@
 
 import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { youtubeChannels } from "../db/schema/index.js";
+import { youtubeChannels, telegramChannels } from "../db/schema/index.js";
 import { dataSourceChannelState } from "../db/schema/data-source-channel-state.js";
 import {
   redditSubredditsCache,
@@ -63,6 +63,7 @@ export async function loadSourcesPage(userId: string): Promise<SourcesPageData> 
   const sourceIds = dtos.map((s) => s.id);
 
   await enrichDataSourceDtosWithYoutubeChannelTitles(dtos);
+  await enrichTelegramSourcesWithChannelTitle(dtos);
   await enrichWithChannelState(dtos);
   await enrichWithChannelState(dtos, telegramChannelKey);
   await enrichRedditSourcesWithLastPolled(dtos);
@@ -95,6 +96,7 @@ export async function loadSourceDetailPage(
   const channelIds = dto.channelId === null ? [] : [dto.channelId];
 
   await enrichDataSourceDtosWithYoutubeChannelTitles([dto]);
+  await enrichTelegramSourcesWithChannelTitle([dto]);
   await enrichWithChannelState([dto]);
   await enrichWithChannelState([dto], telegramChannelKey);
   await enrichRedditSourcesWithLastPolled([dto]);
@@ -129,6 +131,44 @@ export async function enrichDataSourceDtosWithYoutubeChannelTitles(
   for (const r of cache) titleByChannel.set(r.channelId, r.channelTitle);
   for (const s of dtos) {
     if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
+  }
+}
+
+/**
+ * Telegram sources have no channelId — the channel title lives on the
+ * telegram_channels ENTITY (keyed by channel_key, upserted from the listing
+ * header on every poll), deliberately NOT denormalized onto data_sources (the
+ * no-denorm rule). So /sources would fall back to the raw t.me URL. Read the
+ * entity title by slug (data_sources.metadata.channel) and stamp it onto
+ * dto.channelTitle — the SAME field YouTube uses — so SourceRow's
+ * channelTitle-first precedence renders the channel name (e.g. "d954mas | …")
+ * instead of the URL. Mirrors enrichDataSourceDtosWithYoutubeChannelTitles.
+ *
+ * A never-polled channel has no entity row yet → channelTitle stays null and
+ * SourceRow falls back to the @handle (deriveTelegramHandle), never the bare URL.
+ * Joining on the slug (the user-registered handle === the current entity slug in
+ * the common case) is consistent with how the walker keys telegram channel-state.
+ */
+export async function enrichTelegramSourcesWithChannelTitle(dtos: DataSourceDto[]): Promise<void> {
+  const slugs: string[] = [];
+  for (const s of dtos) {
+    if (s.kind !== "telegram_channel") continue;
+    const md = (s.metadata ?? {}) as { channel?: unknown };
+    if (typeof md.channel === "string" && md.channel) slugs.push(md.channel);
+  }
+  if (slugs.length === 0) return;
+  const rows = await db
+    .select({ slug: telegramChannels.slug, title: telegramChannels.title })
+    .from(telegramChannels)
+    .where(inArray(telegramChannels.slug, slugs));
+  const titleBySlug = new Map<string, string | null>();
+  for (const r of rows) if (r.slug !== null) titleBySlug.set(r.slug, r.title);
+  for (const s of dtos) {
+    if (s.kind !== "telegram_channel") continue;
+    const md = (s.metadata ?? {}) as { channel?: unknown };
+    if (typeof md.channel === "string" && md.channel) {
+      s.channelTitle = titleBySlug.get(md.channel) ?? null;
+    }
   }
 }
 
