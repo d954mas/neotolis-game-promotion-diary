@@ -26,15 +26,7 @@ import { logger } from "$lib/server/logger.js";
 import { telegramChannelAdapterCore } from "../adapter.js";
 import { writeTelegramSnapshot, upsertTelegramChannel } from "../snapshots.js";
 import { materializeTelegramEvents } from "../events.js";
-
-const TELEGRAM_BASE = "https://t.me";
-
-/** Build the canonical per-post t.me URL from the renameable slug + messageId.
- *  The stored post_id is channelKey-based (rename-proof), but the channelKey is
- *  NOT a valid t.me path segment — the real link is t.me/<slug>/<messageId>. */
-function externalUrlForPost(slug: string, messageId: string): string {
-  return `${TELEGRAM_BASE}/${slug}/${messageId}`;
-}
+import { telegramPostUrl } from "../url.js";
 
 export async function handleTelegramListingPoll(args: {
   channel: string;
@@ -74,7 +66,7 @@ export async function handleTelegramListingPoll(args: {
       textSnippet: post.textSnippet,
       mediaKind: post.mediaKind,
       thumbnailUrl: post.thumbnailUrl,
-      externalUrl: externalUrlForPost(post.slug, post.messageId),
+      externalUrl: telegramPostUrl(post.slug, post.messageId),
       publishedAt: post.publishedAt,
       viewCount: post.viewCount,
       reactionsTotal: post.reactionsTotal,

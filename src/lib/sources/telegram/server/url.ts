@@ -1,17 +1,28 @@
-// Telegram URL parsing — PLAT-06 free-fetch adapter input path.
+// Telegram URL parsing + canonical-URL string ops — PLAT-06 free-fetch adapter
+// input path. PURE module: string ops only, NO I/O, NO DB, NO imports beyond the
+// shared ParsedUrl types.
+//
+// The single home for the t.me/<slug>/<messageId> string shape: TELEGRAM_BASE,
+// telegramPostUrl (build), splitTelegramPostUrl (reverse), and the two parsers
+// below all share one definition of the host set + slug/messageId regex so the
+// canonical-URL shape lives in ONE place instead of being re-derived inline
+// across handlers/events/preview/sync-stats/worker-tick.
 //
 // Two parsers, mirroring the Reddit + Instagram precedents
 // (reddit/server/url.ts, instagram/server/url.ts):
 //   1. telegramParsePostUrl   — EVENT paste flow. Matches a single message:
-//                               `t.me/<channel>/<messageId>` (and the tolerated
-//                               `/s/<channel>/<messageId>` preview variant).
+//                               `t.me/<slug>/<messageId>` (and the tolerated
+//                               `/s/<slug>/<messageId>` preview variant).
 //                               Returns a `kind:"telegram_post"` ParsedUrl whose
-//                               externalId is the FULL `"<channel>/<messageId>"`
-//                               (RESEARCH Q3: message ids are per-channel
-//                               sequential and NOT globally unique, so the
-//                               composite is the stable PK — it also matches
-//                               telegram_posts.post_id). A channel-only URL
-//                               returns null (a channel is a SOURCE, not an
+//                               externalId is the SLUG-based `"<slug>/<messageId>"`.
+//                               NOTE: this slug-based id is DELIBERATELY NOT the
+//                               stored key — events-mutation excludes telegram_post
+//                               from URL-derivation, and the preview /
+//                               resolveCachedExternalId resolve the rename-proof
+//                               channelKey-based id from our cache (#1). The slug
+//                               id here only feeds the cache lookup + fetch path;
+//                               it never reaches events.external_id. A channel-only
+//                               URL returns null (a channel is a SOURCE, not an
 //                               event).
 //   2. telegramParseSourceUrl — SOURCE registration flow. Matches a CHANNEL:
 //                               `@channel`, bare `channel`, `t.me/<channel>`,
@@ -32,14 +43,17 @@
 //
 // Case normalization: the channel SLUG comes out LOWERCASE regardless of input
 // casing. Telegram treats `@Durov` and `@durov` as the same channel (handles are
-// case-insensitive); the channel slug is the key for data_source_channel_state.
-// channelKey, telegram_channels.channel, and the `<channel>/<messageId>` post id,
-// so lowercasing at parse keeps all of them consistent — two subscribers pasting
-// different-case spellings land on the same channel-state row + fan-out lane.
-// Mirrors reddit/server/url.ts (subreddit/username lowercase at parse). Message
-// ids are case-irrelevant numerics — only the channel segment lowercases.
+// case-insensitive); lowercasing at parse keeps subscribers who paste
+// different-case spellings on the same channel-state row + fan-out lane. Mirrors
+// reddit/server/url.ts (subreddit/username lowercase at parse). Message ids are
+// case-irrelevant numerics — only the channel segment lowercases.
 
 import type { ParsedSourceUrl, ParsedUrl } from "$lib/sources/adapter.js";
+
+/** Canonical t.me base. The single home for the literal — handlers / events /
+ *  preview / sync-stats / worker-tick / http all import this instead of
+ *  re-declaring `"https://t.me"`. */
+export const TELEGRAM_BASE = "https://t.me";
 
 // t.me is canonical; telegram.me / telegram.dog are the official aliases that
 // redirect to it. t.me is the load-bearing form.
@@ -64,12 +78,21 @@ const RAW_HANDLE_RE = /^@?([A-Za-z0-9_]+)$/;
  * SOURCE, not an event).
  *
  * Recognized shapes:
- *   - https://t.me/<channel>/<messageId>
- *   - https://t.me/s/<channel>/<messageId>   (tolerated preview variant)
+ *   - https://t.me/<slug>/<messageId>
+ *   - https://t.me/s/<slug>/<messageId>   (tolerated preview variant)
  *   - https://telegram.me|telegram.dog/...   (host aliases)
  *
- * externalId is the FULL `"<channel>/<messageId>"`; metadata carries the
- * channel + messageId split out for callers that need either part.
+ * externalId is the SLUG-based `"<slug>/<messageId>"`; metadata carries the slug
+ * (as `channel`) + messageId split out for callers that need either part.
+ *
+ * IMPORTANT: this slug-based externalId is DELIBERATELY NOT stored. The stored
+ * events.external_id / telegram_posts.post_id is the rename-proof
+ * `"<channelKey>/<messageId>"` (the numeric data-view channel id, see parse.ts).
+ * events-mutation excludes telegram_post from URL-derivation; the single-post
+ * preview overrides externalId with the channelKey-based id, and
+ * resolveCachedExternalId re-derives the stored id from our cache by external_url.
+ * The slug id this parser returns only feeds those cache lookups + the fetch
+ * path — it never lands in the events row (which would re-key on a rename).
  */
 export function telegramParsePostUrl(input: string): ParsedUrl | null {
   let url: URL;
@@ -90,6 +113,31 @@ export function telegramParsePostUrl(input: string): ParsedUrl | null {
     externalId: `${channel}/${messageId}`,
     metadata: { channel, messageId },
   };
+}
+
+// Trailing `/<slug>/<messageId>` of a canonical post URL — the reverse of
+// telegramPostUrl. Anchored at the end so it pulls the last two segments off any
+// t.me/<slug>/<messageId> link (with or without a trailing slash / query is
+// already stripped by the callers that store a clean external_url).
+const POST_URL_TAIL_RE = /\/([A-Za-z0-9_]+)\/(\d+)\/?$/;
+
+/** Build the canonical per-post t.me URL from the renameable slug + messageId.
+ *  The stored post_id is channelKey-based (rename-proof), but the channelKey is
+ *  NOT a valid t.me path segment — the real link is t.me/<slug>/<messageId>. The
+ *  single home for this builder (handlers / events / preview all import it). */
+export function telegramPostUrl(slug: string, messageId: string): string {
+  return `${TELEGRAM_BASE}/${slug}/${messageId}`;
+}
+
+/** Reverse of telegramPostUrl: split a stored canonical post URL back into its
+ *  renameable slug + messageId. Returns null when the URL has no
+ *  `/<slug>/<messageId>` tail. The single home for the
+ *  fetch-target-resolution regex (worker-tick + sync-stats both used a private
+ *  copy). */
+export function splitTelegramPostUrl(url: string): { slug: string; messageId: string } | null {
+  const m = POST_URL_TAIL_RE.exec(url);
+  if (m === null) return null;
+  return { slug: m[1]!, messageId: m[2]! };
 }
 
 /**

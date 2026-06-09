@@ -25,12 +25,10 @@ import { db } from "$lib/server/db/client.js";
 import { telegramPosts } from "$lib/server/db/schema/index.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { telegramParsePostUrl } from "./url.js";
+import { TELEGRAM_BASE, telegramParsePostUrl, telegramPostUrl } from "./url.js";
 import { fetchTelegramPost } from "./http.js";
 import { parseTelegramPost, type ParsedTelegramPost } from "./parse.js";
 import { writeTelegramSnapshot } from "./snapshots.js";
-
-const TELEGRAM_BASE = "https://t.me";
 
 /** Shared single-post fetch core for the sync paste + preview paths. Issues ONE
  *  ?embed=1 GET through the DEFAULT "acquire" pacer (a sync user path owns its
@@ -52,7 +50,7 @@ export async function fetchTelegramPostSingle(
   slug: string,
   messageId: string,
 ): Promise<ParsedTelegramPost | null> {
-  const externalUrl = `${TELEGRAM_BASE}/${slug}/${messageId}`;
+  const externalUrl = telegramPostUrl(slug, messageId);
   const html = await fetchTelegramPost(slug, messageId);
   const parsed = parseTelegramPost(html);
   if (parsed === null) {

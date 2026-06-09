@@ -32,7 +32,9 @@
 // first backfill_page row carries no/empty cursor → getTelegramWalkState returns
 // beforeCursor=null → core.pollListing(channel, null) → newest page).
 //
-// channelKey for the walker state is the channel slug (data_sources.metadata.channel).
+// The walker-state key is the channel SLUG (data_sources.metadata.channel) —
+// passed as `channelSlug` into walker-state.ts. (Distinct from
+// telegram_posts.channel_key, the rename-proof numeric per-post id.)
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -43,6 +45,7 @@ import { logger } from "$lib/server/logger.js";
 import { telegramChannelAdapterCore } from "../adapter.js";
 import { writeTelegramSnapshot, upsertTelegramChannel } from "../snapshots.js";
 import { materializeTelegramEvents } from "../events.js";
+import { telegramPostUrl } from "../url.js";
 import {
   getTelegramWalkState,
   persistTelegramWalkProgress,
@@ -51,14 +54,6 @@ import {
 import type { ParsedTelegramPost } from "../parse.js";
 
 const ADAPTER_KIND = "telegram_channel";
-const TELEGRAM_BASE = "https://t.me";
-
-/** Canonical per-post t.me URL from the renameable slug + messageId. The stored
- *  post_id is channelKey-based (rename-proof) but the channelKey is not a valid
- *  t.me path segment — the real link is t.me/<slug>/<messageId>. */
-function externalUrlForPost(slug: string, messageId: string): string {
-  return `${TELEGRAM_BASE}/${slug}/${messageId}`;
-}
 
 /** Resolve the DEEPEST backfillTargetSince across the channel's active
  *  auto-import subscribers — the depth the walk must reach (B1). The channel
@@ -183,7 +178,7 @@ export async function handleTelegramBackfillWalker(args: {
       textSnippet: post.textSnippet,
       mediaKind: post.mediaKind,
       thumbnailUrl: post.thumbnailUrl,
-      externalUrl: externalUrlForPost(post.slug, post.messageId),
+      externalUrl: telegramPostUrl(post.slug, post.messageId),
       publishedAt: post.publishedAt,
       viewCount: post.viewCount,
       reactionsTotal: post.reactionsTotal,

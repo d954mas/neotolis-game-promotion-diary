@@ -23,10 +23,7 @@
 // Each lane is maxBatchSize 1: every t.me path is a single-resource GET (one
 // listing, one page, one post), and a tick only acquires one pacer slot.
 
-import { eq } from "drizzle-orm";
 import { AdapterError } from "$lib/sources/errors.js";
-import { db } from "$lib/server/db/client.js";
-import { telegramPosts } from "$lib/server/db/schema/index.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import {
@@ -41,6 +38,7 @@ import { acquireTelegramPacerSlotWith } from "../pacer.js";
 import { fetchTelegramPost } from "../http.js";
 import { parseTelegramPost } from "../parse.js";
 import { writeTelegramSnapshot, type TelegramSnapshotStatus } from "../snapshots.js";
+import { resolveTelegramFetchTarget } from "../fetch-target.js";
 import {
   resolveTelegramOperatorUserId,
   __resetTelegramOperatorIdCacheForTest,
@@ -169,28 +167,6 @@ async function dispatchByLane(
   });
 }
 
-/** Resolve the renameable fetch slug + messageId for a channelKey-based post_id
- *  from the stored telegram_posts.external_url (the canonical t.me/<slug>/<id>
- *  link written on every snapshot). The post_id prefix is the rename-proof
- *  channelKey — NOT a t.me path segment — so the slug must come from the cached
- *  URL. Returns null when the post has no cached row / external_url (it can't be
- *  warm-refreshed without a known link). */
-async function resolveTelegramFetchTarget(
-  postId: string,
-): Promise<{ channel: string; messageId: string; externalUrl: string } | null> {
-  const [row] = await db
-    .select({ externalUrl: telegramPosts.externalUrl })
-    .from(telegramPosts)
-    .where(eq(telegramPosts.postId, postId))
-    .limit(1);
-  const externalUrl = row?.externalUrl ?? null;
-  if (externalUrl === null) return null;
-  // external_url is t.me/<slug>/<messageId> — pull the trailing slug/messageId.
-  const m = /\/([A-Za-z0-9_]+)\/(\d+)\/?$/.exec(externalUrl);
-  if (m === null) return null;
-  return { channel: m[1]!, messageId: m[2]!, externalUrl };
-}
-
 /** Single-post ?embed=1 fetch → parse → writeTelegramSnapshot. post_id is the
  *  STABLE "<channelKey>/<messageId>" composite — channelKey is NOT a fetchable
  *  t.me path segment, so the renameable SLUG to fetch with is resolved from the
@@ -220,10 +196,10 @@ async function handleWarmPostFetch(
       category: "permanent",
     });
   }
-  const { channel, messageId, externalUrl } = target;
+  const { slug, messageId, externalUrl } = target;
 
   try {
-    const html = await fetchTelegramPost(channel, messageId, pacer);
+    const html = await fetchTelegramPost(slug, messageId, pacer);
     const parsed = parseTelegramPost(html);
     if (parsed === null) {
       // The embed page carried no message block — deleted / private.

@@ -25,10 +25,7 @@
 
 import { AdapterError } from "$lib/sources/errors.js";
 import { acquireTelegramPacerSlot, recordTelegramAdapterPause } from "./pacer.js";
-
-// Canonical t.me base. Hard-coded for now — Plan 06 decides whether a smoke
-// override env var (mirroring REDDIT_BASE_URL_OVERRIDE) is needed.
-const TELEGRAM_BASE = "https://t.me";
+import { TELEGRAM_BASE } from "./url.js";
 
 // A normal browser-ish UA. RESEARCH confirmed a plain Mozilla/5.0 works live
 // against t.me/s; the contact line keeps us identifiable to the operator.

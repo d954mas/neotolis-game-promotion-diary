@@ -29,9 +29,8 @@ import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { logger } from "$lib/server/logger.js";
+import { telegramPostUrl } from "./url.js";
 import type { ParsedTelegramPost } from "./parse.js";
-
-const TELEGRAM_BASE = "https://t.me";
 
 /** Create feed events from imported telegram posts. Returns the number of new
  *  event rows inserted (0 when everything was already present / filtered out). */
@@ -113,7 +112,7 @@ export async function materializeTelegramEvents(
     // segment — t.me/<slug>/<id> is the real link).
     const title =
       snippet !== "" ? snippet.slice(0, 200) : `Telegram post ${post.slug}/${post.messageId}`;
-    const url = `${TELEGRAM_BASE}/${post.slug}/${post.messageId}`;
+    const url = telegramPostUrl(post.slug, post.messageId);
     for (const sub of subscribers) {
       // Per-subscriber backfill window (chosen at /sources/new time).
       if (sub.backfillTargetSince !== null && occurredAt < sub.backfillTargetSince) continue;
