@@ -29,6 +29,15 @@
 // The channel handle is the URL-intrinsic identity (part of the canonical
 // t.me/<handle> URL), NOT a renameable display value — carrying it is the only
 // safe denormalization per the AGENTS.md no-denorm carve-out.
+//
+// Case normalization: the channel SLUG comes out LOWERCASE regardless of input
+// casing. Telegram treats `@Durov` and `@durov` as the same channel (handles are
+// case-insensitive); the channel slug is the key for data_source_channel_state.
+// channelKey, telegram_channels.channel, and the `<channel>/<messageId>` post id,
+// so lowercasing at parse keeps all of them consistent — two subscribers pasting
+// different-case spellings land on the same channel-state row + fan-out lane.
+// Mirrors reddit/server/url.ts (subreddit/username lowercase at parse). Message
+// ids are case-irrelevant numerics — only the channel segment lowercases.
 
 import type { ParsedSourceUrl, ParsedUrl } from "$lib/sources/adapter.js";
 
@@ -74,7 +83,7 @@ export function telegramParsePostUrl(input: string): ParsedUrl | null {
 
   const m = POST_PATH_RE.exec(url.pathname);
   if (m === null) return null;
-  const channel = m[1]!;
+  const channel = m[1]!.toLowerCase();
   const messageId = m[2]!;
   return {
     kind: "telegram_post",
@@ -107,7 +116,7 @@ export function telegramParseSourceUrl(input: string): ParsedSourceUrl | null {
   if (!trimmed.includes("/") && !trimmed.includes(".") && !trimmed.includes(":")) {
     const raw = RAW_HANDLE_RE.exec(trimmed);
     if (raw !== null) {
-      const handle = raw[1]!;
+      const handle = raw[1]!.toLowerCase();
       return {
         kind: "telegram_channel",
         handle,
@@ -130,7 +139,7 @@ export function telegramParseSourceUrl(input: string): ParsedSourceUrl | null {
 
   const m = SOURCE_PATH_RE.exec(url.pathname);
   if (m === null) return null;
-  const handle = m[1]!;
+  const handle = m[1]!.toLowerCase();
   return {
     kind: "telegram_channel",
     handle,

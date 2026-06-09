@@ -54,6 +54,25 @@ describe("telegramParsePostUrl (event paste flow)", () => {
   it("garbage input → null", () => {
     expect(telegramParsePostUrl("not a url")).toBeNull();
   });
+
+  it("lowercases the channel slug — t.me/Durov/505 → externalId 'durov/505'", () => {
+    // Telegram handles are case-insensitive; the slug is the post-id key, so it
+    // must normalize lowercase (mirrors reddit subreddit/username lowercase).
+    // The numeric message id is case-irrelevant and untouched.
+    expect(telegramParsePostUrl("https://t.me/Durov/505")).toEqual({
+      kind: "telegram_post",
+      externalId: "durov/505",
+      metadata: { channel: "durov", messageId: "505" },
+    });
+  });
+
+  it("lowercases the slug on the /s/ preview variant too — t.me/s/DUROV/505 → 'durov/505'", () => {
+    expect(telegramParsePostUrl("https://t.me/s/DUROV/505")).toEqual({
+      kind: "telegram_post",
+      externalId: "durov/505",
+      metadata: { channel: "durov", messageId: "505" },
+    });
+  });
 });
 
 describe("telegramParseSourceUrl (source registration flow)", () => {
@@ -98,5 +117,25 @@ describe("telegramParseSourceUrl (source registration flow)", () => {
 
   it("a raw handle with a slash is not a bare handle (falls through to URL parse → null)", () => {
     expect(telegramParseSourceUrl("durov/505")).toBeNull();
+  });
+
+  it("lowercases the channel slug — @Durov and t.me/s/DUROV both normalize to 'durov'", () => {
+    // Telegram handles are case-insensitive; the slug keys channel-state /
+    // telegram_channels / metadata.channel, so a mixed-case paste must land on
+    // the same canonical lowercase channel (mirrors reddit r/IndieDev → indiedev).
+    expect(telegramParseSourceUrl("@Durov")).toEqual(expected);
+    expect(telegramParseSourceUrl("Durov")).toEqual(expected);
+    expect(telegramParseSourceUrl("https://t.me/Durov")).toEqual(expected);
+    expect(telegramParseSourceUrl("https://t.me/s/DUROV")).toEqual(expected);
+  });
+
+  it("treats @Durov and @durov as the SAME channel (duplicate-source dedup key)", () => {
+    // The handle is the duplicate-source key; case variants must collapse to one
+    // slug so a user can't register the same channel twice under two spellings.
+    const upper = telegramParseSourceUrl("@Durov");
+    const lower = telegramParseSourceUrl("@durov");
+    expect(upper?.handle).toBe("durov");
+    expect(lower?.handle).toBe("durov");
+    expect(upper?.handle).toBe(lower?.handle);
   });
 });
