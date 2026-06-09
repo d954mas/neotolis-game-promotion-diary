@@ -3,8 +3,14 @@
 // Telegram has NO per-channel cache table (no subreddits_cache / users_cache
 // equivalent — channel display name lives on data_sources, the no-denorm rule).
 // The walker's cross-tenant state therefore lives on the shared
-// data_source_channel_state row (kind='telegram_channel', channelKey=<channel
-// slug>):
+// data_source_channel_state row (kind='telegram_channel', channel_key=<channel
+// SLUG>). NOTE the two distinct key-spaces that both used to be called
+// "channelKey": the shared data_source_channel_state.channel_key COLUMN is
+// generic (each platform stores its own canonical id there); the telegram-LOCAL
+// value this walker stores in it is the @username SLUG (see below). The
+// telegram-local variables/params here are therefore named `channelSlug` so the
+// slug key-space does not collide on one word with telegram_posts.channel_key
+// (the rename-proof NUMERIC id, a different thing entirely):
 //   - metadata.lastBackfillCursor — the ?before=<messageId> cursor for the NEXT
 //     page (mirrors how the YouTube walker stashes lastBackfillPageToken in the
 //     same JSONB column, and how IG stashes its per-feed cursors). null = start
@@ -28,11 +34,11 @@
 // The cursor monotonically DECREASES (older messageId each page) so the walker
 // never re-fetches a page it already drained.
 //
-// channelKey for Telegram is the channel SLUG (the URL-intrinsic handle stored
-// on data_sources.metadata.channel). Unlike YouTube/IG it is not a resolved
-// numeric id — Telegram exposes no synchronous resolve, and the slug IS the
-// canonical t.me/<slug> identity (the safe-denorm carve-out). channel_key on
-// telegram_posts (the numeric data-view id) is a separate per-post anchor; the
+// The channel-state key for Telegram is the channel SLUG (the URL-intrinsic
+// handle stored on data_sources.metadata.channel). Unlike YouTube/IG it is not a
+// resolved numeric id — Telegram exposes no synchronous resolve, and the slug IS
+// the canonical t.me/<slug> identity (the safe-denorm carve-out). channel_key on
+// telegram_posts (the numeric data-view id) is a SEPARATE per-post anchor; the
 // walker keys its state by the slug because that is what every fetch needs.
 //
 // Concurrency model (multi-replica safe via CAS, mirrors reddit walker-state):
@@ -80,7 +86,7 @@ export interface TelegramWalkState {
 /** Read the walker state for a channel slug. Defaults for a never-walked
  *  channel (no row): cursor null, not complete, no frontier, zero collected. */
 export async function getTelegramWalkState(
-  channelKey: string,
+  channelSlug: string,
   dbCtx: DbOrTx = db,
 ): Promise<TelegramWalkState> {
   const [row] = await dbCtx
@@ -91,7 +97,7 @@ export async function getTelegramWalkState(
     })
     .from(dataSourceChannelState)
     .where(
-      and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelKey)),
+      and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelSlug)),
     )
     .limit(1);
   const md =
@@ -143,7 +149,7 @@ export interface TelegramPersistResult {
  *   from 0 again.
  */
 export async function persistTelegramWalkProgress(
-  channelKey: string,
+  channelSlug: string,
   next: {
     expectedBeforeCursor: string | null;
     nextBeforeCursor: string | null;
@@ -153,7 +159,7 @@ export async function persistTelegramWalkProgress(
   },
   dbCtx: DbOrTx = db,
 ): Promise<TelegramPersistResult> {
-  await ensureChannelState(KIND, channelKey, dbCtx);
+  await ensureChannelState(KIND, channelSlug, dbCtx);
 
   // Advance (or clear, on completion) the ?before cursor + collected count under
   // metadata. Atomic JSONB merge preserves any other adapter metadata on the row.
@@ -177,7 +183,7 @@ export async function persistTelegramWalkProgress(
     .where(
       and(
         eq(dataSourceChannelState.kind, KIND),
-        eq(dataSourceChannelState.channelKey, channelKey),
+        eq(dataSourceChannelState.channelKey, channelSlug),
         // CAS: only commit when the persisted cursor still equals the one this
         // tick started from. `IS NOT DISTINCT FROM` makes NULL=NULL equal so the
         // first tick (expected=null on a never-walked row) still matches.
@@ -192,10 +198,10 @@ export async function persistTelegramWalkProgress(
   if (updated.length === 0) return { committed: false };
 
   if (next.oldestPublishedAt !== null) {
-    await markChannelBackfillFrontier(KIND, channelKey, next.oldestPublishedAt, dbCtx);
+    await markChannelBackfillFrontier(KIND, channelSlug, next.oldestPublishedAt, dbCtx);
   }
   if (next.backfillComplete) {
-    await markChannelBackfillComplete(KIND, channelKey, dbCtx);
+    await markChannelBackfillComplete(KIND, channelSlug, dbCtx);
   }
   return { committed: true };
 }
@@ -204,14 +210,14 @@ export async function persistTelegramWalkProgress(
  *  cron-pool, cap-exempt). The user paid for the first page; the operator pool
  *  drains the rest (mirrors reddit enqueueWalkerContinuation). */
 async function enqueueTelegramBackfillContinuation(
-  channelKey: string,
+  channelSlug: string,
   dbCtx: DbOrTx,
 ): Promise<void> {
   await dbCtx.insert(adapterRefreshQueue).values({
     adapterKind: KIND,
     queueName: "service_source",
     type: "backfill_page",
-    payload: { channel: channelKey },
+    payload: { channel: channelSlug },
     userId: null,
     priority: 0,
   });
@@ -230,7 +236,7 @@ async function enqueueTelegramBackfillContinuation(
  * continuation enqueued for this tick". Mirrors reddit commitSubredditWalkProgress.
  */
 export async function commitTelegramWalkProgress(
-  channelKey: string,
+  channelSlug: string,
   payload: {
     expectedBeforeCursor: string | null;
     nextBeforeCursor: string | null;
@@ -241,7 +247,7 @@ export async function commitTelegramWalkProgress(
 ): Promise<TelegramPersistResult> {
   return db.transaction(async (tx) => {
     const persistResult = await persistTelegramWalkProgress(
-      channelKey,
+      channelSlug,
       {
         expectedBeforeCursor: payload.expectedBeforeCursor,
         nextBeforeCursor: payload.nextBeforeCursor,
@@ -252,7 +258,7 @@ export async function commitTelegramWalkProgress(
       tx,
     );
     if (persistResult.committed && !payload.backfillComplete && payload.nextBeforeCursor !== null) {
-      await enqueueTelegramBackfillContinuation(channelKey, tx);
+      await enqueueTelegramBackfillContinuation(channelSlug, tx);
     }
     return persistResult;
   });
@@ -275,7 +281,7 @@ export async function commitTelegramWalkProgress(
  * when the channel was never walked / already incomplete — caller logs a no-op).
  */
 export async function resetTelegramWalkState(
-  channelKey: string,
+  channelSlug: string,
   dbCtx: DbOrTx = db,
 ): Promise<number> {
   const result = await dbCtx
@@ -288,7 +294,7 @@ export async function resetTelegramWalkState(
     .where(
       and(
         eq(dataSourceChannelState.kind, KIND),
-        eq(dataSourceChannelState.channelKey, channelKey),
+        eq(dataSourceChannelState.channelKey, channelSlug),
         eq(dataSourceChannelState.backfillComplete, true),
       ),
     )
