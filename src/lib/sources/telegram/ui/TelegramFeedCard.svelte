@@ -146,51 +146,56 @@
 />
 
 {#snippet statsSnippet()}
-  {#if stats && stats.viewCount !== null}
-    <div class="card-stats stats-line">
-      <span class="stat">
-        <svg
-          class="stat-icon"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          style={`color:${metricColor("views")}`}
-        >
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-        <span class="num">{formatStat(stats.viewCount)}</span>
-      </span>
-    </div>
-  {/if}
-  {#if reactions && reactions.length > 0}
-    <!-- E1: top-5 reactions list — one chip per reaction (glyph + count). A
-         null/empty list renders nothing (mirror the null-views → no-chip rule). -->
-    <div class="card-stats reactions-line">
-      {#each reactions as r (r.kind + (r.emoji ?? "") + r.count)}
-        <span class="reaction" title={r.kind === "paid" ? "Telegram Stars" : undefined}>
-          <span class="reaction-glyph" aria-hidden="true">{reactionGlyph(r)}</span>
-          <span class="num">{formatStat(r.count)}</span>
+  {#if (stats && stats.viewCount !== null) || (reactions && reactions.length > 0)}
+    <!-- Views chip + top-5 reactions share ONE wrapping row (user 2026-06-09):
+         the views count and the reaction list sit on the same line and wrap
+         only when the card is too narrow to hold them. -->
+    <div class="card-stats stats-line tg-stats-row">
+      {#if stats && stats.viewCount !== null}
+        <span class="stat">
+          <svg
+            class="stat-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            style={`color:${metricColor("views")}`}
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <span class="num">{formatStat(stats.viewCount)}</span>
         </span>
-      {/each}
+      {/if}
+      {#if reactions && reactions.length > 0}
+        <!-- E1: top-5 reactions — one chip per reaction (glyph + count). -->
+        {#each reactions as r (r.kind + (r.emoji ?? "") + r.count)}
+          <span class="reaction" title={r.kind === "paid" ? "Telegram Stars" : undefined}>
+            <span class="reaction-glyph" aria-hidden="true">{reactionGlyph(r)}</span>
+            <span class="num">{formatStat(r.count)}</span>
+          </span>
+        {/each}
+      {/if}
     </div>
   {/if}
 {/snippet}
 
 <style>
-  /* Top-5 reactions row (E1) — sits under the views chip. Wraps so 5 chips fit
-     on a narrow card; matches the views stats-line spacing/weight. */
-  .reactions-line {
+  /* Views chip + top-5 reactions on ONE wrapping row (E1, user 2026-06-09).
+     .stats-line is BaseFeedCard's stat row; we make it wrap and give the views
+     chip + each reaction comfortable spacing so they read on a single line and
+     wrap only on a narrow card. */
+  .tg-stats-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
+    align-items: center;
+    column-gap: 0.6rem;
+    row-gap: 0.2rem;
   }
   .reaction {
     display: inline-flex;
