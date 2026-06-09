@@ -10,7 +10,7 @@
 // album).
 //
 // Invariants under test:
-//   - normalizeViewCount: plain / K / M / missing / garbage
+//   - parseAbbreviatedCount: plain / K / M / missing / garbage
 //   - album = exactly ONE post with mediaKind='album' (D-01)
 //   - not_found is CONTENT-based (HTTP-200-safe), by absence of tgme_* markers
 //   - ?before cursor extraction; null = end-of-history
@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
-  normalizeViewCount,
+  parseAbbreviatedCount,
   parseTelegramListing,
   parseTelegramPost,
   parseTelegramChannelHeader,
@@ -34,37 +34,37 @@ import {
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../fixtures/telegram");
 const fixture = (name: string): string => readFileSync(join(FIXTURE_DIR, name), "utf8");
 
-describe("normalizeViewCount", () => {
+describe("parseAbbreviatedCount", () => {
   it("plain integer passes through", () => {
-    expect(normalizeViewCount("227")).toBe(227);
-    expect(normalizeViewCount("118")).toBe(118);
+    expect(parseAbbreviatedCount("227")).toBe(227);
+    expect(parseAbbreviatedCount("118")).toBe(118);
   });
 
   it("K suffix multiplies by 1_000", () => {
-    expect(normalizeViewCount("12.3K")).toBe(12300);
-    expect(normalizeViewCount("18.1K")).toBe(18100);
-    expect(normalizeViewCount("27K")).toBe(27000);
+    expect(parseAbbreviatedCount("12.3K")).toBe(12300);
+    expect(parseAbbreviatedCount("18.1K")).toBe(18100);
+    expect(parseAbbreviatedCount("27K")).toBe(27000);
   });
 
   it("M suffix multiplies by 1_000_000", () => {
-    expect(normalizeViewCount("1.2M")).toBe(1200000);
-    expect(normalizeViewCount("14M")).toBe(14000000);
-    expect(normalizeViewCount("1.01M")).toBe(1010000);
+    expect(parseAbbreviatedCount("1.2M")).toBe(1200000);
+    expect(parseAbbreviatedCount("14M")).toBe(14000000);
+    expect(parseAbbreviatedCount("1.01M")).toBe(1010000);
   });
 
   it("empty / garbage → null", () => {
-    expect(normalizeViewCount("")).toBeNull();
-    expect(normalizeViewCount("garbage")).toBeNull();
-    expect(normalizeViewCount("12K3")).toBeNull();
+    expect(parseAbbreviatedCount("")).toBeNull();
+    expect(parseAbbreviatedCount("garbage")).toBeNull();
+    expect(parseAbbreviatedCount("12K3")).toBeNull();
   });
 });
 
 describe("parseTelegramListing — healthy listing", () => {
   const listing = parseTelegramListing(fixture("listing-healthy.html"));
 
-  it("status='ok' with a non-null channel title", () => {
+  it("status='ok' with a non-null channel title (on channelHeader)", () => {
     expect(listing.status).toBe("ok");
-    expect(listing.channelTitle).toBe("Pavel Durov");
+    expect(listing.channelHeader?.title).toBe("Pavel Durov");
   });
 
   it("yields one post per [data-post] block", () => {
@@ -191,9 +191,9 @@ describe("parseTelegramListing — nonexistent channel (content-based not_found)
     expect(listing.status).toBe("not_found");
   });
 
-  it("no posts, no title, no cursor", () => {
+  it("no posts, no header (title), no cursor", () => {
     expect(listing.posts.length).toBe(0);
-    expect(listing.channelTitle).toBeNull();
+    expect(listing.channelHeader).toBeNull();
     expect(listing.nextBeforeCursor).toBeNull();
   });
 });

@@ -54,7 +54,6 @@ function listing(
   channelKey: string | null = "-1009999",
 ): ParsedTelegramListing {
   return {
-    channelTitle: "Fixture Channel",
     channelHeader:
       channelKey === null
         ? null
@@ -329,7 +328,6 @@ describe("telegram listing-poll handler (registered — Plan 09-05)", () => {
   it("a not_found listing writes nothing (no post ids to snapshot)", async () => {
     const channel = `lpnf_${uniq()}`;
     vi.spyOn(telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce({
-      channelTitle: null,
       channelHeader: null,
       status: "not_found",
       posts: [],

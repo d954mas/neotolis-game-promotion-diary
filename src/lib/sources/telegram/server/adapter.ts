@@ -42,7 +42,7 @@ interface TelegramChannelAdapterCore {
   /**
    * Fetch + parse ONE page of a channel's t.me/s listing. `beforeCursor` pages
    * back through history (?before=<messageId>); null/undefined starts at the
-   * newest page. Returns the typed ParsedTelegramListing (channelTitle, status,
+   * newest page. Returns the typed ParsedTelegramListing (channelHeader, status,
    * posts[], nextBeforeCursor). The t.me fetch goes through the global pacer
    * (http.ts) — the caller (the lane worker dispatch) has already acquired a
    * pacer slot via its claimGate, so this consumes that politeness budget.

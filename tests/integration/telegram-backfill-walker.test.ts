@@ -50,7 +50,6 @@ function listing(
   channelKey: string | null = "-1009999",
 ): ParsedTelegramListing {
   return {
-    channelTitle: "Fixture Channel",
     channelHeader:
       channelKey === null
         ? null

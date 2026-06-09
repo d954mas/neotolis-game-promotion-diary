@@ -76,13 +76,12 @@ export interface ParsedTelegramPost {
 }
 
 export interface ParsedTelegramListing {
-  channelTitle: string | null; // .tgme_channel_info_header_title (display name)
   // The channel's OWN scraped metadata from the listing header — the
   // source-of-truth for the telegram_channels subject entity (UPSERTed by the
   // listing-poll + backfill handlers). null on a not_found listing (no header to
-  // parse) or when the header carries no decodable channel id. `channelTitle`
-  // above is retained as the back-compat shortcut for callers that only need the
-  // display name (materializeTelegramEvents); the full entity lives here.
+  // parse) or when the header carries no decodable channel id. The display title
+  // lives at channelHeader.title (no separate top-level shortcut — the only
+  // consumers are the snapshot UPSERT, which reads the full header).
   channelHeader: ParsedTelegramChannelHeader | null;
   status: "ok" | "not_found"; // content-based, HTTP-200-safe
   posts: ParsedTelegramPost[];
@@ -115,7 +114,6 @@ export function parseTelegramListing(html: string): ParsedTelegramListing {
   // not_found: HTTP 200 but no widget markers at all (RESEARCH §Availability).
   if (header === null && blocks.length === 0) {
     return {
-      channelTitle: null,
       channelHeader: null,
       status: "not_found",
       posts: [],
@@ -127,7 +125,6 @@ export function parseTelegramListing(html: string): ParsedTelegramListing {
   const nextBeforeCursor = extractBeforeCursor(root);
   const channelHeader = parseChannelHeaderFromRoot(root, posts);
   return {
-    channelTitle: header?.text?.trim() ?? null,
     channelHeader,
     status: "ok",
     posts,
@@ -177,7 +174,7 @@ function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
   const publishedAt = datetime ? new Date(datetime) : null;
 
   const viewsEl = el.querySelector(".tgme_widget_message_views");
-  const viewCount = viewsEl ? normalizeViewCount(viewsEl.text.trim()) : null;
+  const viewCount = viewsEl ? parseAbbreviatedCount(viewsEl.text.trim()) : null;
 
   const textEl = el.querySelector(".tgme_widget_message_text");
   const textSnippet = (textEl?.text ?? "").trim().split("\n", 1)[0]!.slice(0, 280);
@@ -296,14 +293,14 @@ function parseChannelHeaderFromRoot(
  *  markup is a list of `.tgme_channel_info_counter` entries (subscribers /
  *  photos / videos / links) — pick the one whose `.counter_type` is
  *  "subscribers" and normalize its `.counter_value` (same K/M abbreviation as
- *  view counts → reuse normalizeViewCount). null when no subscribers counter is
- *  present (a private/empty channel header). */
+ *  view counts → reuse parseAbbreviatedCount). null when no subscribers counter
+ *  is present (a private/empty channel header). */
 function extractSubscriberCount(root: HTMLElement): number | null {
   for (const counter of root.querySelectorAll(".tgme_channel_info_counter")) {
     const type = counter.querySelector(".counter_type")?.text?.trim().toLowerCase();
     if (type === "subscribers") {
       const value = counter.querySelector(".counter_value")?.text?.trim();
-      return value ? normalizeViewCount(value) : null;
+      return value ? parseAbbreviatedCount(value) : null;
     }
   }
   return null;
@@ -321,7 +318,7 @@ const TOP_REACTIONS_CAP = 5;
  *      <i class="icon icon-telegram-stars"></i>8.19K</span>` → kind="paid",
  *      emoji=null.
  *  Counts are the trailing text node (the same K/M abbreviation as views →
- *  reuse normalizeViewCount). A reactions block with zero parseable counts
+ *  reuse parseAbbreviatedCount). A reactions block with zero parseable counts
  *  (defensive) yields total=null, top=[]. */
 function parseReactions(el: HTMLElement): {
   reactionsTotal: number | null;
@@ -343,7 +340,7 @@ function parseReactions(el: HTMLElement): {
 
     const rawText = span.text;
     const countText = emoji !== null ? rawText.replace(emoji, "") : rawText;
-    const count = normalizeViewCount(countText.trim());
+    const count = parseAbbreviatedCount(countText.trim());
     if (count === null) continue;
     reactions.push({ emoji, kind, count });
   }
@@ -355,7 +352,11 @@ function parseReactions(el: HTMLElement): {
   return { reactionsTotal, reactionsTop };
 }
 
-export function normalizeViewCount(s: string): number | null {
+/** Parse a Telegram K/M-abbreviated count into an integer. Used for view counts,
+ *  subscriber counts, AND reaction counts — every numeric the t.me/s markup
+ *  renders with the same "12.3K" / "1.2M" / plain-integer abbreviation. null on
+ *  empty / unparseable input (a chart GAP downstream, never coerced to 0). */
+export function parseAbbreviatedCount(s: string): number | null {
   const m = /^([\d.]+)\s*([KM]?)$/i.exec(s.trim());
   if (!m) return null;
   const n = Number.parseFloat(m[1]!);
