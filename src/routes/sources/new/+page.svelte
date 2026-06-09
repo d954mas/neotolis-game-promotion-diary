@@ -94,9 +94,7 @@
   // Kind-appropriate post-cap ceiling for the picker honesty note: Telegram
   // caps deeper (free t.me/s scrape) than IG. Read from the loader, not hardcoded.
   const pickerPostCap = $derived(
-    pickerKind === "telegram_channel"
-      ? data.telegramBackfillMaxPosts
-      : data.socialBackfillMaxPosts,
+    pickerKind === "telegram_channel" ? data.telegramBackfillMaxPosts : data.socialBackfillMaxPosts,
   );
 
   // Picker collapse → reset value (same effect as the modal).
