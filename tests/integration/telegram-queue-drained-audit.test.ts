@@ -113,7 +113,11 @@ describe("telegram.queue_drained audit (G1/A1)", () => {
     const adminEmail = `tg-empty-${uniq()}@test.local`;
     const adminId = await seedAdminUser(adminEmail);
     await withAllowlist(adminEmail, async (m) => {
-      await m.emitQueueDrainedAudit({ queueName: "service_post", entriesProcessed: 0, durationMs: 1 });
+      await m.emitQueueDrainedAudit({
+        queueName: "service_post",
+        entriesProcessed: 0,
+        durationMs: 1,
+      });
       const rows = await db.execute(sql`
         SELECT 1 FROM audit_log
         WHERE action = 'telegram.queue_drained' AND user_id = ${adminId}

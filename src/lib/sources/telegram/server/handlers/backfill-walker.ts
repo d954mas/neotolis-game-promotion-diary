@@ -209,10 +209,7 @@ export async function handleTelegramBackfillWalker(args: {
   //   - the deepest subscriber's window was crossed (B1),
   //   - the post-count cap was reached (B1 — cost independent of archive size).
   const backfillComplete =
-    listing.posts.length === 0 ||
-    listing.nextBeforeCursor === null ||
-    crossedWindow ||
-    capReached;
+    listing.posts.length === 0 || listing.nextBeforeCursor === null || crossedWindow || capReached;
 
   await persistTelegramWalkProgress(channel, {
     nextBeforeCursor: listing.nextBeforeCursor,

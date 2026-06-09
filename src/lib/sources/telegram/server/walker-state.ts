@@ -75,9 +75,12 @@ export async function getTelegramWalkState(
       backfillOldestAt: dataSourceChannelState.backfillOldestAt,
     })
     .from(dataSourceChannelState)
-    .where(and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelKey)))
+    .where(
+      and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelKey)),
+    )
     .limit(1);
-  const md = (row?.metadata as { lastBackfillCursor?: unknown; backfillCollected?: unknown } | null) ?? null;
+  const md =
+    (row?.metadata as { lastBackfillCursor?: unknown; backfillCollected?: unknown } | null) ?? null;
   const cursor = md?.lastBackfillCursor;
   const collected = md?.backfillCollected;
   return {
@@ -134,7 +137,9 @@ export async function persistTelegramWalkProgress(
       metadata: collectedSet,
       updatedAt: new Date(),
     })
-    .where(and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelKey)));
+    .where(
+      and(eq(dataSourceChannelState.kind, KIND), eq(dataSourceChannelState.channelKey, channelKey)),
+    );
 
   if (next.oldestPublishedAt !== null) {
     await markChannelBackfillFrontier(KIND, channelKey, next.oldestPublishedAt, dbCtx);

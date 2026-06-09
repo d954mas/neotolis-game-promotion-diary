@@ -232,8 +232,16 @@ describe("telegram listing-poll handler (registered — Plan 09-05)", () => {
   it("writes a telegram_posts row + a telegram_post_snapshots row per parsed post", async () => {
     const channel = `lp_${uniq()}`;
     const posts = [
-      { externalId: `${channel}/12`, publishedAt: new Date("2026-06-01T00:00:00Z"), viewCount: 1500 },
-      { externalId: `${channel}/11`, publishedAt: new Date("2026-05-31T00:00:00Z"), viewCount: 900 },
+      {
+        externalId: `${channel}/12`,
+        publishedAt: new Date("2026-06-01T00:00:00Z"),
+        viewCount: 1500,
+      },
+      {
+        externalId: `${channel}/11`,
+        publishedAt: new Date("2026-05-31T00:00:00Z"),
+        viewCount: 900,
+      },
     ];
     const pollSpy = vi
       .spyOn(telegramChannelAdapterCore, "pollListing")
@@ -324,8 +332,16 @@ describe("telegram listing-poll event materialization (A2)", () => {
     );
 
     const posts = [
-      { externalId: `${channel}/30`, publishedAt: new Date("2026-06-05T00:00:00Z"), viewCount: 200 },
-      { externalId: `${channel}/29`, publishedAt: new Date("2026-06-04T00:00:00Z"), viewCount: 150 },
+      {
+        externalId: `${channel}/30`,
+        publishedAt: new Date("2026-06-05T00:00:00Z"),
+        viewCount: 200,
+      },
+      {
+        externalId: `${channel}/29`,
+        publishedAt: new Date("2026-06-04T00:00:00Z"),
+        viewCount: 150,
+      },
     ];
     vi.spyOn(telegramChannelAdapterCore, "pollListing").mockResolvedValue(listing(posts));
 

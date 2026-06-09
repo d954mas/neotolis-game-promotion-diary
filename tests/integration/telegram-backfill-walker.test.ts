@@ -77,12 +77,28 @@ describe("telegram backfill walker (Phase 9)", () => {
   it("persists the ?before cursor, fetches the next page from it, and never re-fetches a page", async () => {
     const channel = `walk_${uniq()}`;
     const p1 = [
-      { externalId: `${channel}/510`, publishedAt: new Date("2026-06-01T00:00:00Z"), viewCount: 100 },
-      { externalId: `${channel}/509`, publishedAt: new Date("2026-05-31T00:00:00Z"), viewCount: 90 },
+      {
+        externalId: `${channel}/510`,
+        publishedAt: new Date("2026-06-01T00:00:00Z"),
+        viewCount: 100,
+      },
+      {
+        externalId: `${channel}/509`,
+        publishedAt: new Date("2026-05-31T00:00:00Z"),
+        viewCount: 90,
+      },
     ];
     const p2 = [
-      { externalId: `${channel}/490`, publishedAt: new Date("2026-05-20T00:00:00Z"), viewCount: 50 },
-      { externalId: `${channel}/489`, publishedAt: new Date("2026-05-19T00:00:00Z"), viewCount: 40 },
+      {
+        externalId: `${channel}/490`,
+        publishedAt: new Date("2026-05-20T00:00:00Z"),
+        viewCount: 50,
+      },
+      {
+        externalId: `${channel}/489`,
+        publishedAt: new Date("2026-05-19T00:00:00Z"),
+        viewCount: 40,
+      },
     ];
 
     const pollSpy = vi
@@ -207,7 +223,11 @@ describe("telegram backfill walker (Phase 9)", () => {
   it("writes a snapshot row per ok post (idempotency guard intact)", async () => {
     const channel = `walksnap_${uniq()}`;
     const posts = [
-      { externalId: `${channel}/7`, publishedAt: new Date("2026-06-01T00:00:00Z"), viewCount: 1234 },
+      {
+        externalId: `${channel}/7`,
+        publishedAt: new Date("2026-06-01T00:00:00Z"),
+        viewCount: 1234,
+      },
     ];
     vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
       listing(posts, null),
@@ -264,8 +284,16 @@ describe("telegram backfill walker — window + cap bounding (B1)", () => {
     // THOUGH the page still has a more-anchor cursor (would otherwise continue).
     await seedSubscriber(channel, new Date("2026-05-25T00:00:00Z"));
     const posts = [
-      { externalId: `${channel}/510`, publishedAt: new Date("2026-05-31T00:00:00Z"), viewCount: 100 },
-      { externalId: `${channel}/505`, publishedAt: new Date("2026-05-20T00:00:00Z"), viewCount: 90 },
+      {
+        externalId: `${channel}/510`,
+        publishedAt: new Date("2026-05-31T00:00:00Z"),
+        viewCount: 100,
+      },
+      {
+        externalId: `${channel}/505`,
+        publishedAt: new Date("2026-05-20T00:00:00Z"),
+        viewCount: 90,
+      },
     ];
     vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
       listing(posts, "505"), // more-anchor present — only the window bound stops it
@@ -339,7 +367,13 @@ describe("telegram backfill walker — widening re-opens a complete channel (G3)
     // Drive a channel to completion (end-of-history).
     vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
       listing(
-        [{ externalId: `${channel}/3`, publishedAt: new Date("2025-01-01T00:00:00Z"), viewCount: 9 }],
+        [
+          {
+            externalId: `${channel}/3`,
+            publishedAt: new Date("2025-01-01T00:00:00Z"),
+            viewCount: 9,
+          },
+        ],
         null,
       ),
     );
@@ -379,7 +413,13 @@ describe("telegram backfill walker — widening re-opens a complete channel (G3)
     // Drive the channel to completion.
     vi.spyOn(adapterMod.telegramChannelAdapterCore, "pollListing").mockResolvedValueOnce(
       listing(
-        [{ externalId: `${channel}/4`, publishedAt: new Date("2026-05-10T00:00:00Z"), viewCount: 2 }],
+        [
+          {
+            externalId: `${channel}/4`,
+            publishedAt: new Date("2026-05-10T00:00:00Z"),
+            viewCount: 2,
+          },
+        ],
         null,
       ),
     );

@@ -20,10 +20,7 @@ const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
 const KIND = "telegram_channel" as const;
 
-async function laneRows(
-  channel: string,
-  type: "listing_poll" | "backfill_page",
-): Promise<number> {
+async function laneRows(channel: string, type: "listing_poll" | "backfill_page"): Promise<number> {
   const rows = await db
     .select({ id: adapterRefreshQueue.id })
     .from(adapterRefreshQueue)

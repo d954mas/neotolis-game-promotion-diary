@@ -91,7 +91,9 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
 
   await boss.work(QUEUES.TELEGRAM_POLL_CRON, { batchSize: 2 }, async (jobs) => {
     for (const job of jobs) {
-      await handleTelegramPollCron(job as { id?: string; data: { tier: "active" | "cold" | "warm" } });
+      await handleTelegramPollCron(
+        job as { id?: string; data: { tier: "active" | "cold" | "warm" } },
+      );
     }
   });
 }
@@ -134,7 +136,11 @@ export async function enqueueServiceListingPolls(
     .selectDistinct({ metadata: dataSources.metadata })
     .from(dataSources)
     .where(
-      and(eq(dataSources.kind, KIND), eq(dataSources.autoImport, true), isNull(dataSources.deletedAt)),
+      and(
+        eq(dataSources.kind, KIND),
+        eq(dataSources.autoImport, true),
+        isNull(dataSources.deletedAt),
+      ),
     );
   const channels = [
     ...new Set(
@@ -198,7 +204,12 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
   // Active listing tick — every 6h (D-04). The page-1 walk re-stamps the newest
   // ~20 posts' view snapshots for free; the 12h warm staleness gate sits above
   // this interval so on-listing posts never enter the warm lane.
-  await boss.schedule(QUEUES.TELEGRAM_POLL_CRON, "0 */6 * * *", { tier: "active" }, { key: "active" });
+  await boss.schedule(
+    QUEUES.TELEGRAM_POLL_CRON,
+    "0 */6 * * *",
+    { tier: "active" },
+    { key: "active" },
+  );
   // Cold listing tick — daily (same listing-poll path; the picker is identical,
   // the tier is informational for now since Telegram has no separate cold lane).
   await boss.schedule(QUEUES.TELEGRAM_POLL_CRON, "0 5 * * *", { tier: "cold" }, { key: "cold" });
@@ -258,7 +269,9 @@ async function backfillSource(
  *  is seeded LATER by the first listing poll (Telegram has no synchronous
  *  resolve that wouldn't burn a t.me call). Throws AppError 422 when
  *  unparseable. */
-async function normalizeSourceOnCreate(input: NormalizeSourceInput): Promise<NormalizeSourceResult> {
+async function normalizeSourceOnCreate(
+  input: NormalizeSourceInput,
+): Promise<NormalizeSourceResult> {
   const parsed = telegramParseSourceUrl(input.handleUrl);
   if (parsed === null) {
     throw new AppError(
