@@ -31,6 +31,7 @@ import {
 } from "../../src/lib/sources/telegram/server/snapshots.js";
 import { telegramChannelAdapterCore } from "../../src/lib/sources/telegram/server/adapter.js";
 import { handleTelegramListingPoll } from "../../src/lib/sources/telegram/server/handlers/listing-poll.js";
+import { materializeTelegramEvents } from "../../src/lib/sources/telegram/server/events.js";
 import { createSource } from "../../src/lib/server/services/data-sources.js";
 import { AppError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
@@ -564,5 +565,50 @@ describe("telegram listing-poll event materialization (A2)", () => {
     expect(await telegramEventCount(user.id, `${channel}/20`)).toBe(0);
 
     vi.restoreAllMocks();
+  });
+
+  it("a USER-triggered materialize fans out to ALL auto-import subscribers, not just the trigger user (#3)", async () => {
+    // Two users both auto-import the SAME public channel. A user-triggered
+    // backfill/refresh fetches PUBLIC channel content — the page is identical
+    // for every subscriber, so it must fan out to BOTH, not only the trigger
+    // user. Pre-fix materializeTelegramEvents filtered subscribers by opts.userId
+    // and only userA would have gotten the event (mirrors reddit sub-poll / IG
+    // backfill-account: a fetched public listing fans out to every subscriber).
+    const channel = `fanout_${uniq()}`;
+    const userA = await seedUserDirectly({ email: `tg-fan-a-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `tg-fan-b-${uniq()}@test.local` });
+    for (const u of [userA, userB]) {
+      await createSource(
+        u.id,
+        {
+          kind: "telegram_channel",
+          handleUrl: `https://t.me/${channel}`,
+          isOwnedByMe: false,
+          autoImport: true,
+          backfillTargetSince: new Date("2026-01-01T00:00:00Z"),
+        },
+        "127.0.0.1",
+      );
+    }
+
+    const post = {
+      externalId: `${channel}/77`,
+      channelKey: "-1009999",
+      publishedAt: new Date("2026-06-05T00:00:00Z"),
+      viewCount: 500,
+      textSnippet: "public promo",
+      mediaKind: null,
+      thumbnailUrl: null,
+      reactionsTotal: null,
+      reactionsTop: [],
+    };
+
+    // userA triggers the materialize (e.g. they clicked refresh). Despite the
+    // userId being set, the fan-out must reach BOTH subscribers.
+    const inserted = await materializeTelegramEvents(channel, [post], { userId: userA.id });
+    expect(inserted).toBe(2); // one event per subscriber
+
+    expect(await telegramEventCount(userA.id, `${channel}/77`)).toBe(1);
+    expect(await telegramEventCount(userB.id, `${channel}/77`)).toBe(1);
   });
 });

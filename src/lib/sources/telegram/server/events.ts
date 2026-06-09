@@ -13,10 +13,16 @@
 // event is the feed item that references it (events.external_id = post_id, the
 // same key telegramFetchEventMetricSeries / telegramEnrichFeedDtos read).
 //
-// Fan-out: a service poll (userId null — the cron lane serves every subscriber
-// from one fetch) creates an event per auto-import subscriber of the channel;
-// a user-triggered poll / backfill (userId set) targets just that user's source.
-// Dedup is the (user_id, kind, source_id, external_id) partial unique on events.
+// Fan-out: ALWAYS to every auto-import subscriber of the channel, regardless of
+// what triggered the fetch (cron service poll OR a user-triggered refresh /
+// backfill). A t.me/s listing is PUBLIC channel content with no single owning
+// user — a fetched page is the same data for every subscriber, so a user who
+// clicks "refresh" on their source fans the page out to ALL subscribers of that
+// channel (cross-tenant by design), exactly like reddit sub-poll / IG
+// backfill-account. The per-subscriber backfillTargetSince window still filters
+// each subscriber's slice; dedup is the (user_id, kind, source_id, external_id)
+// partial unique on events. The `userId` arg is retained for logging only — it
+// no longer narrows the fan-out.
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -36,10 +42,14 @@ export async function materializeTelegramEvents(
 ): Promise<number> {
   if (posts.length === 0) return 0;
 
-  // Channel subscribers. A user-triggered poll/backfill targets only that
-  // user's source; a service poll fans out to every auto-import subscriber of
-  // the channel (cross-tenant by design — a telegram_channel has no single
-  // owning user; the events INSERT below pins user_id per subscriber row).
+  // Channel subscribers — ALWAYS every auto-import subscriber of the channel,
+  // cross-tenant by design (a telegram_channel listing is public content with no
+  // single owning user; one fetch serves every subscriber). No per-user filter:
+  // a user-triggered refresh/backfill fans the fetched PUBLIC page out to ALL
+  // subscribers, mirroring reddit sub-poll / IG backfill-account. The events
+  // INSERT below pins user_id per subscriber row; the (user_id, kind, source_id,
+  // external_id) partial unique protects per-user dedup.
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out: a telegram_channel has no owning user; one public fetch fans out to every subscriber across tenants (each event INSERT pins its own user_id).
   const subscribers = await db
     .select({
       id: dataSources.id,
@@ -54,7 +64,6 @@ export async function materializeTelegramEvents(
         sql`${dataSources.metadata}->>'channel' = ${channel}`,
         eq(dataSources.autoImport, true),
         isNull(dataSources.deletedAt),
-        ...(opts.userId != null ? [eq(dataSources.userId, opts.userId)] : []),
       ),
     );
   if (subscribers.length === 0) return 0;
