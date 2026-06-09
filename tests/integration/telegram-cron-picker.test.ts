@@ -13,7 +13,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
 import { adapterRefreshQueue } from "../../src/lib/server/db/schema/index.js";
 import { createSource } from "../../src/lib/server/services/data-sources.js";
-import { enqueueServiceListingPolls } from "../../src/lib/sources/telegram/server/index.js";
+import { enqueueServiceListingPolls } from "../../src/lib/sources/telegram/server/handlers/listing-cron.js";
 import { seedUserDirectly } from "./helpers.js";
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
