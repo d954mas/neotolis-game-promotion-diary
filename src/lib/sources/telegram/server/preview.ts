@@ -173,19 +173,29 @@ export async function fetchEventPreviewMetadata(
  * telegram_posts rows can share one external_url with DIFFERENT channelKeys —
  * e.g. channel -100AAA at @durov, then @durov freed + reassigned to -100BBB,
  * both at t.me/durov/505. A recency (ORDER BY updated_at) guess could bind the
- * wrong post. We resolve UNAMBIGUOUSLY by the row count:
- *   - 0 rows  → null (a create WITHOUT a prior preview, or a preview that
- *               couldn't resolve a channelKey) → an honest stats-less card,
- *               identical to the recognition-only paste path (NEVER a slug id).
- *   - 1 row   → that row's post_id (unambiguous — the overwhelming common case,
- *               and the hot post-preview save path: ZERO added t.me fetch).
- *   - 2+ rows → COLLISION: do a live ?embed=1 parse (Telegram is FREE, same call
- *               fetchEventPreviewMetadata already makes) to decode the live
- *               channelKey directly — the disambiguating signal the external_url
- *               cannot carry — and return that exact <channelKey>/<messageId>.
- *               The live fetch UPSERTs the correct row, so it's consistent. A
- *               failed fetch / undecodable channelKey → null (honest stats-less
- *               card; never an arbitrary recency guess on a known collision).
+ * wrong post. We resolve UNAMBIGUOUSLY by the number of DISTINCT channelKeys
+ * (NOT the row count — the collision the header describes is "different
+ * channelKeys", and two rows that SHARE a channelKey are the SAME post keyed two
+ * ways: a pre-channelKey-canonical slug-keyed row left beside the channelKey-keyed
+ * row a later preview wrote. That is benign duplicate keying, not a slug reuse —
+ * counting rows there would force a needless live re-fetch that the post-preview
+ * pacer slot has just consumed, denying it and falsely degrading to null):
+ *   - 0 rows         → null (a create WITHOUT a prior preview, or a preview that
+ *                      couldn't resolve a channelKey) → an honest stats-less card,
+ *                      identical to the recognition-only paste path (NEVER a slug id).
+ *   - 1 channelKey   → the canonical "<channelKey>/<messageId>", built from the
+ *                      cached channelKey (unambiguous — the overwhelming common
+ *                      case AND the hot post-preview save path: ZERO added t.me
+ *                      fetch; rename-proof even if the only cached row is legacy
+ *                      slug-keyed).
+ *   - 2+ channelKeys → COLLISION: do a live ?embed=1 parse (Telegram is FREE, same
+ *                      call fetchEventPreviewMetadata already makes) to decode the
+ *                      live channelKey directly — the disambiguating signal the
+ *                      external_url cannot carry — and return that exact
+ *                      <channelKey>/<messageId>. The live fetch UPSERTs the correct
+ *                      row, so it's consistent. A failed fetch / undecodable
+ *                      channelKey → null (honest stats-less card; never an
+ *                      arbitrary recency guess on a known collision).
  *
  * Mirrors instagram/server/index.ts resolveCachedExternalId (unambiguous-key
  * resolution), and reuses the SAME live-parse path as the preview (#1).
@@ -195,17 +205,27 @@ export async function resolveCachedExternalId(url: string): Promise<string | nul
   if (parsed === null) return null;
   const { channel: slug, messageId } = parsed.metadata as { channel: string; messageId: string };
   // The preview wrote external_url = t.me/<slug>/<messageId> (the canonical link)
-  // and post_id = the channelKey-based id. Read EVERY cached row for that URL —
-  // not LIMIT 1 — so a slug-reuse collision (2+ rows, different channelKeys) is
-  // detectable instead of silently recency-guessed.
+  // and post_id = the channelKey-based id. Read EVERY cached row's channelKey for
+  // that URL — not LIMIT 1 — so a slug-reuse collision (2+ DISTINCT channelKeys)
+  // is detectable instead of silently recency-guessed.
   const externalUrl = `${TELEGRAM_BASE}/${slug}/${messageId}`;
   const rows = await db
-    .select({ postId: telegramPosts.postId })
+    .select({ channelKey: telegramPosts.channelKey })
     .from(telegramPosts)
     .where(eq(telegramPosts.externalUrl, externalUrl));
 
   if (rows.length === 0) return null;
-  if (rows.length === 1) return rows[0]!.postId;
+  // Decide on DISTINCT channelKeys, not row count. channelKey is non-null on every
+  // row we write (fetchTelegramPostSingle returns unwritten when it's undecodable,
+  // so we never persist a slug-keyed snapshot), so the filter only drops
+  // hypothetical legacy null rows.
+  const channelKeys = new Set(rows.map((r) => r.channelKey).filter((k): k is string => k !== null));
+  if (channelKeys.size === 0) return null;
+  if (channelKeys.size === 1) {
+    // Unambiguous — the canonical channelKey-based id, built from the cached
+    // channelKey + the URL messageId (the slug never enters the stored id).
+    return `${[...channelKeys][0]}/${messageId}`;
+  }
 
   // COLLISION — a reused slug points one external_url at 2+ posts with different
   // channelKeys. The cache alone cannot disambiguate; resolve from the LIVE
@@ -213,7 +233,7 @@ export async function resolveCachedExternalId(url: string): Promise<string | nul
   // is the authoritative answer. fetchTelegramPostSingle UPSERTs the row, so the
   // returned id is both correct and now freshly cached.
   logger.warn(
-    { slug, messageId, candidates: rows.length },
+    { slug, messageId, candidates: channelKeys.size },
     "telegram.resolveCachedExternalId: external_url collision (slug reuse); resolving via live channelKey",
   );
   try {
