@@ -317,15 +317,24 @@ describe("telegram backfill walker — window + cap bounding (B1)", () => {
     expect(await countPendingBackfillContinuations(channel)).toBe(0);
   });
 
-  it("STOPS at SOCIAL_BACKFILL_MAX_POSTS even with more history + an unbounded window", async () => {
+  it("STOPS at TELEGRAM_BACKFILL_MAX_POSTS even with more history + an unbounded window", async () => {
     const channel = `b1cap_${uniq()}`;
     // "everything" subscriber → no date bound; only the post-count cap stops it.
     await seedSubscriber(channel, new Date("1970-01-01T00:00:00Z"));
     // env is a runtime-mutable plain object with a readonly TS type — cast to a
-    // mutable view to override the cap for this case only.
-    const mutableEnv = env as { SOCIAL_BACKFILL_MAX_POSTS: number };
-    const originalCap = mutableEnv.SOCIAL_BACKFILL_MAX_POSTS;
-    mutableEnv.SOCIAL_BACKFILL_MAX_POSTS = 2; // tiny cap for the test
+    // mutable view to override the TELEGRAM cap for this case only. The walker
+    // reads TELEGRAM_BACKFILL_MAX_POSTS (its OWN cap), NOT IG's
+    // SOCIAL_BACKFILL_MAX_POSTS — overriding the latter must NOT bound the walk.
+    const mutableEnv = env as {
+      TELEGRAM_BACKFILL_MAX_POSTS: number;
+      SOCIAL_BACKFILL_MAX_POSTS: number;
+    };
+    const originalCap = mutableEnv.TELEGRAM_BACKFILL_MAX_POSTS;
+    const originalIgCap = mutableEnv.SOCIAL_BACKFILL_MAX_POSTS;
+    mutableEnv.TELEGRAM_BACKFILL_MAX_POSTS = 2; // tiny telegram cap for the test
+    // Pin IG's cap LARGER so a regression reusing it would NOT stop at 2 — this
+    // is the load-bearing guard that the walker reads the telegram cap.
+    mutableEnv.SOCIAL_BACKFILL_MAX_POSTS = 999;
     try {
       const posts = [
         { externalId: `${channel}/9`, publishedAt: new Date("2026-06-03T00:00:00Z"), viewCount: 3 },
@@ -337,14 +346,15 @@ describe("telegram backfill walker — window + cap bounding (B1)", () => {
       );
 
       const r = await handleTelegramBackfillWalker({ channel });
-      expect(r.written).toBe(2); // cap reached after 2 posts
+      expect(r.written).toBe(2); // telegram cap reached after 2 posts
       expect(r.backfillComplete).toBe(true); // cap bound → complete
       expect(r.nextBeforeCursor).toBeNull();
       // The 3rd post was never snapshotted (cap hit first).
       expect(await snapshotCountFor([`${channel}/7`])).toBe(0);
       expect(await countPendingBackfillContinuations(channel)).toBe(0);
     } finally {
-      mutableEnv.SOCIAL_BACKFILL_MAX_POSTS = originalCap;
+      mutableEnv.TELEGRAM_BACKFILL_MAX_POSTS = originalCap;
+      mutableEnv.SOCIAL_BACKFILL_MAX_POSTS = originalIgCap;
     }
   });
 

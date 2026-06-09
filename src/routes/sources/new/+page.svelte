@@ -91,6 +91,13 @@
 
   const showPicker = $derived(submitKind !== null && autoImport);
   const pickerKind: AddSourceUiKind = $derived(submitKind ?? "youtube_channel");
+  // Kind-appropriate post-cap ceiling for the picker honesty note: Telegram
+  // caps deeper (free t.me/s scrape) than IG. Read from the loader, not hardcoded.
+  const pickerPostCap = $derived(
+    pickerKind === "telegram_channel"
+      ? data.telegramBackfillMaxPosts
+      : data.socialBackfillMaxPosts,
+  );
 
   // Picker collapse → reset value (same effect as the modal).
   $effect(() => {
@@ -364,7 +371,7 @@
         bind:value={backfillWindow}
         bind:customDate={backfillCustomDate}
         kind={pickerKind}
-        postCap={data.socialBackfillMaxPosts}
+        postCap={pickerPostCap}
       />
     {/if}
 

@@ -30,8 +30,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   return {
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
-    // BACK-01: post-cap ceiling for the BackfillPicker honesty note.
+    // BACK-01: per-adapter post-cap ceilings for the BackfillPicker honesty note.
+    // IG and Telegram have separate caps; the page passes the kind-appropriate
+    // one to the picker.
     socialBackfillMaxPosts: env.SOCIAL_BACKFILL_MAX_POSTS,
+    telegramBackfillMaxPosts: env.TELEGRAM_BACKFILL_MAX_POSTS,
     kindMatrix: buildKindMatrix(),
   };
 };

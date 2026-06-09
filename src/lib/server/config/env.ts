@@ -323,6 +323,12 @@ const RawSchema = z.object({
   // Bound on consecutive non-ok polls before a post drops OUT of warm
   // auto-refresh (stops hammering a permanently-broken post). Resets on ok.
   TELEGRAM_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
+  // Telegram backfill post-count cap (B1) — the dedicated ceiling the ?before
+  // walker stops at (collected >= this), so a giant channel costs a bounded
+  // number of pages regardless of archive size. Separate from IG's
+  // SOCIAL_BACKFILL_MAX_POSTS: Telegram is a FREE t.me/s scrape, so its depth
+  // is paced (not credit-bounded) and earns its own, deeper default (100 vs 48).
+  TELEGRAM_BACKFILL_MAX_POSTS: z.coerce.number().int().positive().default(100),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -454,6 +460,7 @@ export const env = {
   TELEGRAM_WARM_WINDOW_DAYS: raw.TELEGRAM_WARM_WINDOW_DAYS,
   TELEGRAM_WARM_STALENESS_HOURS: raw.TELEGRAM_WARM_STALENESS_HOURS,
   TELEGRAM_WARM_MAX_FAILURES: raw.TELEGRAM_WARM_MAX_FAILURES,
+  TELEGRAM_BACKFILL_MAX_POSTS: raw.TELEGRAM_BACKFILL_MAX_POSTS,
 } as const;
 
 export type Env = typeof env;

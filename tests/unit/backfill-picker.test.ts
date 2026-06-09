@@ -80,4 +80,36 @@ describe("BackfillPicker", () => {
     expect(sourceText).not.toContain("backfill_picker_preset_cost");
     expect(sourceText).not.toContain("backfill_picker_helper_default");
   });
+
+  // BACK-01 honesty: a telegram_channel source DOES have a backfill post cap
+  // (TELEGRAM_BACKFILL_MAX_POSTS, default 100) — the picker must render the
+  // "up to N posts" note on wide presets, NOT claim "no cap". The cap value is
+  // read from the postCap prop (the loader's env value), not hardcoded.
+  it("renders the post-cap note for telegram_channel on a wide preset (honest cap, from prop)", () => {
+    const out = render(BackfillPicker, {
+      props: { value: "everything", kind: "telegram_channel", postCap: 100 },
+    });
+    // The cap value passed via prop appears in the "Up to N most-recent posts" note.
+    expect(out.body).toContain("Up to 100 most-recent posts");
+    // And the snapshot honesty note also renders for the social source.
+    expect(out.body).toContain("import as a current snapshot");
+  });
+
+  it("post-cap note reads the cap from the prop (no hardcoded 100)", () => {
+    const out = render(BackfillPicker, {
+      props: { value: "1y", kind: "telegram_channel", postCap: 250 },
+    });
+    expect(out.body).toContain("Up to 250 most-recent posts");
+    expect(out.body).not.toContain("Up to 100 most-recent posts");
+  });
+
+  it("suppresses the post-cap note on a NARROW preset (date cutoff dominates)", () => {
+    const out = render(BackfillPicker, {
+      props: { value: "30d", kind: "telegram_channel", postCap: 100 },
+    });
+    // Narrow window → no "up to N posts" note (the date cutoff is the binding
+    // limit), but the snapshot note still renders for the social source.
+    expect(out.body).not.toContain("most-recent posts within this window");
+    expect(out.body).toContain("import as a current snapshot");
+  });
 });

@@ -80,6 +80,7 @@
     open,
     kindMatrix,
     socialBackfillMaxPosts = 48,
+    telegramBackfillMaxPosts = 100,
     defaultIsOwnedByMe = true,
     defaultAutoImport = true,
     onClose,
@@ -88,6 +89,7 @@
     open: boolean;
     kindMatrix: KindEntry[];
     socialBackfillMaxPosts?: number;
+    telegramBackfillMaxPosts?: number;
     defaultIsOwnedByMe?: boolean;
     defaultAutoImport?: boolean;
     onClose: () => void;
@@ -152,6 +154,11 @@
   const showPicker = $derived(submitKind !== null && autoImport);
   // BackfillPicker needs a concrete kind; only rendered when submitKind set.
   const pickerKind: SourceKind = $derived(submitKind ?? "youtube_channel");
+  // The post-cap note reads the kind-appropriate ceiling: Telegram caps deeper
+  // (free t.me/s scrape) than IG. Read from the loader value, never hardcoded.
+  const pickerPostCap = $derived(
+    pickerKind === "telegram_channel" ? telegramBackfillMaxPosts : socialBackfillMaxPosts,
+  );
 
   // Picker collapse → reset value (same effect as /sources/new).
   $effect(() => {
@@ -448,7 +455,7 @@
           bind:value={backfillWindow}
           bind:customDate={backfillCustomDate}
           kind={pickerKind}
-          postCap={socialBackfillMaxPosts}
+          postCap={pickerPostCap}
         />
       {/if}
 

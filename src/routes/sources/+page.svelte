@@ -341,6 +341,7 @@
     open={addOpen}
     kindMatrix={data.kindMatrix}
     socialBackfillMaxPosts={data.socialBackfillMaxPosts}
+    telegramBackfillMaxPosts={data.telegramBackfillMaxPosts}
     defaultIsOwnedByMe={data.defaultIsOwnedByMe}
     defaultAutoImport={data.defaultAutoImport}
     onClose={() => (addOpen = false)}

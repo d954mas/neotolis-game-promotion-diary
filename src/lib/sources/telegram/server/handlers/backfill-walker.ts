@@ -17,7 +17,8 @@
 //         subscriber chose "everything") has target=null and walks to
 //         end-of-history.
 //       * POST-COUNT CAP (B1) — the running collected count hit
-//         env.SOCIAL_BACKFILL_MAX_POSTS, so a giant archive costs a bounded
+//         env.TELEGRAM_BACKFILL_MAX_POSTS (Telegram's own cap, deeper than IG's
+//         since the t.me/s scrape is free), so a giant archive costs a bounded
 //         number of pages regardless of size (mirrors IG backfill-account.ts
 //         state.collected >= maxPosts).
 //   - CONTINUE → persist the next ?before cursor (which monotonically decreases,
@@ -149,7 +150,7 @@ export async function handleTelegramBackfillWalker(args: {
   // unbounded (an "everything" subscriber, or a direct test walk with no
   // subscriber row).
   const target = await resolveDeepestTargetSince(channel);
-  const maxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
+  const maxPosts = env.TELEGRAM_BACKFILL_MAX_POSTS;
 
   // Snapshot each post NEWER than the depth target; stop the page the moment we
   // cross below it (the listing is newest-first) OR the running count hits the

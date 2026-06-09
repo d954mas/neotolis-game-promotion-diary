@@ -16,6 +16,7 @@ export interface SourcesPageLoadData extends SourcesPageData {
   defaultIsOwnedByMe: boolean;
   defaultAutoImport: boolean;
   socialBackfillMaxPosts: number;
+  telegramBackfillMaxPosts: number;
   kindMatrix: KindMatrixEntry[];
 }
 
@@ -28,10 +29,13 @@ export interface SourcesPageLoadData extends SourcesPageData {
  */
 export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPageLoadData> => {
   const view = url.searchParams.get("view") === "trash" ? "trash" : ("feed" as const);
-  // BACK-01: surface the post-cap ceiling so the BackfillPicker honesty note
-  // ("Up to N most-recent posts within this window") reads the true value the
-  // walker enforces, not a hard-coded literal.
+  // BACK-01: surface each adapter's post-cap ceiling so the BackfillPicker
+  // honesty note ("Up to N most-recent posts within this window") reads the true
+  // value the walker enforces, not a hard-coded literal. IG and Telegram have
+  // separate caps (Telegram's t.me/s scrape is free → its own deeper default);
+  // AddSourceModal passes the kind-appropriate one to the picker.
   const socialBackfillMaxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
+  const telegramBackfillMaxPosts = env.TELEGRAM_BACKFILL_MAX_POSTS;
   // Single derived matrix — same call the /sources/new loader makes (F1). The
   // Reddit/Instagram not-configured state lives on each entry's disabledReason.
   const kindMatrix: KindMatrixEntry[] = buildKindMatrix();
@@ -48,6 +52,7 @@ export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPage
       defaultIsOwnedByMe: true,
       defaultAutoImport: true,
       socialBackfillMaxPosts,
+      telegramBackfillMaxPosts,
       kindMatrix,
     };
   }
@@ -58,6 +63,7 @@ export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPage
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
     socialBackfillMaxPosts,
+    telegramBackfillMaxPosts,
     kindMatrix,
   };
 };
