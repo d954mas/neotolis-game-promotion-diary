@@ -160,11 +160,7 @@ function parseReactions(el: HTMLElement): {
     const isPaid = span.classList.contains("tgme_reaction_paid");
     const emojiBold = span.querySelector("i.emoji > b");
     const emoji = emojiBold?.text?.trim() || null;
-    const kind: TelegramReaction["kind"] = isPaid
-      ? "paid"
-      : emoji !== null
-        ? "standard"
-        : "custom";
+    const kind: TelegramReaction["kind"] = isPaid ? "paid" : emoji !== null ? "standard" : "custom";
 
     const rawText = span.text;
     const countText = emoji !== null ? rawText.replace(emoji, "") : rawText;
@@ -176,9 +172,7 @@ function parseReactions(el: HTMLElement): {
   if (reactions.length === 0) return { reactionsTotal: null, reactionsTop: [] };
 
   const reactionsTotal = reactions.reduce((sum, r) => sum + r.count, 0);
-  const reactionsTop = [...reactions]
-    .sort((a, b) => b.count - a.count)
-    .slice(0, TOP_REACTIONS_CAP);
+  const reactionsTop = [...reactions].sort((a, b) => b.count - a.count).slice(0, TOP_REACTIONS_CAP);
   return { reactionsTotal, reactionsTop };
 }
 
