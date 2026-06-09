@@ -30,6 +30,7 @@ import type {
   AdapterContext,
   BackfillWindow,
   EventKind,
+  EventPreviewMetadata,
   MinimalBoss,
   NormalizeSourceInput,
   NormalizeSourceResult,
@@ -45,15 +46,21 @@ import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
 import { logger } from "$lib/server/logger.js";
 import { AppError } from "$lib/server/services/errors.js";
+import { AdapterError } from "$lib/sources/errors.js";
 import { telegramChannelAdapterCore } from "./adapter.js";
 import { telegramObservability } from "./observability.js";
 import { telegramParsePostUrl, telegramParseSourceUrl } from "./url.js";
+import { fetchTelegramPost } from "./http.js";
+import { parseTelegramPost } from "./parse.js";
+import { writeTelegramSnapshot } from "./snapshots.js";
 import { handleTelegramWarmRefresh } from "./handlers/warm-refresh.js";
 import {
   telegramWorkerTick,
   TELEGRAM_SLOT_MAPPING,
   FALLTHROUGH_ORDER,
 } from "./handlers/worker-tick.js";
+
+const TELEGRAM_BASE = "https://t.me";
 
 const KIND = "telegram_channel" as const;
 
@@ -294,6 +301,150 @@ function validateEventInput(input: { kind: string; url?: string | null }): void 
   }
 }
 
+/** Split "<channel>/<messageId>" → { channel, messageId }, or null when the
+ *  shape is wrong. Telegram message ids are per-channel sequential and NOT
+ *  globally unique (RESEARCH Q3), so the composite is the stable post id. */
+function splitTelegramPostId(postId: string): { channel: string; messageId: string } | null {
+  const slash = postId.indexOf("/");
+  if (slash <= 0 || slash === postId.length - 1) return null;
+  return { channel: postId.slice(0, slash), messageId: postId.slice(slash + 1) };
+}
+
+/** Shared single-post fetch core for the sync paste + preview paths. Issues ONE
+ *  ?embed=1 GET through the DEFAULT "acquire" pacer (a sync user path owns its
+ *  own slot — the lane worker's "already-acquired" is a worker-only contract),
+ *  parses the embed widget, and UPSERTs telegram_posts + a snapshot via
+ *  writeTelegramSnapshot so the saved event renders views immediately (mirrors
+ *  the warm-lane handleWarmPostFetch + Reddit handlePostSingle / IG
+ *  fetchPostByUrl→writeSnapshot). A null parse → a not_found snapshot (the
+ *  telegram_posts row still stamps last_polled_at) and a null parsed result so
+ *  the caller degrades. AdapterError propagates (the caller maps it to the
+ *  graceful-degrade discriminator). */
+async function fetchTelegramPostSingle(
+  channel: string,
+  messageId: string,
+): Promise<import("./parse.js").ParsedTelegramPost | null> {
+  const postId = `${channel}/${messageId}`;
+  const externalUrl = `${TELEGRAM_BASE}/${postId}`;
+  const html = await fetchTelegramPost(channel, messageId);
+  const parsed = parseTelegramPost(html);
+  if (parsed === null) {
+    await writeTelegramSnapshot({ postId, externalUrl, viewCount: null, status: "not_found" });
+    return null;
+  }
+  await writeTelegramSnapshot({
+    postId,
+    textSnippet: parsed.textSnippet,
+    mediaKind: parsed.mediaKind,
+    thumbnailUrl: parsed.thumbnailUrl,
+    externalUrl,
+    publishedAt: parsed.publishedAt,
+    viewCount: parsed.viewCount,
+    status: "ok",
+  });
+  return parsed;
+}
+
+/**
+ * fetchEventPreviewMetadata — adapter wrapper for the Add Event "Fetch" button
+ * (POST /api/events/preview-url). Mirrors Reddit's / IG's synchronous single-post
+ * preview: ONE ?embed=1 t.me GET (free — no credit, no cap), then UPSERTs the
+ * telegram_posts cache + a snapshot so the saved event renders views immediately
+ * in /feed (exactly like Reddit's preview UPSERTs reddit_posts + a snapshot, and
+ * IG's preview UPSERTs instagram_posts + a snapshot).
+ *
+ * The Telegram externalId IS URL-derivable ("<channel>/<messageId>" — RESEARCH
+ * Q3) and matches telegram_posts.post_id directly, so this preview does NOT set
+ * EventPreviewMetadata.externalId (the caller keeps the URL-parsed value, the
+ * opposite of IG which must override with the non-URL media id). NO
+ * resolveCachedExternalId is needed for the same reason.
+ *
+ * Graceful-degrade discriminators (mirrors Reddit's mapping):
+ *   - URL not a t.me post  → unreachable(url_not_telegram_post)
+ *   - null parse (deleted / private / nonexistent — t.me serves HTTP 200 with no
+ *     widget block) → unavailable
+ *   - AdapterError not-found → unavailable
+ *   - AdapterError rate-limited (pacer denial / 403 / 429) → unreachable(rate_limited)
+ *   - AdapterError transient/permanent (network, 5xx) → unreachable(cause)
+ * A typed AppError propagates (none is thrown today; kept for parity with the
+ * Reddit branch). Telegram is FREE so there is no cap-exhaustion soft path.
+ */
+async function fetchEventPreviewMetadata(
+  canonicalUrl: string,
+  _ctx: { userId: string; ipAddress: string },
+): Promise<EventPreviewMetadata> {
+  const parsed = telegramParsePostUrl(canonicalUrl);
+  if (parsed === null) {
+    return { kind: "unreachable", cause: "url_not_telegram_post" };
+  }
+  const { channel, messageId } = parsed.metadata as { channel: string; messageId: string };
+  try {
+    const post = await fetchTelegramPostSingle(channel, messageId);
+    if (post === null) return { kind: "unavailable" };
+    const snippet = post.textSnippet.trim();
+    return {
+      kind: "ok",
+      // Title = the post's first text line (the user-meaningful label), falling
+      // back to "Telegram post <channel>/<id>" so a media-only post still yields
+      // a non-empty title (the Add Event form requires one) — mirrors
+      // materializeTelegramEvents' title rule.
+      title: snippet !== "" ? snippet.slice(0, 200) : `Telegram post ${parsed.externalId}`,
+      // The channel handle is the author surface for a Telegram channel (no
+      // per-post author, unlike a subreddit). authorUrl is the canonical channel
+      // URL; the display TITLE stays on data_sources (no-denorm — never copied
+      // onto the event).
+      authorName: channel,
+      authorUrl: `${TELEGRAM_BASE}/${channel}`,
+      occurredAt: post.publishedAt ?? undefined,
+      thumbnailUrl: post.thumbnailUrl ?? undefined,
+    };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    if (err instanceof AdapterError) {
+      if (err.category === "not-found") return { kind: "unavailable" };
+      if (err.category === "rate-limited") return { kind: "unreachable", cause: "rate_limited" };
+      return { kind: "unreachable", cause: err.message };
+    }
+    return { kind: "unreachable", cause: String((err as Error)?.message ?? err) };
+  }
+}
+
+/**
+ * fetchSyncStats — synchronous stats fetch on POST /api/events so /feed shows the
+ * view count immediately. Mirrors Reddit's syncStats.fetch: the cross-source
+ * createEvent calls this AFTER the events INSERT, errors are logged-and-swallowed
+ * by the caller. Covers the create-WITHOUT-preview path (a direct paste-save that
+ * never clicked "Fetch") — the preview path already wrote the snapshot, and
+ * writeTelegramSnapshot's per-minute ON CONFLICT DO NOTHING collapses a
+ * preview+submit pair to one snapshot row.
+ *
+ * Telegram is VIEWS-ONLY (no likes/comments on the public t.me surface, D-04), so
+ * likeCount/commentCount are constant 0 (the cross-source shape is preserved for
+ * UI parity; per-kind feed enrichment reads telegram_post_snapshots for the
+ * Telegram-specific view). No authorIsMe signal — a telegram_post has no per-post
+ * author to match (author_is_me is inherited from the owned data_sources row at
+ * source-create time, D-02). Returns null on fetch failure → the caller treats it
+ * as "stats unavailable, cron/warm lane will pick it up".
+ */
+async function fetchSyncStats(
+  externalId: string,
+  _ctx: { userId: string; ipAddress?: string },
+): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null> {
+  const ids = splitTelegramPostId(externalId);
+  if (ids === null) return null;
+  try {
+    const post = await fetchTelegramPostSingle(ids.channel, ids.messageId);
+    if (post === null) return null;
+    return { viewCount: post.viewCount ?? 0, likeCount: 0, commentCount: 0 };
+  } catch (err) {
+    logger.warn(
+      { externalId, err: String((err as Error)?.message ?? err) },
+      "telegram syncStats.fetch failed; UI will rely on cron/warm polling",
+    );
+    return null;
+  }
+}
+
 /** enqueueRefreshNow — the per-event Refresh-Now path. INSERTs ONE user_post row
  *  into adapter_refresh_queue; the lane worker fetches that post via ?embed=1 +
  *  writeTelegramSnapshot. INSERT via the passed tx (requestRefreshPoll calls this
@@ -348,6 +499,14 @@ export const telegramAdapter: SourceAdapter & typeof telegramChannelAdapterCore 
   normalizeSourceOnCreate,
   onSourceCreated,
   validateEventInput,
+  fetchEventPreviewMetadata,
+  // Telegram is FREE (no canRun gate, mirrors Reddit's gate-less syncStats).
+  // Covers the create-without-preview path so a direct paste-save renders views
+  // immediately; the preview path already wrote the snapshot (per-minute ON
+  // CONFLICT DO NOTHING collapses the preview+submit pair to one row).
+  syncStats: {
+    fetch: fetchSyncStats,
+  },
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "telegram_post",
     // NO canRun — free, always available (IG's canRun existed only to block on an

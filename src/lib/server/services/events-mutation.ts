@@ -461,7 +461,10 @@ export interface EnrichmentResult {
  *   - unsupported URL                → AppError 'unsupported_url' 422
  *   - reddit_post unreachable        → AppError 'reddit_unreachable' 502
  *   - reddit_post private/unavailable → AppError 'reddit_post_not_found' 404
- *   - twitter_post/telegram_post     → AppError 'kind_not_yet_functional' 422
+ *   - telegram_post any failure      → soft-degrade to recognition-only (no 422
+ *                                       dead-end; mirrors the IG branch — free
+ *                                       source, manual entry always preserved)
+ *   - twitter_post                   → AppError 'kind_not_yet_functional' 422
  *   - oEmbed 5xx/network             → AppError 'youtube_oembed_unreachable' 502
  *   - oEmbed 401 (private)           → AppError 'youtube_unavailable' 422
  *   - oEmbed 404 (unavailable)       → AppError 'youtube_unavailable' 422
@@ -543,7 +546,82 @@ export async function enrichFromUrl(
     };
   }
 
-  if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
+  // Telegram branch — adapter-driven preview through
+  // telegramAdapter.fetchEventPreviewMetadata. Mirrors the Reddit + IG branches:
+  // ONE synchronous ?embed=1 t.me fetch (free — no credit, no cap), which UPSERTs
+  // telegram_posts + a snapshot so the saved event renders views immediately.
+  //
+  // The externalId is URL-derivable — telegramParsePostUrl returns
+  // "<channel>/<messageId>", which IS telegram_posts.post_id — so we set it
+  // directly here (and createEvent's parseAnyUrl path derives the same value on
+  // save; telegram_post is NOT in that path's exclusion list). The IG-style
+  // resolveCachedExternalId is deliberately NOT used (IG needs it only because
+  // the IG media id is NOT in the URL).
+  if (parsed.kind === "telegram_post") {
+    const { telegramParsePostUrl } = await import("$lib/sources/telegram/server/url.js");
+    const telegramExternalId = telegramParsePostUrl(parsed.canonicalUrl)?.externalId ?? null;
+    // Recognition-only fallback (no live data resolved) — honest stats-less
+    // manual card, never a dead-end. externalId stays the URL-derived composite
+    // (unlike IG's shortcode trap: the Telegram composite IS the cache key, so
+    // the card can still be enriched later by the warm/cron lane or a Refresh).
+    const recognitionOnly: EnrichmentResult = {
+      kind: "telegram_post",
+      externalId: telegramExternalId,
+      title: "",
+      occurredAt: null,
+      thumbnailUrl: null,
+      authorName: null,
+      authorUrl: null,
+      canonicalUrl: parsed.canonicalUrl,
+      sourceMatch: null,
+    };
+    const adapter = getAdapter("telegram_channel");
+    if (adapter.fetchEventPreviewMetadata === undefined) return recognitionOnly;
+
+    let preview;
+    try {
+      preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+        userId,
+        ipAddress,
+      });
+    } catch (err) {
+      // EXPECTED failures (AdapterError network/rate-limit, any typed AppError)
+      // soft-degrade — manual entry must never dead-end. An UNEXPECTED throw (a
+      // programmer bug: bad import, undefined access) is NOT in the degrade
+      // contract — re-throw so it surfaces as a 500 + escaped-error log rather
+      // than hiding behind a benign WARN. Mirrors the IG branch.
+      const { AdapterError } = await import("$lib/sources/errors.js");
+      if (!(err instanceof AppError) && !(err instanceof AdapterError)) throw err;
+      logger.warn(
+        { userId, url: parsed.canonicalUrl, err: String((err as Error)?.message ?? err) },
+        "telegram preview threw; degrading to recognition-only manual entry",
+      );
+      return recognitionOnly;
+    }
+
+    // Any non-ok discriminator (unreachable / private / unavailable) →
+    // recognition-only so the user can still save a bare event (no 422 dead-end).
+    if (preview.kind !== "ok") return recognitionOnly;
+
+    return {
+      kind: "telegram_post",
+      // URL-derived composite — matches telegram_posts.post_id (the snapshot the
+      // preview just wrote keys on it). Falls back to null (never a partial id).
+      externalId: telegramExternalId,
+      title: preview.title,
+      occurredAt: preview.occurredAt ?? null,
+      thumbnailUrl: preview.thumbnailUrl ?? null,
+      authorName: preview.authorName || null,
+      authorUrl: preview.authorUrl || null,
+      canonicalUrl: parsed.canonicalUrl,
+      // author_is_me for a telegram_post is inherited from the owned
+      // data_sources row at source-create time (D-02), not matched per-post —
+      // a telegram channel has no per-post author. No sourceMatch precompute.
+      sourceMatch: null,
+    };
+  }
+
+  if (parsed.kind === "twitter_post") {
     throw new AppError(
       `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
       "kind_not_yet_functional",
