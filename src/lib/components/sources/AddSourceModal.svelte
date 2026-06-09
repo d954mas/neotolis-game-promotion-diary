@@ -28,7 +28,10 @@
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
-  import { inferSourceKindFromUrl } from "$lib/components/sources/infer-source-kind.js";
+  import {
+    inferSourceKindFromUrl,
+    normalizeHandleUrl,
+  } from "$lib/components/sources/infer-source-kind.js";
 
   // Mirror the synthetic UI kind picker from /sources/new — "reddit" is
   // resolved server-side to reddit_account / reddit_subreddit by URL
@@ -238,14 +241,14 @@
     e.preventDefault();
     if (submitting) return;
     if (handleUrl.trim().length === 0) return;
-    if (!handleUrl.trim().startsWith("https://")) {
-      formError = m.ingest_error_malformed_url();
-      return;
-    }
     if (submitKind === null) {
       formError = m.add_source_link_unrecognized();
       return;
     }
+    // URL-first: accept scheme-less host/paths ("t.me/durov") and raw handles —
+    // normalize to an absolute URL the server's parseSourceUrl can read. The
+    // detector already matched a kind above, so this is a recognized link.
+    const normalizedUrl = normalizeHandleUrl(handleUrl);
     submitting = true;
     formError = null;
     try {
@@ -254,7 +257,7 @@
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           kind: submitKind,
-          handleUrl: handleUrl.trim(),
+          handleUrl: normalizedUrl,
           metadata: description.trim() ? { description: description.trim() } : undefined,
           isOwnedByMe,
           autoImport,
@@ -375,9 +378,13 @@
 
       <label class="field">
         <span class="label">Handle URL *</span>
+        <!-- type="text" (not "url"): the field accepts scheme-less host/paths and
+             raw @handles per the placeholder; type="url" would natively reject
+             "t.me/durov" before submit (the normalize step adds the scheme). -->
         <input
           class="input"
-          type="url"
+          type="text"
+          inputmode="url"
           bind:value={handleUrl}
           required
           placeholder="https://t.me/channel · youtube.com/@handle · reddit.com/r/sub"
