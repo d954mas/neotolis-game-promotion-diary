@@ -39,8 +39,22 @@
 // been deleted. The row IS the historical record for that channel's per-post
 // stats; future channel-level analytics require the full historical record.
 
-import { pgTable, text, timestamp, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, jsonb, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+/** One reaction entry for the card's top-5 list (E1 — current-state, lives on
+ *  telegram_posts like thumbnail_url / text_snippet, NOT the snapshot table).
+ *  - `emoji` is the unicode char for a standard emoji; null for a custom/premium
+ *    sticker (only an emoji-id, no unicode) and for a paid Telegram-Stars
+ *    reaction (a stars glyph, no emoji). The card renders a per-kind fallback
+ *    glyph when emoji is null.
+ *  - `kind` distinguishes the three reaction families the t.me/s markup exposes.
+ *  - `count` is the normalized integer (K/M-expanded, same as view counts). */
+export interface TelegramReaction {
+  emoji: string | null;
+  kind: "standard" | "custom" | "paid";
+  count: number;
+}
 
 export const telegramPosts = pgTable(
   "telegram_posts",
@@ -57,6 +71,14 @@ export const telegramPosts = pgTable(
     textSnippet: text("text_snippet"),
     mediaKind: text("media_kind"), // 'photo' | 'video' | 'album' | null
     thumbnailUrl: text("thumbnail_url"), // hotlink (D-06); refreshed each poll
+    // Top-5 most-popular reactions (E1 current-state — parallels thumbnail_url /
+    // text_snippet: the card's reactions list reads THIS, while the
+    // reactions_total time-series lives on telegram_post_snapshots). Array of
+    // {emoji, kind, count} sorted desc, capped at 5. null until first resolved;
+    // COALESCE-preserved on a non-ok poll (a transient failure must not blank a
+    // working reactions list, same rule as thumbnail_url). A post with no
+    // reactions block stores [] (resolved, but empty) → the card renders no row.
+    reactionsTop: jsonb("reactions_top").$type<TelegramReaction[]>(),
     externalUrl: text("external_url"), // canonical t.me/<channel>/<id>
     publishedAt: timestamp("published_at", { withTimezone: true }), // drives tier
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),

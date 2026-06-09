@@ -15,10 +15,15 @@
 // NOTHING`). `polled_at` is `date_trunc('minute', now())` at insert time so two
 // retries inside the same minute collapse to one row.
 //
-// Telegram exposes ONLY a view count on the public t.me/s listing — no likes,
-// no comments, no shares — so this table is views-only (D-02). `view_count` is
-// bigint (channels exceed 2^31 views — 14M seen live) and is null when the post
-// hides views (very new / views disabled) → excluded from the chart.
+// Telegram exposes a view count AND a per-post reaction tally on the public
+// t.me/s LISTING (the reactions block is absent from the ?embed=1 single-post
+// page). `view_count` is bigint (channels exceed 2^31 views — 14M seen live)
+// and is null when the post hides views (very new / views disabled) → excluded
+// from the chart. `reactions_total` (E1 — Phase 9 UAT second metric) is the
+// summed count across every reaction kind (standard emoji + custom/premium
+// stickers + paid Telegram-Stars), parallel to view_count: bigint, null when
+// the post carries no reactions block (→ chart GAP, never coerced to 0, the
+// metric-series reader drops an all-null reactions line — D-05).
 //
 // Deep-history backfill yields a CURRENT snapshot of old posts, NOT historical
 // trends — per-post time-series accrues only from when tracking starts.
@@ -37,6 +42,10 @@ export const telegramPostSnapshots = pgTable(
     // bigint — channels exceed 2^31 views (14M seen live). null when the
     // post hides views (very new / views disabled) → excluded from chart.
     viewCount: bigint("view_count", { mode: "number" }),
+    // bigint — summed reaction count across all kinds (E1, second metric). null
+    // when the post has no reactions block → excluded from chart (D-05 GAP).
+    // Popular posts exceed 2^31 reactions in aggregate, so bigint like views.
+    reactionsTotal: bigint("reactions_total", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

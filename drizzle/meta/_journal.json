@@ -414,6 +414,13 @@
       "when": 1780991077866,
       "tag": "0058_sad_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1780993596412,
+      "tag": "0059_majestic_dazzler",
+      "breakpoints": true
     }
   ]
 }
