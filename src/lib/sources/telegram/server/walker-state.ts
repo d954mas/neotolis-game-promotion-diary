@@ -251,11 +251,7 @@ export async function commitTelegramWalkProgress(
       },
       tx,
     );
-    if (
-      persistResult.committed &&
-      !payload.backfillComplete &&
-      payload.nextBeforeCursor !== null
-    ) {
+    if (persistResult.committed && !payload.backfillComplete && payload.nextBeforeCursor !== null) {
       await enqueueTelegramBackfillContinuation(channelKey, tx);
     }
     return persistResult;
