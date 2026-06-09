@@ -691,6 +691,7 @@ An auto-import adapter that wants channel-level / account-level analytics later 
 | ------- | ------------ | -------------------- | ----- |
 | YouTube | `youtube_channels` | `channel_id` (UC…) | channel title, uploads playlist id, handle aliases |
 | Reddit | `reddit_subreddits_cache` | `name` (lowercase slug) | subscribers, description, submission metadata |
+| Instagram | `instagram_accounts` | `account_id` (stable IG user id, = `instagram_posts.account_id`) | full name, @handle username, avatar, follower count, handle aliases |
 | Telegram | `telegram_channels` | `channel_key` (numeric id from each post's base64 `data-view` payload `{"c":…}`) | title, @username slug, avatar, subscriber count, description, handle aliases |
 
 The entity row's `title` / `name` is the upstream-scraped value — OUR truth for the subject's own metadata (see the "this IS our truth" comment in `youtube_channels.ts`). It is **not** a copy of `data_sources.display_name`, which is the user-facing label a tenant may rename freely. The two coexist by design and never alias each other (AGENTS.md no-denorm rule forbids caching `data_sources.display_name` onto the entity, and equally forbids caching the entity title onto a `data_sources` / per-post row). The renameable @username / handle still lives on `data_sources` for feed enrichment; the entity carries a `handle_aliases` history so a future channel page can resolve any historical handle to the rename-proof id. Populate via UPSERT on each poll, COALESCE-preserving prior good values on a partial / failed parse so a transient miss never blanks working metadata (same rule as a per-post thumbnail, IG #69 P1-A).
@@ -705,5 +706,7 @@ The entity row's `title` / `name` is the upstream-scraped value — OUR truth fo
 | ------- | ---------- | --------------------------- | ------------- |
 | YouTube | ✅ `youtube_channels` | ✅ | — (not built; analytics live on the per-game chart) |
 | Reddit | ✅ `reddit_subreddits_cache` | ✅ | ✅ `reddit_subreddit_baselines` (the canonical reference) |
-| Instagram | ❌ **documented debt** — no account-entity table; per-account analytics have no anchor | ✅ `instagram_posts` + snapshots | — |
+| Instagram | ✅ `instagram_accounts` | ✅ `instagram_posts` + snapshots | — (designed-for; not built) |
 | Telegram | ✅ `telegram_channels` (Phase 9) | ✅ `telegram_posts` + snapshots | — (designed-for; not built) |
+
+`instagram_accounts` is populated from data the adapter ALREADY pays for — the create-time profile resolve (`resolveHandleToAccountId`, the richer full_name / avatar / follower_count) and the FREE feed owner object the walker page carries (account_id + @handle + avatar), COALESCE-preserving the richer profile fields. ZERO additional provider credits: the entity refreshes from data in hand, so it adds the subject-entity anchor without touching the IG cost guardrails or the backfill cap.
