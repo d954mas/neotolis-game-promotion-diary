@@ -99,9 +99,18 @@ In `<kind>/server/handlers/`:
 
 ## 4. UI integration
 
+> **Why two of these are explicit, not compile-enforced.** The feed kind-filter
+> and the chart event-marker thumbnail are hand-edited surfaces (not
+> `satisfies Record<…>`-enforced), so an adapter can ship and be **invisible** in
+> filters / charts — Phase 10 D-08/D-09 fixed exactly that IG/Telegram regression
+> structurally (derive the filter from `kind-display.ts`; route the marker through
+> the enrichment seam). These checklist items prevent it recurring.
+
 - [ ] Create `<kind>/ui/server.ts` — `toCardProps(event): CardProps` projection for feed display.
 - [ ] Create `<kind>/ui/index.ts` — optional client-side `cardComponent` override if FeedCard default doesn't fit.
 - [ ] Register both in `src/lib/sources/registry-ui.ts` and `src/lib/sources/registry-ui-client.ts` — **one line each**.
+- [ ] **Feed kind-filter visibility.** Set `feedFilterable: true` on the new EventKind in `src/lib/sources/kind-display.ts` (EVENT_KIND_DISPLAY). The /feed FiltersSheet derives its KIND axis from `FEED_FILTERABLE_EVENT_KINDS` — do NOT add the kind to any hand-list. Verify the kind appears in the /feed Filters sheet after wiring.
+- [ ] **Chart event-marker thumbnail.** Ensure the adapter's `enrichFeedDtos` hangs a `<kind>Enrichment.thumbnailUrl` on the dto AND that `eventThumbnail` in `src/lib/components/charts/wishlist-chart-shared.ts` reads it (add the `<kind>Enrichment` field to its ThumbnailEvent type). The games-chart markers resolve through this seam — a missing thumbnail field means a blank marker. Verify a marker shows the preview on /games/[id].
 
 ---
 
