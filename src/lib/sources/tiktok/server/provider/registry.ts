@@ -20,3 +20,13 @@ export function isTikTokConfigured(): boolean {
 
 /** The TikTok provider impl (the SOC-02 issuer). */
 export const tiktokProvider: SocialProvider = scrapeCreatorsTikTokProvider;
+
+// Re-export the CANONICAL cross-platform switch from instagram's registry (the
+// single switch, all platforms — do NOT fork it). The tiktok tree's handlers /
+// adapter import `getSocialProvider` from HERE so they read their provider
+// accessor from inside their own folder; the routing logic still lives in one
+// place. Integration tests mock THIS module's getSocialProvider to inject a fake
+// tiktok provider at the seam (mirrors the instagram tests). The re-export is a
+// live binding, so a vi.mock of this module shadows it for the tiktok tree
+// without touching the instagram tree's own copy.
+export { getSocialProvider } from "$lib/sources/instagram/server/provider/registry.js";

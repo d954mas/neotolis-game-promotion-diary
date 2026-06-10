@@ -212,6 +212,7 @@ export const VALID_EVENT_KINDS = [
   "youtube_video",
   "reddit_post",
   "instagram_post",
+  "tiktok_post",
   "twitter_post",
   "telegram_post",
   "discord_drop",

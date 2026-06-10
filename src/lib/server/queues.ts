@@ -94,6 +94,24 @@ export const QUEUES = {
    *  is a monotonic hard ceiling (D-16 / Pitfall 3). */
   INSTAGRAM_QUOTA_RESET: "instagram.quota_reset",
 
+  // Per-kind: tiktok (Phase 10, paid ScrapeCreators scraper). Mirrors the
+  // Instagram cron topology — TikTok is the same PAID-scraper substrate (one
+  // resumable account walker, age-tiered ongoing poll, midnight-PT daily-cap
+  // reset), just SINGLE-FEED (one max_cursor / has_more, no posts/reels split).
+  /** Account-scoped resumable walker — one page per tick, fans out INSERT events
+   *  to all active subscribers, persists the provider cursor (the coerced
+   *  max_cursor string) to data_source_channel_state.metadata.tiktok. Singleton
+   *  key by TikTok account id dedupes parallel triggers. */
+  TIKTOK_BACKFILL_ACCOUNT: "tiktok.backfill.account",
+  /** Active + cold ongoing poll + warm per-post producer collapsed via pg-boss
+   *  key-based schedules ({ tier } payload — active 6h / cold daily / warm
+   *  hourly). The poll-cron handler dispatches on job.data.tier. */
+  TIKTOK_POLL_CRON: "tiktok.poll.cron",
+  /** Midnight-Pacific daily-cap counter reset. Clears ONLY the daily-cap spend
+   *  counter / audit-transition Set — NEVER the prepaid balance, which is a
+   *  monotonic hard ceiling shared with IG (D-16 / D-01 / Pitfall 3). */
+  TIKTOK_QUOTA_RESET: "tiktok.quota_reset",
+
   // Per-kind: telegram (Phase 9, free t.me/s scrape — no secret).
   /** Telegram 6h listing poll + warm producer collapsed via pg-boss
    *  key-based schedules ({ tier } payload — active/cold 6h listing /
