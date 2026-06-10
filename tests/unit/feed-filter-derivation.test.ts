@@ -13,10 +13,7 @@
 // someone re-introduces a hand-list that drops a kind, this fails.
 
 import { describe, it, expect } from "vitest";
-import {
-  FEED_FILTERABLE_EVENT_KINDS,
-  eventKindLabel,
-} from "../../src/lib/sources/kind-display.js";
+import { FEED_FILTERABLE_EVENT_KINDS, eventKindLabel } from "../../src/lib/sources/kind-display.js";
 import { sortByLabel } from "../../src/lib/util/sort-kinds.js";
 
 // The exact expression FiltersSheet.svelte uses for its KIND_OPTIONS $derived.
