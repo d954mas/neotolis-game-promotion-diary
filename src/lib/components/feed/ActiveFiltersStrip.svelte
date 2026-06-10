@@ -41,6 +41,7 @@
     telegram_post: "var(--k-telegram)",
     discord_drop: "var(--k-discord)",
     instagram_post: "var(--k-instagram)",
+    tiktok_post: "var(--k-tiktok)",
     conference: "var(--k-conference)",
     talk: "var(--k-talk)",
     press: "var(--k-press)",

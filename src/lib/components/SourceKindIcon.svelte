@@ -39,7 +39,8 @@
     | "twitter_account"
     | "telegram_channel"
     | "discord_server"
-    | "instagram_account";
+    | "instagram_account"
+    | "tiktok_account";
   type _AllSourceKindsHaveIcon =
     Exclude<SourceKind, IconedSourceKind> extends never
       ? true
@@ -163,6 +164,25 @@
     <rect x="3" y="3" width="18" height="18" rx="5" />
     <circle cx="12" cy="12" r="4" />
     <circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none" />
+  </svg>
+{:else if kind === "tiktok_account"}
+  <!-- TikTok — music note (short-form video): note stem + flag + filled note
+       head. Geometric primitives only (NO brand glyph); mirrors the
+       tiktok_post icon in kind-icon-svg.ts for cross-surface consistency. -->
+  <svg
+    class="icon"
+    viewBox="0 0 24 24"
+    width="16"
+    height="16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M10 18V6l8-2v3" />
+    <circle cx="7.5" cy="18" r="2.5" fill="currentColor" stroke="none" />
   </svg>
 {/if}
 

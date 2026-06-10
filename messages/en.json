@@ -826,6 +826,7 @@
   "feed_axis_kind_telegram_post": "Telegram",
   "feed_axis_kind_discord_drop": "Discord",
   "feed_axis_kind_instagram_post": "Instagram",
+  "feed_axis_kind_tiktok_post": "TikTok",
   "feed_axis_kind_post": "Post",
   "feed_axis_kind_conference": "Conference",
   "feed_axis_kind_talk": "Talk",

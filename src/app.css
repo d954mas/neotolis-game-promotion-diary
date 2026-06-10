@@ -100,6 +100,7 @@
   --k-telegram: #5baac8; /* cyan */
   --k-discord: #7a82d6; /* indigo */
   --k-instagram: #d167a6; /* magenta */
+  --k-tiktok: #4fb6b0; /* teal — distinct from telegram cyan */
   --k-conference: #7fb46a; /* sage */
   --k-talk: #d8b259; /* amber */
   --k-press: #b488d4; /* lilac */
@@ -116,6 +117,7 @@
   --k-telegram_post: var(--k-telegram);
   --k-discord_drop: var(--k-discord);
   --k-instagram_post: var(--k-instagram);
+  --k-tiktok_post: var(--k-tiktok);
 
   /* Single source of truth for the sticky chrome offset. The chrome
    * wrapper (`.sticky-chrome` in src/routes/+layout.svelte) contains BOTH

@@ -16,6 +16,7 @@ import {
   SOURCE_KIND_DISPLAY,
   POLLABLE_EVENT_KINDS,
   CHARTABLE_EVENT_KINDS,
+  FEED_FILTERABLE_EVENT_KINDS,
   MANUAL_EVENT_KINDS,
   SOURCE_PLATFORM_GROUPS,
   eventKindLabel,
@@ -70,6 +71,7 @@ describe("kind-display config — EVENT_KIND_DISPLAY", () => {
       expect(typeof d.pollable).toBe("boolean");
       expect(typeof d.chartable).toBe("boolean");
       expect(typeof d.manualCreatable).toBe("boolean");
+      expect(typeof d.feedFilterable).toBe("boolean");
     }
   });
 
@@ -143,6 +145,25 @@ describe("kind-display config — derived helper sets stay in lockstep", () => {
     // Phase 09 — telegram_post charts its view_count series.
     expect(CHARTABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
     expect(CHARTABLE_EVENT_KINDS.has("other")).toBe(false);
+  });
+
+  it("FEED_FILTERABLE_EVENT_KINDS equals exactly the feedFilterable=true entries", () => {
+    const expected = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_DISPLAY[k].feedFilterable);
+    expect([...FEED_FILTERABLE_EVENT_KINDS].sort()).toEqual([...expected].sort());
+    // Phase 10 D-08 — the user-reported regression: the social adapter kinds
+    // were missing from the /feed KIND axis. They MUST be members now, and a
+    // new adapter kind auto-appears the moment it's marked feedFilterable.
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("youtube_video")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("reddit_post")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("instagram_post")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
+    // Free-form kinds stay filterable (they were never the regression).
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("post")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("other")).toBe(true);
+    // No-adapter kinds stay OUT — filtering to a kind you can't create is a
+    // footgun (same rationale as manualCreatable:false).
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("twitter_post")).toBe(false);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("discord_drop")).toBe(false);
   });
 });
 

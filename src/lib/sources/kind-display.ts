@@ -50,6 +50,24 @@ export interface EventKindDisplay {
    *  from the picker: the new key must declare manualCreatable, forcing an
    *  explicit yes/no decision. Order is carried by MANUAL_EVENT_KINDS. */
   manualCreatable: boolean;
+  /** Appears as an option in the /feed KIND filter axis (FiltersSheet's
+   *  checkbox list, derived from FEED_FILTERABLE_EVENT_KINDS). true for the
+   *  kinds a user can see in their feed and meaningfully filter — the pollable
+   *  paste-flow kinds (youtube_video / reddit_post / instagram_post /
+   *  telegram_post) PLUS the free-form kinds (press / post / conference / talk
+   *  / other); false for twitter_post / discord_drop, which have no adapter —
+   *  filtering to a kind you can't create is a footgun (same rationale as
+   *  manualCreatable).
+   *
+   *  Phase 10 D-08: this flag REPLACES the hand-maintained allowlist that used
+   *  to live in FiltersSheet.svelte (FUNCTIONAL_KIND_OPTIONS). That hand-list
+   *  was never updated when instagram_post / telegram_post shipped, so the
+   *  social kinds silently dropped out of the /feed filter — the user-reported
+   *  regression. Deriving from this flag means a new adapter kind auto-appears
+   *  in the filter the moment it's marked feedFilterable:true, with no sheet
+   *  edit, and the `satisfies Record<EventKind, …>` below forces the explicit
+   *  yes/no decision for every future kind. */
+  feedFilterable: boolean;
 }
 
 export interface SourceKindDisplay {
@@ -68,72 +86,84 @@ export const EVENT_KIND_DISPLAY = {
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   reddit_post: {
     label: () => m.event_kind_label_reddit_post(),
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   instagram_post: {
     label: () => m.event_kind_label_instagram_post(),
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   tiktok_post: {
     label: () => m.event_kind_label_tiktok_post(),
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   twitter_post: {
     label: () => m.event_kind_label_twitter_post(),
     pollable: false,
     chartable: false,
     manualCreatable: false,
+    feedFilterable: false,
   },
   telegram_post: {
     label: () => m.event_kind_label_telegram_post(),
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   discord_drop: {
     label: () => m.event_kind_label_discord_drop(),
     pollable: false,
     chartable: false,
     manualCreatable: false,
+    feedFilterable: false,
   },
   conference: {
     label: () => m.event_kind_label_conference(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   talk: {
     label: () => m.event_kind_label_talk(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   press: {
     label: () => m.event_kind_label_press(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   post: {
     label: () => m.event_kind_label_post(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   other: {
     label: () => m.event_kind_label_other(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
 } satisfies Record<EventKind, EventKindDisplay>;
 
@@ -182,6 +212,17 @@ export const POLLABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
 
 export const CHARTABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
   (Object.keys(EVENT_KIND_DISPLAY) as EventKind[]).filter((k) => EVENT_KIND_DISPLAY[k].chartable),
+);
+
+/** The /feed KIND filter axis membership — every kind a user can see in their
+ *  feed and meaningfully filter to. FiltersSheet derives its KIND checkbox
+ *  list from this set (sorted by label), so a new adapter kind auto-appears in
+ *  the filter the moment it's marked feedFilterable:true — no hand-maintained
+ *  allowlist to forget (Phase 10 D-08, the IG/Telegram regression fix). */
+export const FEED_FILTERABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
+  (Object.keys(EVENT_KIND_DISPLAY) as EventKind[]).filter(
+    (k) => EVENT_KIND_DISPLAY[k].feedFilterable,
+  ),
 );
 
 /** The Add Event manual kind picker (AddEventForm) chip list, in render

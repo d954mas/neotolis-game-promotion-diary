@@ -38,7 +38,7 @@
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
   import { auditActionLabel, AUDIT_ACTION_LIST } from "$lib/audit-labels.js";
-  import { eventKindLabel } from "$lib/sources/kind-display.js";
+  import { eventKindLabel, FEED_FILTERABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
   // Source list shows a kind glyph + short kind label adjacent to
   // displayName. Reuses SourceKindIcon and the shared sourceKindLabel
   // helper.
@@ -148,22 +148,18 @@
   let fromVal = $state<string>(filters.from ?? "");
   let toVal = $state<string>(filters.to ?? "");
 
-  // Functional-only allowlist + alphabetical-by-label sort. Mirrors the
-  // /events/new picker — same allowlist, same sort. Hidden kinds
-  // (reddit_post / twitter_post / telegram_post / discord_drop)
-  // re-appear when their adapter ships. Legacy rows of hidden kinds
-  // still render via FilterChips' kindLabel switch.
-  const FUNCTIONAL_KIND_OPTIONS: ReadonlyArray<string> = [
-    "youtube_video",
-    "post",
-    "conference",
-    "talk",
-    "press",
-    "other",
-  ];
-  // Kind label resolves through the central kind-display config
-  // (eventKindLabel) — same source of truth FilterChips / FeedCard use.
-  const KIND_OPTIONS = $derived(sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => eventKindLabel(k)));
+  // KIND options are DERIVED from kind-display.ts (FEED_FILTERABLE_EVENT_KINDS)
+  // — NO hand-maintained allowlist. Phase 10 D-08: the previous local
+  // FUNCTIONAL_KIND_OPTIONS array was never updated when instagram_post /
+  // telegram_post shipped, so the social adapter kinds silently dropped out of
+  // the /feed filter (the user-reported regression). Deriving from the
+  // feedFilterable flag means a new adapter kind auto-appears here the moment
+  // it's marked feedFilterable:true in kind-display, with no sheet edit.
+  // Label + alphabetical-by-label sort resolve through the same central
+  // kind-display config (eventKindLabel) FilterChips / FeedCard use.
+  const KIND_OPTIONS = $derived(
+    sortByLabel([...FEED_FILTERABLE_EVENT_KINDS], (k) => eventKindLabel(k)),
+  );
 
   // auditActionLabel + AUDIT_ACTIONS imported directly. The shared
   // $lib/audit-labels.ts is the single source of truth
