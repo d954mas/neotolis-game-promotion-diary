@@ -95,3 +95,38 @@ export function inferSourceKindFromUrl(input: string): InferredSourceKind | null
   }
   return matchSubstring(input.toLowerCase());
 }
+
+/**
+ * Normalize a pasted Handle URL into a submittable form for POST /api/sources.
+ *
+ * The Add-Source surfaces are URL-first and the placeholder advertises
+ * SCHEME-LESS input ("youtube.com/@handle", "reddit.com/r/sub", "t.me/channel").
+ * The server's parseSourceUrl iterator needs a parseable ABSOLUTE URL for a
+ * host/path input (`new URL()` rejects a missing scheme), so prepend `https://`
+ * when the input looks like a host/path with no scheme — otherwise a perfectly
+ * valid paste like `t.me/durov` dead-ends at "enter a URL" (the input was
+ * `type="url"`, which natively rejects a scheme-less value too).
+ *
+ * A raw `@handle` / bare handle (no `/`, `.`, or `:`) is left UNTOUCHED — the
+ * per-kind server parser resolves those directly (e.g. telegram `@durov`), and
+ * prepending a scheme would make `https://@durov` (invalid). Already-schemed
+ * input is returned as-is, with `http://` upgraded to `https://` (the app is
+ * https-only). Empty input returns "".
+ *
+ * Pure + client-safe (no server imports), same as inferSourceKindFromUrl — the
+ * server's parseSourceUrl iterator remains the validation source of truth.
+ */
+export function normalizeHandleUrl(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed === "") return "";
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/^http:\/\//i, "https://");
+  }
+  // Raw `@handle` / bare handle — no path/host/scheme separators. The per-kind
+  // server parser handles these; a scheme prefix would corrupt them.
+  if (!trimmed.includes("/") && !trimmed.includes(".") && !trimmed.includes(":")) {
+    return trimmed;
+  }
+  // Scheme-less host/path (e.g. "t.me/channel", "youtube.com/@h") → absolute.
+  return `https://${trimmed}`;
+}

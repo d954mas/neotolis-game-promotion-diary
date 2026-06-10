@@ -4,7 +4,10 @@
 // validation gate (the server's parseSourceUrl iterator is the source of
 // truth on submit).
 import { describe, it, expect } from "vitest";
-import { inferSourceKindFromUrl } from "../../src/lib/components/sources/infer-source-kind.js";
+import {
+  inferSourceKindFromUrl,
+  normalizeHandleUrl,
+} from "../../src/lib/components/sources/infer-source-kind.js";
 
 describe("inferSourceKindFromUrl", () => {
   it("maps youtube.com and youtu.be to youtube_channel", () => {
@@ -60,5 +63,42 @@ describe("inferSourceKindFromUrl", () => {
     expect(inferSourceKindFromUrl("not a url at all")).toBeNull();
     expect(inferSourceKindFromUrl("https://example.com/")).toBeNull();
     expect(inferSourceKindFromUrl("ftp://files.local/x")).toBeNull();
+  });
+});
+
+describe("normalizeHandleUrl", () => {
+  it("prepends https:// to a scheme-less host/path (the t.me/durov regression)", () => {
+    // The exact paste that dead-ended at the browser's type=url "enter a URL"
+    // popup: a scheme-less channel link. After normalization the server's
+    // telegramParseSourceUrl (which `new URL()`-parses) accepts it.
+    expect(normalizeHandleUrl("t.me/durov")).toBe("https://t.me/durov");
+    expect(normalizeHandleUrl("youtube.com/@handle")).toBe("https://youtube.com/@handle");
+    expect(normalizeHandleUrl("reddit.com/r/IndieDev")).toBe("https://reddit.com/r/IndieDev");
+    expect(normalizeHandleUrl("t.me/d954mas_make_games")).toBe("https://t.me/d954mas_make_games");
+  });
+
+  it("leaves an already-https URL unchanged", () => {
+    expect(normalizeHandleUrl("https://t.me/durov")).toBe("https://t.me/durov");
+    expect(normalizeHandleUrl("https://www.youtube.com/@handle")).toBe(
+      "https://www.youtube.com/@handle",
+    );
+  });
+
+  it("upgrades http:// to https:// (the app is https-only)", () => {
+    expect(normalizeHandleUrl("http://t.me/durov")).toBe("https://t.me/durov");
+    expect(normalizeHandleUrl("HTTP://t.me/durov")).toBe("https://t.me/durov");
+  });
+
+  it("leaves a raw @handle / bare handle untouched (no scheme to prepend onto)", () => {
+    // Prepending https:// would corrupt these into https://@durov; the per-kind
+    // server parser resolves a raw handle directly (telegram @durov).
+    expect(normalizeHandleUrl("@durov")).toBe("@durov");
+    expect(normalizeHandleUrl("durov")).toBe("durov");
+  });
+
+  it("trims surrounding whitespace and returns '' for empty/whitespace input", () => {
+    expect(normalizeHandleUrl("  t.me/durov  ")).toBe("https://t.me/durov");
+    expect(normalizeHandleUrl("")).toBe("");
+    expect(normalizeHandleUrl("   ")).toBe("");
   });
 });
