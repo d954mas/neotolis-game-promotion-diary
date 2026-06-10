@@ -127,16 +127,29 @@ export function buildDayGroups(
 /**
  * The SINGLE source of the event→thumbnail URL logic for the charts. Mirrors
  * `deriveThumbnailUrl` (derive-card-data.ts) so a marker shows the SAME preview
- * image the FeedCard does — but takes a structurally-typed input because the
- * chart consumes EventDto-shaped rows that the games loader has run through
- * `adapter.enrichFeedDtos` (so `redditEnrichment.linkUrl` is present at runtime
- * even though the static EventDto type doesn't declare it).
+ * image the FeedCard does — by reading each kind's ENRICHMENT OBJECT (the
+ * `<kind>Enrichment` decoration the games loader hangs on the dto via
+ * `adapter.enrichFeedDtos`), not per-kind `event.metadata` branches. The input
+ * is structurally typed because the chart consumes EventDto-shaped rows that
+ * the loader already enriched (so `redditEnrichment.linkUrl` /
+ * `telegramEnrichment.thumbnailUrl` are present at runtime even though the
+ * static EventDto type doesn't declare them).
  *
  *   - YouTube (`kind==="youtube_video"` + externalId) → the intrinsic
  *     `img.youtube.com/vi/{externalId}/mqdefault.jpg` (no enrichment needed —
  *     externalId IS the video id, part of the canonical URL).
  *   - Reddit → the enrichment `linkUrl` when it's image-like, else the
  *     `metadata.media.url` snapshot (same chain the RedditFeedCard renders).
+ *   - Instagram → `instagramEnrichment.thumbnailUrl` (set by
+ *     sources/instagram/server/feed-enrichment.ts).
+ *   - Telegram → `telegramEnrichment.thumbnailUrl` (set by
+ *     sources/telegram/server/feed-enrichment.ts). Phase 10 D-09: this was the
+ *     bug — the old branch read empty `event.metadata` and the type didn't even
+ *     carry telegramEnrichment, so every Telegram marker rendered blank.
+ *   - TikTok → `tiktokEnrichment.thumbnailUrl` (set by Plan 04/05's
+ *     feed-enrichment). Forward-compat: the field is in the type now so the
+ *     marker lights up the moment TikTok enrichment ships — D-09 "TikTok
+ *     markers for free", parallel to the kind-display feedFilterable wiring.
  *   - everything else → null (the marker falls back to a kind-colored
  *     placeholder symbol).
  */
@@ -146,6 +159,8 @@ type ThumbnailEvent = {
   metadata: unknown;
   redditEnrichment?: { linkUrl?: string | null } | null;
   instagramEnrichment?: { thumbnailUrl?: string | null } | null;
+  telegramEnrichment?: { thumbnailUrl?: string | null } | null;
+  tiktokEnrichment?: { thumbnailUrl?: string | null } | null;
 };
 
 export function eventThumbnail(event: ThumbnailEvent): string | null {
@@ -159,13 +174,13 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
     return readMediaUrlFromMetadata(event.metadata);
   }
   if (event.kind === "instagram_post") {
-    // The fresh CDN hotlink lives on instagramEnrichment (set by
-    // sources/instagram/server/feed-enrichment.ts) — same source the
-    // FeedCard + deriveThumbnailUrl read. NOT in event.metadata.
     return event.instagramEnrichment?.thumbnailUrl ?? null;
   }
-  if (event.kind === "twitter_post" || event.kind === "telegram_post") {
-    return readMediaUrlFromMetadata(event.metadata);
+  if (event.kind === "telegram_post") {
+    return event.telegramEnrichment?.thumbnailUrl ?? null;
+  }
+  if (event.kind === "tiktok_post") {
+    return event.tiktokEnrichment?.thumbnailUrl ?? null;
   }
   return null;
 }
