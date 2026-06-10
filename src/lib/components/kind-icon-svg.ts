@@ -74,6 +74,10 @@ export const KIND_ICON_INNER: Record<EventKind, string> = {
   instagram_post: `<rect x="3" y="3" width="18" height="18" rx="5" />
     <circle cx="12" cy="12" r="4" />
     <circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none" />`,
+  // music note (short-form video): note stem + flag + filled note head.
+  // Geometric primitives only (NO brand glyph) per the Iconography Contract.
+  tiktok_post: `<path d="M10 18V6l8-2v3" />
+    <circle cx="7.5" cy="18" r="2.5" fill="currentColor" stroke="none" />`,
   // other / generic dot
   other: `<circle cx="12" cy="12" r="9" />
     <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />`,

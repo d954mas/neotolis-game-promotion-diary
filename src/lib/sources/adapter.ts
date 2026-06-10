@@ -26,7 +26,8 @@ export type SourceKind =
   | "twitter_account"
   | "telegram_channel"
   | "discord_server"
-  | "instagram_account";
+  | "instagram_account"
+  | "tiktok_account";
 
 export type EventKind =
   | "youtube_video"
@@ -39,7 +40,8 @@ export type EventKind =
   | "press"
   | "other"
   | "post"
-  | "instagram_post";
+  | "instagram_post"
+  | "tiktok_post";
 
 export type SnapshotStatus = "ok" | "rate_limited" | "auth_error" | "not_found" | "private";
 

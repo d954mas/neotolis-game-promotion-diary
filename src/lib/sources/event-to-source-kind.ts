@@ -26,6 +26,8 @@ export function eventKindToSourceKind(eventKind: EventKind): SourceKind | null {
       return "discord_server";
     case "instagram_post":
       return "instagram_account";
+    case "tiktok_post":
+      return "tiktok_account";
     // Free-form / non-pollable kinds — no source kind to dispatch to.
     case "post":
       return null;
@@ -61,5 +63,7 @@ export function sourceKindToEventKind(sourceKind: SourceKind): EventKind | null 
       return "discord_drop";
     case "instagram_account":
       return "instagram_post";
+    case "tiktok_account":
+      return "tiktok_post";
   }
 }

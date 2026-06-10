@@ -162,6 +162,7 @@
   "event_kind_label_other": "Other",
   "event_kind_label_post": "Post",
   "event_kind_label_instagram_post": "Instagram",
+  "event_kind_label_tiktok_post": "TikTok",
   "event_title_instagram_fallback": "Instagram {mediaType} · {date}",
 
   "source_kind_label_youtube_channel": "YouTube",
@@ -170,6 +171,7 @@
   "source_kind_label_telegram_channel": "Telegram",
   "source_kind_label_discord_server": "Discord",
   "source_kind_label_instagram_account": "Instagram",
+  "source_kind_label_tiktok_account": "TikTok",
 
   "source_kind_status_reddit_account": "Coming soon — pending Reddit OAuth",
   "source_kind_status_twitter_account": "Out of scope — Twitter API is paid",

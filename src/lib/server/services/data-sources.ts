@@ -95,6 +95,10 @@ export const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   telegram_channel: "available",
   discord_server: "coming soon",
   instagram_account: "not configured by operator",
+  // Wave-0 foundation: the TikTok adapter (parseUrl / provider / walker) lands
+  // in Plans 10-02..05. Until then the chip is disabled with this hint, the same
+  // way Instagram read "not configured" before its adapter shipped.
+  tiktok_account: "not configured by operator",
 };
 
 // Defense-in-depth mirror of the schema's source_kind pgEnum. The pgEnum is
@@ -216,6 +220,8 @@ function duplicateSourceMessage(kind: SourceKind): string {
       return "You already track this Discord server";
     case "instagram_account":
       return "You already track this Instagram account";
+    case "tiktok_account":
+      return "You already track this TikTok account";
   }
 }
 

@@ -37,3 +37,8 @@ export * from "$lib/sources/instagram/server/schema/index.js";
 // discovers telegram_posts / telegram_post_snapshots / telegram_pacer for
 // migrate; the re-export keeps cross-source call sites compiling.
 export * from "$lib/sources/telegram/server/schema/index.js";
+// TikTok schemas — same per-source plugin layout. Drizzle's schema glob
+// discovers tiktok_accounts / tiktok_posts / tiktok_post_snapshots for migrate;
+// the re-export keeps cross-source call sites (`import { tiktokPosts } from
+// "$lib/server/db/schema/index.js"`) compiling.
+export * from "$lib/sources/tiktok/server/schema/index.js";

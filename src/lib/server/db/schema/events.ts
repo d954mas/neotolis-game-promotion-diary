@@ -56,6 +56,9 @@ const tsvector = customType<{ data: string; default: false; notNull: false }>({
 // `instagram_post` (Phase 8) is the single IG kind — posts AND reels share
 // it; the content form (image | carousel | video | short) lives in
 // `metadata.media_type` (D-06, one-kind-per-platform precedent).
+// `tiktok_post` (Phase 10) is the single TikTok kind — videos AND photo-mode
+// posts share it; the content form (video | carousel) lives in
+// `metadata.media_type`, same one-kind-per-platform precedent.
 // `post` is the generic platform-agnostic kind for Mastodon / LinkedIn /
 // Bluesky / Threads / unmapped platforms beyond the platform-tagged kinds.
 export const eventKindEnum = pgEnum("event_kind", [
@@ -70,6 +73,7 @@ export const eventKindEnum = pgEnum("event_kind", [
   "other",
   "post",
   "instagram_post",
+  "tiktok_post",
 ]);
 
 export const events = pgTable(
