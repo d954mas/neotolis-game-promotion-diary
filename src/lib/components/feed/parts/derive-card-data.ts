@@ -125,6 +125,24 @@ export interface CardEventLite {
       | { emoji: string | null; kind: "standard" | "custom" | "paid"; count: number }[]
       | null;
   };
+  /** TikTok public-data decoration attached by
+   *  sources/tiktok/server/feed-enrichment.ts (mirrors instagramEnrichment with
+   *  the PLAT-02 shareCount delta). Each stat is INDEPENDENTLY nullable —
+   *  metrics-by-presence (D-05): a photo-mode post has no views (null), NEVER
+   *  coerced to 0; shareCount is TikTok's first-class share metric. thumbnailUrl
+   *  is the raw TikTok CDN hotlink (D-07, signed + expiring — onerror fallback in
+   *  the card); mediaType ("video" | "carousel") drives the media-type overlay. */
+  tiktokEnrichment?: {
+    stats: {
+      viewCount: number | null;
+      likeCount: number | null;
+      commentCount: number | null;
+      shareCount: number | null;
+      polledAt: Date | string;
+    } | null;
+    thumbnailUrl: string | null;
+    mediaType: string | null;
+  };
 }
 
 export interface CardSourceLite {
@@ -169,6 +187,15 @@ export function redditAuthorByline(metadata: unknown): string | null {
  *  is owned by data_sources and can be renamed). Falls back to displayName
  *  (user's own label) then the raw handleUrl. Mirrors youtubeChannelLabel. */
 export function instagramHandleLabel(source: CardSourceLite | null): string {
+  return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
+}
+
+/** Read the TikTok account handle/display name from FK-joined data_sources,
+ *  NEVER from event metadata (no-denorm rule — the TikTok @handle is owned by
+ *  data_sources / tiktok_accounts and the account owner can rename it). Falls
+ *  back to displayName (user's own label) then the raw handleUrl. Mirrors
+ *  instagramHandleLabel / youtubeChannelLabel. */
+export function tiktokHandleLabel(source: CardSourceLite | null): string {
   return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
 }
 
@@ -264,6 +291,15 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     const polledAt = event.instagramEnrichment.stats?.polledAt;
     return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
   }
+  if (event.kind === "tiktok_post") {
+    // 10-SPIKE.md Q3: the TikTok cover is on tiktokcdn-us.com (signed + expiring,
+    // .awebp preferred over .heic). The spike left hotlink-vs-CORP docs-only, so
+    // the plan defaults to hotlinking the RAW CDN cover the normalizer already
+    // preferred (dynamic_cover .awebp) + an <img> onerror fallback. A same-origin
+    // proxy is added only if Plan 05 UAT finds the cover CORP-blocked in a real
+    // browser (the IG path needed one; TikTok's CDN is a different origin).
+    return event.tiktokEnrichment?.thumbnailUrl ?? null;
+  }
   return null;
 }
 
@@ -272,7 +308,7 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
  *  Instagram 4:5 (the IG card overrides the aspect-ratio token). Other
  *  kinds only render the thumb when an image is actually derivable. */
 export function isMediaShape(kind: CardEventKind): boolean {
-  return kind === "youtube_video" || kind === "instagram_post";
+  return kind === "youtube_video" || kind === "instagram_post" || kind === "tiktok_post";
 }
 
 /** Month-Day formatter — "May 21" style. Locale-aware (Intl). */

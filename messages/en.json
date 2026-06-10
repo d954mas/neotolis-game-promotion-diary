@@ -178,6 +178,7 @@
   "source_kind_status_telegram_channel": "Coming soon",
   "source_kind_status_discord_server": "Coming soon",
   "source_kind_status_instagram_account": "not configured by operator",
+  "source_kind_status_tiktok_account": "Set TIKTOK_PROVIDER to enable TikTok import",
 
   "sources_status_auto_on_pending": "Auto-import: ON",
   "sources_status_auto_off": "Auto-import: OFF",
@@ -427,6 +428,7 @@
   "card_youtube_metric_views": "Views",
   "card_youtube_metric_likes": "Likes",
   "card_youtube_metric_comments": "Comments",
+  "card_tiktok_metric_shares": "Shares",
   "card_reddit_subtitle_mine": "My post",
   "card_reddit_badge_mine": "Mine",
   "card_reddit_metric_score": "Score",

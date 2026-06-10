@@ -119,6 +119,8 @@
         return m.source_kind_label_discord_server();
       case "source_kind_label_instagram_account":
         return m.source_kind_label_instagram_account();
+      case "source_kind_label_tiktok_account":
+        return m.source_kind_label_tiktok_account();
       case "common_kind_reddit":
         return m.common_kind_reddit();
     }
@@ -146,6 +148,8 @@
         return m.source_kind_status_discord_server();
       case "source_kind_status_instagram_account":
         return m.source_kind_status_instagram_account();
+      case "source_kind_status_tiktok_account":
+        return m.source_kind_status_tiktok_account();
     }
   }
 

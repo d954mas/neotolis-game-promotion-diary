@@ -22,6 +22,7 @@ export type InferredSourceKind =
   | "youtube_channel"
   | "reddit"
   | "instagram_account"
+  | "tiktok_account"
   | "twitter_account"
   | "telegram_channel"
   | "discord_server";
@@ -38,6 +39,9 @@ const HOST_SUFFIX_TO_KIND: ReadonlyArray<readonly [string, InferredSourceKind]> 
   ["reddit.com", "reddit"],
   ["redd.it", "reddit"],
   ["instagram.com", "instagram_account"],
+  // TikTok: the canonical profile/video host + the vm./vt. short-link hosts the
+  // adapter resolves on create (a short link can be pasted into Add-Source too).
+  ["tiktok.com", "tiktok_account"],
   ["twitter.com", "twitter_account"],
   ["x.com", "twitter_account"],
   ["t.me", "telegram_channel"],

@@ -41,6 +41,7 @@ import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
 import { ensureChannelState } from "./channel-state.js";
 import { isInstagramConfigured } from "$lib/sources/instagram/server/provider/registry.js";
+import { isTikTokConfigured } from "$lib/sources/tiktok/server/provider/registry.js";
 
 // Initial-backfill window presets accepted by createSource for
 // kind=youtube_channel + autoImport. The worker handler reads
@@ -77,6 +78,23 @@ export const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
   // gate — t.me/s scraping is free, always available (the structural contrast
   // with instagram_account's isInstagramConfigured branch below).
   "telegram_channel",
+  // tiktok_account is functional (Plan 10-05) but, like instagram_account, its
+  // create path is gated on TIKTOK_PROVIDER + SCRAPECREATORS_API_KEY (a PAID
+  // provider). The gate lives in SOURCE_KINDS_NEEDING_PROVIDER below; unconfigured
+  // → clean 422 kind_not_configured (SOC-05), never a 500.
+  "tiktok_account",
+]);
+
+// SourceKinds whose create path requires the operator to have wired a (paid)
+// provider before the kind works. The gate below probes each kind's
+// isConfigured() and returns a clean 422 `kind_not_configured` when off (SOC-05),
+// so an unconfigured operator degrades gracefully instead of half-writing a row
+// no walker will ever poll. Generalized from the old hardcoded instagram-only
+// `if` so TikTok (and X in Phase 11) plug in with ONE map entry — no re-edit of
+// the gate. Telegram/YouTube/Reddit are absent on purpose (free, always-on).
+const SOURCE_KINDS_NEEDING_PROVIDER: ReadonlyMap<SourceKind, () => boolean> = new Map([
+  ["instagram_account", isInstagramConfigured],
+  ["tiktok_account", isTikTokConfigured],
 ]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata.
@@ -113,6 +131,7 @@ const VALID_SOURCE_KINDS: readonly SourceKind[] = [
   "telegram_channel",
   "discord_server",
   "instagram_account",
+  "tiktok_account",
 ] as const;
 
 // Cap on per-user POST /api/sources/:id/refresh-content calls in any
@@ -422,17 +441,19 @@ export async function createSource(
     );
   }
 
-  // SOC-05 not-configured degrade. instagram_account is functional but its
-  // create path needs an operator-configured provider (INSTAGRAM_PROVIDER +
-  // SCRAPECREATORS_API_KEY). When unconfigured, surface a clean 422
-  // `kind_not_configured` (NOT a 500, NOT the schema-only
-  // `kind_not_yet_functional`) — mirrors the Reddit REDDIT_USER_AGENT-empty
-  // disabled-chip pattern. No APP_MODE branch: SaaS == self-host, both read
-  // the same env. SOURCE_KINDS_NEEDING_PROVIDER keeps this generic so the
-  // TikTok/X kinds (Phases 9-11) slot in without re-editing the gate.
-  if (input.kind === "instagram_account" && !isInstagramConfigured()) {
+  // SOC-05 not-configured degrade. instagram_account / tiktok_account are
+  // functional but their create paths need an operator-configured (paid)
+  // provider (INSTAGRAM_PROVIDER / TIKTOK_PROVIDER + SCRAPECREATORS_API_KEY).
+  // When unconfigured, surface a clean 422 `kind_not_configured` (NOT a 500,
+  // NOT the schema-only `kind_not_yet_functional`) — mirrors the Reddit
+  // REDDIT_USER_AGENT-empty disabled-chip pattern. No APP_MODE branch: SaaS ==
+  // self-host, both read the same env. SOURCE_KINDS_NEEDING_PROVIDER is the
+  // set-driven generalization of the old hardcoded instagram-only `if` (the X
+  // kind in Phase 11 slots in with one more map entry, no re-edit here).
+  const providerProbe = SOURCE_KINDS_NEEDING_PROVIDER.get(input.kind);
+  if (providerProbe !== undefined && !providerProbe()) {
     throw new AppError(
-      "Instagram import is not configured by the operator",
+      "This import is not configured by the operator",
       "kind_not_configured",
       422,
       { kind: input.kind, status: KIND_STATUS[input.kind] },
