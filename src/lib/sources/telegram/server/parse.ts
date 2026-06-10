@@ -160,7 +160,11 @@ function parseBlock(el: HTMLElement): ParsedTelegramPost | null {
   if (!dataPost) return null;
   const slash = dataPost.indexOf("/");
   if (slash <= 0 || slash === dataPost.length - 1) return null;
-  const slug = dataPost.slice(0, slash);
+  // Lowercase per the "slugs are lowercase everywhere" invariant (url.ts:44-49):
+  // url.ts lowercases the URL-parsed handle, so the slug we store on external_url
+  // must match — else resolveCachedExternalId's external_url lookup misses for an
+  // uppercase @Username channel.
+  const slug = dataPost.slice(0, slash).toLowerCase();
   const messageId = dataPost.slice(slash + 1);
 
   // channelKey is the rename-proof prefix of the stable post id. When it cannot
@@ -260,7 +264,12 @@ function parseChannelHeaderFromRoot(
   // leading '@' for the stored slug.
   const usernameEl = root.querySelector(".tgme_channel_info_header_username a");
   const usernameRaw = usernameEl?.text?.trim() ?? "";
-  const slug = usernameRaw.replace(/^@/, "") || null;
+  // Lowercase per the "slugs are lowercase everywhere" invariant (url.ts:44-49):
+  // data_sources.metadata.channel is lowercased at parse, so the stored
+  // telegram_channels.slug must match — else the channel-name JOIN
+  // (enrichTelegramSourcesWithChannelTitle) silently misses for an uppercase
+  // @Username and the source/feed cards degrade to the @handle forever.
+  const slug = usernameRaw.replace(/^@/, "").toLowerCase() || null;
 
   // og:image is the channel avatar on the listing page (a stable hotlink).
   const ogImage = root.querySelector('meta[property="og:image"]')?.getAttribute("content")?.trim();

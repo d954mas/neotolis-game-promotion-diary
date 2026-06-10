@@ -9,6 +9,7 @@
   import SourceCoverageBadge from "$lib/components/SourceCoverageBadge.svelte";
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
+  import { telegramHandleFromUrl } from "$lib/util/telegram-handle.js";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -36,10 +37,17 @@
       }
     };
   });
-  // Heading prefers canonical channel title from cache (always more
-  // identifiable than the user-typed displayName). displayName is legacy
-  // — UI doesn't surface it anymore.
-  const heading = $derived(source.channelTitle ?? source.handleUrl);
+  // Heading precedence mirrors the /sources list row (SourceRow.handleLabel) so
+  // the list and this detail heading never disagree: canonical channel title
+  // (FK-resolved, most identifiable) → legacy displayName → Telegram @handle
+  // (so a not-yet-polled telegram channel shows "@durov", not the raw URL) →
+  // the raw handle URL as last resort.
+  const heading = $derived(
+    source.channelTitle ??
+      source.displayName ??
+      telegramHandleFromUrl(source.handleUrl) ??
+      source.handleUrl,
+  );
 
   // ---- date picker (target_since) ----
   const SENTINEL_ISO = "1970-01-01";

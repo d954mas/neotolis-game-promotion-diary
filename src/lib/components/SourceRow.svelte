@@ -43,6 +43,7 @@
   import BackfillPicker from "./BackfillPicker.svelte";
   import RetentionBadge from "./RetentionBadge.svelte";
   import { type SourceKind } from "$lib/util/source-kind-label.js";
+  import { telegramHandleFromUrl } from "$lib/util/telegram-handle.js";
 
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
@@ -359,8 +360,12 @@
   const handleLabel = $derived.by((): string => {
     if (source.channelTitle) return source.channelTitle;
     if (source.displayName) return source.displayName;
-    const derived = deriveRedditHandle(source.kind, source.handleUrl);
-    if (derived) return derived;
+    const reddit = deriveRedditHandle(source.kind, source.handleUrl);
+    if (reddit) return reddit;
+    if (source.kind === "telegram_channel") {
+      const telegram = telegramHandleFromUrl(source.handleUrl);
+      if (telegram) return telegram;
+    }
     return source.handleUrl;
   });
 

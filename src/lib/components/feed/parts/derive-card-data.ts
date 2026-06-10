@@ -24,6 +24,8 @@
 //     reflects everywhere immediately; event.channelTitle is the
 //     fallback for unregistered channels.
 
+import { telegramHandleFromUrl } from "$lib/util/telegram-handle.js";
+
 export type CardEventKind =
   | "youtube_video"
   | "reddit_post"
@@ -177,7 +179,12 @@ export function instagramHandleLabel(source: CardSourceLite | null): string {
  *  telegramChannelLabel below is the URL-intrinsic numeric/slug key, a
  *  different concern — this is the renameable display surface.) */
 export function telegramChannelHandleLabel(source: CardSourceLite | null): string {
-  return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
+  if (source?.channelTitle) return source.channelTitle;
+  if (source?.displayName) return source.displayName;
+  // Fallback for a not-yet-polled channel (no telegram_channels entity title
+  // resolved yet): show the @handle from the t.me URL, never the raw URL.
+  // Shared with SourceRow + the /sources/[id] heading via telegramHandleFromUrl.
+  return telegramHandleFromUrl(source?.handleUrl) ?? source?.handleUrl ?? "";
 }
 
 /** Read the Twitter @handle from event metadata. The handle is part of

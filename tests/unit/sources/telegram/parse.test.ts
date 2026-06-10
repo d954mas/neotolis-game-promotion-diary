@@ -384,3 +384,30 @@ describe("parseTelegramChannelHeader — the channel subject entity (Phase 9)", 
     expect(h.subscriberCount).toBeNull();
   });
 });
+
+describe("slug lowercasing (the slugs-are-lowercase invariant, url.ts:44-49)", () => {
+  // url.ts lowercases the URL-parsed handle, so parse.ts MUST lowercase the
+  // scraped slug too — else data_sources.metadata.channel (always lowercase)
+  // won't match telegram_channels.slug (the channel-name JOIN), and external_url
+  // won't match resolveCachedExternalId's lowercased lookup. Every other fixture
+  // here is already lowercase, so without these cases a revert of the
+  // .toLowerCase() calls would pass green (the regression-guard gap the review
+  // flagged).
+  it("parseTelegramChannelHeader lowercases an uppercase @Username slug (NOT the title)", () => {
+    const html =
+      '<div class="tgme_channel_info_header_title">Durov Channel</div>' +
+      '<div class="tgme_channel_info_header_username"><a href="https://t.me/Durov">@Durov</a></div>';
+    const h = parseTelegramChannelHeader(html);
+    expect(h.slug).toBe("durov");
+    expect(h.title).toBe("Durov Channel"); // display title keeps its original case
+  });
+
+  it("parseTelegramPost lowercases the data-post slug", () => {
+    const html =
+      '<div class="tgme_widget_message" data-post="Durov/503">' +
+      '<div class="tgme_widget_message_text">hello</div></div>';
+    const post = parseTelegramPost(html);
+    expect(post?.slug).toBe("durov");
+    expect(post?.messageId).toBe("503");
+  });
+});
