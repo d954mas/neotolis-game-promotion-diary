@@ -33,15 +33,12 @@ const PLATFORM = "instagram";
 const PROVIDER = "scrapecreators";
 
 async function readBalance(): Promise<number | null> {
+  // The prepaid balance is keyed by PROVIDER only now (D-01 shared ceiling) —
+  // no platform predicate.
   const rows = await db
     .select({ balance: socialProviderBalance.prepaidBalanceCredits })
     .from(socialProviderBalance)
-    .where(
-      and(
-        eq(socialProviderBalance.platform, PLATFORM),
-        eq(socialProviderBalance.provider, PROVIDER),
-      ),
-    );
+    .where(eq(socialProviderBalance.provider, PROVIDER));
   return rows.length > 0 ? Number(rows[0]!.balance) : null;
 }
 
@@ -86,9 +83,9 @@ async function seedPoolUsed(pool: "cron" | "user", credits: number): Promise<voi
 async function seedBalance(credits: number): Promise<void> {
   await db
     .insert(socialProviderBalance)
-    .values({ platform: PLATFORM, provider: PROVIDER, prepaidBalanceCredits: credits })
+    .values({ provider: PROVIDER, prepaidBalanceCredits: credits })
     .onConflictDoUpdate({
-      target: [socialProviderBalance.platform, socialProviderBalance.provider],
+      target: [socialProviderBalance.provider],
       set: { prepaidBalanceCredits: credits },
     });
 }
@@ -424,9 +421,9 @@ describe("social provider budget + throttle — operator audit hooks (F4)", () =
     await seedBalance(100000); // PLATFORM/PROVIDER
     await db
       .insert(socialProviderBalance)
-      .values({ platform: PLATFORM, provider: PROVIDER_B, prepaidBalanceCredits: 100000 })
+      .values({ provider: PROVIDER_B, prepaidBalanceCredits: 100000 })
       .onConflictDoUpdate({
-        target: [socialProviderBalance.platform, socialProviderBalance.provider],
+        target: [socialProviderBalance.provider],
         set: { prepaidBalanceCredits: 100000 },
       });
     await seedPoolUsed("cron", 79);
@@ -487,9 +484,9 @@ describe("social provider budget + throttle — operator audit hooks (F4)", () =
     await seedBalance(1); // PLATFORM/PROVIDER exhausts on a unit-1 reserve
     await db
       .insert(socialProviderBalance)
-      .values({ platform: PLATFORM, provider: PROVIDER_B, prepaidBalanceCredits: 1 })
+      .values({ provider: PROVIDER_B, prepaidBalanceCredits: 1 })
       .onConflictDoUpdate({
-        target: [socialProviderBalance.platform, socialProviderBalance.provider],
+        target: [socialProviderBalance.provider],
         set: { prepaidBalanceCredits: 1 },
       });
 

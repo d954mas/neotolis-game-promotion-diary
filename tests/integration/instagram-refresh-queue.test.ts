@@ -77,7 +77,7 @@ function post(overrides: Partial<NormalizedSinglePost> = {}): NormalizedSinglePo
     shortcode: "ABC",
     kind: "carousel",
     publishedAt: new Date("2026-06-01T12:00:00Z"),
-    metrics: { views: null, likes: 99, comments: 3 },
+    metrics: { views: null, likes: 99, comments: 3, shares: null },
     caption: "cap",
     thumbnailUrl: "https://scontent.cdninstagram.com/x.jpg",
     ownerId: "24549572243",

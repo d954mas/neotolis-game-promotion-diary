@@ -85,10 +85,18 @@ export interface NormalizedSinglePost {
   /** Same cross-platform content-form vocabulary as NormalizedPost.kind. */
   kind: "video" | "short" | "image" | "carousel" | "text";
   publishedAt: Date;
+  /**
+   * Metrics-by-presence (mirrors NormalizedPost.metrics): a metric whose source
+   * field is absent on this content type is `null`, never `0`. `shares` is the
+   * TikTok-populated metric (PLAT-02) — Instagram's single-post endpoint exposes
+   * no share field, so its provider impl ALWAYS nulls it; TikTok is the first
+   * platform to surface a real share count here.
+   */
   metrics: {
     views: number | null;
     likes: number | null;
     comments: number | null;
+    shares: number | null;
   };
   /** `null` when the post is caption-less. */
   caption: string | null;

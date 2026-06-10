@@ -148,18 +148,18 @@ export async function reserveSocialCredits(args: {
     await tx
       .insert(socialProviderBalance)
       .values({
-        platform,
         provider,
         prepaidBalanceCredits: env.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS,
       })
       .onConflictDoNothing();
 
-    // Lock the prepaid balance row + the two counter rows for this
+    // Lock the prepaid balance row (keyed by PROVIDER only — shared across
+    // platforms, D-01) + the two per-platform counter rows for this
     // (platform, provider) to serialize concurrent reservations.
     const balanceLocked = await tx.execute<{ prepaid_balance_credits: number }>(sql`
       SELECT prepaid_balance_credits
       FROM ${socialProviderBalance}
-      WHERE platform = ${platform} AND provider = ${provider}
+      WHERE provider = ${provider}
       FOR UPDATE
     `);
     const balanceRows =
@@ -219,12 +219,7 @@ export async function reserveSocialCredits(args: {
         prepaidBalanceCredits: sql`${socialProviderBalance.prepaidBalanceCredits} - ${args.units}`,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(socialProviderBalance.platform, platform),
-          eq(socialProviderBalance.provider, provider),
-        ),
-      );
+      .where(eq(socialProviderBalance.provider, provider));
 
     // Compute the daily-cap throttle band crossing + prepaid-balance exhaustion
     // for THIS reservation (before vs after). Emitted after commit below.
@@ -303,12 +298,7 @@ export async function getSocialThrottleState(
   const balanceRows = await db
     .select({ balance: socialProviderBalance.prepaidBalanceCredits })
     .from(socialProviderBalance)
-    .where(
-      and(
-        eq(socialProviderBalance.platform, platform),
-        eq(socialProviderBalance.provider, provider),
-      ),
-    );
+    .where(eq(socialProviderBalance.provider, provider));
   // A seeded-but-spent balance at <= 0 is a hard stop. An ABSENT balance row
   // means no spend has happened yet → 'ok' (the funded ceiling kicks in on
   // first reservation, which seeds the row from env).
@@ -342,12 +332,7 @@ export async function getSocialSpendToday(
   const balanceRows = await db
     .select({ balance: socialProviderBalance.prepaidBalanceCredits })
     .from(socialProviderBalance)
-    .where(
-      and(
-        eq(socialProviderBalance.platform, platform),
-        eq(socialProviderBalance.provider, provider),
-      ),
-    );
+    .where(eq(socialProviderBalance.provider, provider));
   return {
     creditsUsed: Number(spendRows[0]?.credits ?? 0),
     dailyCap: dailyCap(),
@@ -376,20 +361,24 @@ export async function resetSocialDailyCap(now: Date = new Date()): Promise<void>
   budgetExhaustedEmitted.clear();
   cachedOperatorId = undefined;
   const datePacific = todayPacific(now);
-  // Seed today's counter rows at zero for any (platform, provider) that has a
-  // balance row (i.e. has ever spent). New-day rows simply start fresh; old
-  // days are left for audit. Deliberately NO write to social_provider_balance.
-  const balanceRows = await db
-    .select({
-      platform: socialProviderBalance.platform,
-      provider: socialProviderBalance.provider,
+  // Seed today's counter rows at zero for every (platform, provider) that has
+  // EVER had a spend row. The prepaid balance is now keyed by provider ONLY
+  // (D-01 shared ceiling), so it no longer carries the platform dimension —
+  // the (platform, provider) pairs to seed are discovered from
+  // social_provider_spend (the per-platform daily counter) instead. New-day
+  // rows simply start fresh; old days are left for audit. Deliberately NO
+  // write to social_provider_balance (the prepaid ceiling never resets).
+  const pairRows = await db
+    .selectDistinct({
+      platform: socialProviderSpend.platform,
+      provider: socialProviderSpend.provider,
     })
-    .from(socialProviderBalance);
-  if (balanceRows.length === 0) return;
+    .from(socialProviderSpend);
+  if (pairRows.length === 0) return;
   await db
     .insert(socialProviderSpend)
     .values(
-      balanceRows.flatMap((r) => [
+      pairRows.flatMap((r) => [
         {
           datePacific,
           platform: r.platform,

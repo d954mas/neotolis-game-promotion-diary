@@ -350,6 +350,9 @@ export function mapSinglePostToNormalized(
       views: media.video_play_count ?? media.video_view_count ?? null,
       likes: media.edge_media_preview_like?.count ?? null,
       comments: media.edge_media_to_parent_comment?.count ?? null,
+      // Instagram exposes no share metric in either endpoint (D-04). TikTok is
+      // the first platform to populate NormalizedSinglePost.metrics.shares.
+      shares: null,
     },
     caption,
     thumbnailUrl: media.thumbnail_src ?? null,

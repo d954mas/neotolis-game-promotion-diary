@@ -95,7 +95,7 @@ function singlePost(overrides: Partial<NormalizedSinglePost> = {}): NormalizedSi
     shortcode: "ABC123",
     kind: "image",
     publishedAt: new Date("2026-06-01T12:00:00Z"),
-    metrics: { views: null, likes: 42, comments: 7 },
+    metrics: { views: null, likes: 42, comments: 7, shares: null },
     caption: "First line caption\nSecond line ignored",
     thumbnailUrl: "https://cdn.instagram.com/media-1.jpg",
     ownerId: "owner-99",
@@ -157,7 +157,7 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
       id: MEDIA_ID,
       shortcode: "E2ESC1",
       kind: "image",
-      metrics: { views: null, likes: 88, comments: 9 },
+      metrics: { views: null, likes: 88, comments: 9, shares: null },
     });
 
     // 1. Preview (the "Fetch" button) → the route returns enriched.externalId to
@@ -216,7 +216,7 @@ describe("instagram live paste-preview (single-post fetch, issue #65)", () => {
       id: "p-cache",
       shortcode: "CACHE1",
       kind: "image",
-      metrics: { views: null, likes: 11, comments: 3 },
+      metrics: { views: null, likes: 11, comments: 3, shares: null },
     });
 
     await enrichFromUrl(user.id, "https://www.instagram.com/p/CACHE1/", "127.0.0.1");
