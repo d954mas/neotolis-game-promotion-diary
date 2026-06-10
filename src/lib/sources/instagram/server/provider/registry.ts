@@ -6,13 +6,21 @@
 // read `null` as "feature off" rather than crashing. Empty INSTAGRAM_PROVIDER
 // (the safe default) ⇒ unresolved ⇒ degrade.
 //
-// Today the only platform + impl is instagram + scrapecreators. Later phases
-// (TikTok / X) add their own per-platform branches keyed off the same
-// `<PLATFORM>_PROVIDER` env convention.
+// This is the CANONICAL cross-platform switch — ONE switch, all platforms. Each
+// platform's config probe + impl live in that platform's own tree
+// (isTikTokConfigured + tiktokProvider come from the tiktok tree's registry
+// re-export); this file only routes by platform. New platforms (X) add one more
+// case keyed off the same `<PLATFORM>_PROVIDER` env convention.
 
 import { env } from "$lib/server/config/env.js";
 import { scrapeCreatorsProvider } from "./scrapecreators.js";
+import {
+  isTikTokConfigured,
+  tiktokProvider,
+} from "$lib/sources/tiktok/server/provider/registry.js";
 import type { SocialPlatform, SocialProvider } from "$lib/sources/social-provider.js";
+
+export { isTikTokConfigured };
 
 /** Whether the operator has a usable Instagram provider configured: the
  *  provider is selected AND its credential is non-empty. */
@@ -31,8 +39,10 @@ export function getSocialProvider(platform: SocialPlatform): SocialProvider | nu
   switch (platform) {
     case "instagram":
       return isInstagramConfigured() ? scrapeCreatorsProvider : null;
+    case "tiktok":
+      return isTikTokConfigured() ? tiktokProvider : null;
     default:
-      // TikTok / Twitter providers land in Phases 9-11.
+      // Twitter / X provider lands in Phase 11.
       return null;
   }
 }
