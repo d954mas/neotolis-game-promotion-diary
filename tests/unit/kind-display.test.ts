@@ -38,6 +38,7 @@ const ALL_EVENT_KINDS = [
   "other",
   "post",
   "instagram_post",
+  "tiktok_post",
 ] as const satisfies readonly EventKind[];
 
 const ALL_SOURCE_KINDS = [
@@ -48,6 +49,7 @@ const ALL_SOURCE_KINDS = [
   "telegram_channel",
   "discord_server",
   "instagram_account",
+  "tiktok_account",
 ] as const satisfies readonly SourceKind[];
 
 describe("kind-display config — EVENT_KIND_DISPLAY", () => {
@@ -170,11 +172,13 @@ describe("kind-display config — Add Event manual picker is config-driven + in 
     }
   });
 
-  it("includes instagram_post (Phase 08) + telegram_post (Phase 09) and excludes the still-deferred kinds", () => {
+  it("includes instagram_post (Phase 08) + telegram_post (Phase 09) + tiktok_post (Phase 10) and excludes the still-deferred kinds", () => {
     const set = new Set<string>(MANUAL_EVENT_KINDS);
     expect(set.has("instagram_post")).toBe(true);
     // Phase 09 — telegram_post joins the paste-flow kinds (free t.me/s).
     expect(set.has("telegram_post")).toBe(true);
+    // Phase 10 — tiktok_post joins the paste-flow kinds (paid ScrapeCreators).
+    expect(set.has("tiktok_post")).toBe(true);
     // The deferred kinds (no adapter, no paste flow, filtered from /feed) must
     // NOT be manually creatable — letting a user create un-filterable events
     // is the footgun manualCreatable:false prevents.
@@ -182,12 +186,14 @@ describe("kind-display config — Add Event manual picker is config-driven + in 
     expect(set.has("discord_drop")).toBe(false);
   });
 
-  it("preserves the picker order (instagram_post after reddit_post, telegram_post after instagram_post)", () => {
+  it("preserves the picker order (instagram after reddit, telegram after instagram, tiktok after telegram)", () => {
     const ri = MANUAL_EVENT_KINDS.indexOf("reddit_post");
     const ii = MANUAL_EVENT_KINDS.indexOf("instagram_post");
     const ti = MANUAL_EVENT_KINDS.indexOf("telegram_post");
+    const tk = MANUAL_EVENT_KINDS.indexOf("tiktok_post");
     expect(ri).toBeGreaterThanOrEqual(0);
     expect(ii).toBe(ri + 1);
     expect(ti).toBe(ii + 1);
+    expect(tk).toBe(ti + 1);
   });
 });

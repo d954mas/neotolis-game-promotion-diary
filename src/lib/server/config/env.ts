@@ -329,6 +329,27 @@ const RawSchema = z.object({
   // SOCIAL_BACKFILL_MAX_POSTS: Telegram is a FREE t.me/s scrape, so its depth
   // is paced (not credit-bounded) and earns its own, deeper default (100 vs 48).
   TELEGRAM_BACKFILL_MAX_POSTS: z.coerce.number().int().positive().default(100),
+
+  // TikTok provider selection (Phase 10). Mirrors INSTAGRAM_PROVIDER exactly:
+  // empty default => TikTok is NOT configured (the add-source TikTok chip renders
+  // disabled, SOC-05 graceful degrade, no scraper credits spent). Boot succeeds
+  // with this unset (self-host parity — "not configured" is the empty-env state,
+  // not an APP_MODE branch). TikTok REUSES the existing ScrapeCreators account:
+  // no new SCRAPECREATORS_API_KEY, no new budget vars — IG + TikTok draw from the
+  // ONE shared prepaid balance per provider (D-01). The operator flips this to
+  // `scrapecreators` after deploy to enable.
+  TIKTOK_PROVIDER: z.enum(["scrapecreators"]).or(z.literal("")).default(""),
+
+  // TikTok warm per-post auto-refresh (Phase 10). Same shape + defaults as the
+  // Instagram warm lane (7d window / 26h staleness / 5 failures): a post is
+  // "warm" (gets a PAID single-post refresh via the service_post lane) while it
+  // is YOUNGER than this many days AND has gone stale (not refreshed within
+  // TIKTOK_WARM_STALENESS_HOURS). TikTok is a PAID scraper like IG, so the 26h
+  // staleness must stay just over the 24h free account-poll interval to avoid
+  // double-paying page-1 posts (same reasoning as the IG warm gate).
+  TIKTOK_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
+  TIKTOK_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
+  TIKTOK_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -461,6 +482,10 @@ export const env = {
   TELEGRAM_WARM_STALENESS_HOURS: raw.TELEGRAM_WARM_STALENESS_HOURS,
   TELEGRAM_WARM_MAX_FAILURES: raw.TELEGRAM_WARM_MAX_FAILURES,
   TELEGRAM_BACKFILL_MAX_POSTS: raw.TELEGRAM_BACKFILL_MAX_POSTS,
+  TIKTOK_PROVIDER: raw.TIKTOK_PROVIDER,
+  TIKTOK_WARM_WINDOW_DAYS: raw.TIKTOK_WARM_WINDOW_DAYS,
+  TIKTOK_WARM_STALENESS_HOURS: raw.TIKTOK_WARM_STALENESS_HOURS,
+  TIKTOK_WARM_MAX_FAILURES: raw.TIKTOK_WARM_MAX_FAILURES,
 } as const;
 
 export type Env = typeof env;

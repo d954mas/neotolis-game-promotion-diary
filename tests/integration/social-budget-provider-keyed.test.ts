@@ -17,12 +17,8 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 
-const {
-  reserveSocialCredits,
-  getSocialThrottleState,
-  getSocialSpendToday,
-  resetSocialDailyCap,
-} = await import("../../src/lib/sources/instagram/server/quota.js");
+const { reserveSocialCredits, getSocialThrottleState, getSocialSpendToday, resetSocialDailyCap } =
+  await import("../../src/lib/sources/instagram/server/quota.js");
 
 const PROVIDER = "scrapecreators";
 
