@@ -732,6 +732,95 @@ export async function enrichFromUrl(
     };
   }
 
+  // TikTok — LIVE single-video preview (PLAT-02). Mirrors the IG branch exactly:
+  // dispatch to the TikTok adapter's fetchEventPreviewMetadata, which resolves a
+  // vm./vt. short link, issues ONE by-URL provider request (1 credit), cap-gated
+  // against the per-user social cap + the operator prepaid budget, and UPSERTs the
+  // tiktok_posts cache + a snapshot (incl shares) so the saved event renders fully
+  // in /feed.
+  //
+  // GRACEFUL DEGRADE is load-bearing: every non-ok path (provider unconfigured,
+  // network error, budget/cap exhaustion, deleted video) falls through to the
+  // recognition-only shape so manual entry never dead-ends. Cap-exhaustion takes
+  // the soft path over a hard 429 — no credit was burned, so the cost guardrail
+  // still held.
+  if (parsed.kind === "tiktok_post") {
+    // Recognition-only has NO aweme id (no live fetch resolved one). externalId is
+    // null, NOT the URL slug: the create boundary re-keys off the cache by canonical
+    // permalink (resolveCachedExternalId), and a vm./vt. short link has no id in its
+    // path at all. null yields an honest stats-less manual card; re-paste once the
+    // provider recovers to get an enriched, aweme-id-keyed event.
+    const recognitionOnly: EnrichmentResult = {
+      kind: "tiktok_post",
+      externalId: null,
+      title: "",
+      occurredAt: null,
+      thumbnailUrl: null,
+      authorName: null,
+      authorUrl: null,
+      canonicalUrl: parsed.canonicalUrl,
+      sourceMatch: null,
+    };
+    const adapter = getAdapter("tiktok_account");
+    if (adapter.fetchEventPreviewMetadata === undefined) return recognitionOnly;
+
+    let preview;
+    try {
+      preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+        userId,
+        ipAddress,
+      });
+    } catch (err) {
+      // Cap-exhaustion (AppError 429) → soft-degrade to recognition-only rather
+      // than dead-ending the form.
+      if (err instanceof AppError && err.code === "requests_quota_exhausted") {
+        logger.info(
+          { userId, url: parsed.canonicalUrl },
+          "tiktok preview: per-user cap exhausted — degrading to recognition-only",
+        );
+        return recognitionOnly;
+      }
+      // EXPECTED failures (AdapterError network/operator-issue, any other typed
+      // AppError) soft-degrade — manual entry must never dead-end. An UNEXPECTED
+      // throw (a programmer bug: bad import, undefined access) is NOT in the degrade
+      // contract — re-throw so it surfaces as a 500 + escaped-error log rather than
+      // hiding behind a benign WARN. Mirrors the IG branch.
+      const { AdapterError } = await import("$lib/sources/errors.js");
+      if (!(err instanceof AppError) && !(err instanceof AdapterError)) throw err;
+      logger.warn(
+        { userId, url: parsed.canonicalUrl, err: String((err as Error)?.message ?? err) },
+        "tiktok preview threw; degrading to recognition-only manual entry",
+      );
+      return recognitionOnly;
+    }
+
+    // Any non-ok discriminator (unreachable / private / unavailable) →
+    // recognition-only so the user can still save a bare event.
+    if (preview.kind !== "ok") return recognitionOnly;
+
+    return {
+      kind: "tiktok_post",
+      // The aweme id (preview.externalId = post.id), NOT the URL slug. The
+      // single-video fetch UPSERTed tiktok_posts + a snapshot keyed by the aweme id;
+      // saving the event with a different id would orphan it from the cache so
+      // feed-enrichment / metric-series / poll-state / refresh-now never match.
+      // Falls back to null (never a guess) if the adapter somehow didn't surface an
+      // id (defensive): an unenriched-but-honest card beats a permanently-pending
+      // one. Mirrors IG's preview.externalId ?? null.
+      externalId: preview.externalId ?? null,
+      title: preview.title,
+      occurredAt: preview.occurredAt ?? null,
+      thumbnailUrl: preview.thumbnailUrl ?? null,
+      authorName: preview.authorName || null,
+      authorUrl: preview.authorUrl || null,
+      canonicalUrl: parsed.canonicalUrl,
+      // author_is_me for a tiktok_post is inherited from the owned data_sources row
+      // at source-create time (mirrors Telegram); the paste flow matches on the
+      // source, not per-post. No sourceMatch precompute.
+      sourceMatch: null,
+    };
+  }
+
   if (parsed.kind !== "youtube_video") {
     // Exhaustive guard — every ParsedUrl variant handled above.
     const _exhaustive: never = parsed;

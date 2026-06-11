@@ -20,14 +20,17 @@ interface ScriptedSinglePost {
   calls: Array<{ url: string; origin?: string }>;
 }
 const single: ScriptedSinglePost = { next: null, calls: [] };
+// Toggle for the SOC-05 recognition-only degrade test: when false, getSocialProvider
+// returns null (provider unconfigured) exactly as the self-host path does.
+let providerConfigured = true;
 
 vi.mock("../../src/lib/sources/tiktok/server/provider/registry.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    isTikTokConfigured: () => true,
+    isTikTokConfigured: () => providerConfigured,
     getSocialProvider: (platform: string) => {
-      if (platform !== "tiktok") return null;
+      if (platform !== "tiktok" || !providerConfigured) return null;
       return {
         name: "scrapecreators",
         async fetchPostByUrl(
@@ -81,6 +84,7 @@ const { tiktokPosts, tiktokPostSnapshots } =
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
 const { tiktokAdapter: adapter } = await import("../../src/lib/sources/tiktok/server/index.js");
+const { enrichFromUrl } = await import("../../src/lib/server/services/events-mutation.js");
 
 const PLATFORM = "tiktok";
 
@@ -110,6 +114,7 @@ beforeEach(() => {
   single.next = null;
   single.calls = [];
   shortLinkResolution = null;
+  providerConfigured = true;
 });
 
 describe("tiktok paste preview (single-video fetch, adapter seam)", () => {
@@ -279,6 +284,95 @@ describe("tiktok paste preview (single-video fetch, adapter seam)", () => {
       .select()
       .from(tiktokPosts)
       .where(eq(tiktokPosts.awemeId, "7000000000000000003"));
+    expect(cached).toHaveLength(0);
+  });
+});
+
+// Cross-source enrichFromUrl wiring (FIX 2 — the activation seam Plan 05 owed): a
+// pasted TikTok URL now routes parseIngestUrl → enrichFromUrl(tiktok_post) →
+// tiktokAdapter.fetchEventPreviewMetadata, mirroring the IG branch (live preview +
+// graceful recognition-only degrade). The provider seam is mocked at
+// provider/registry (same module as above); the DB is real.
+describe("tiktok enrichFromUrl wiring (the cross-source paste seam)", () => {
+  it("[10-05] a pasted TikTok video URL returns an enriched tiktok_post preview", async () => {
+    const user = await seedUserDirectly({ email: `tk-enrich-ok-${Math.random()}@t.io` });
+    single.next = singlePost({ id: "7100000000000000001", shortcode: "7100000000000000001" });
+
+    const result = await enrichFromUrl(
+      user.id,
+      "https://www.tiktok.com/@stoolpresidente/video/7100000000000000001",
+      "127.0.0.1",
+    );
+
+    expect(result.kind).toBe("tiktok_post");
+    expect(result.title).toBe("First line caption");
+    expect(result.thumbnailUrl).toBe("https://cdn.tiktokcdn-us.com/cover.awebp");
+    // The MEDIA id (aweme id), threaded from preview.externalId — NOT a URL guess.
+    expect(result.externalId).toBe("7100000000000000001");
+    // The canonical permalink (query tail stripped by the parser).
+    expect(result.canonicalUrl).toBe(
+      "https://www.tiktok.com/@stoolpresidente/video/7100000000000000001",
+    );
+    // The provider was metered against the user pool (cost guardrail).
+    expect(single.calls[0]!.origin).toBe("user");
+  });
+
+  it("[10-05] a query-tailed paste canonicalizes before the fetch (clean stored link)", async () => {
+    const user = await seedUserDirectly({ email: `tk-enrich-tail-${Math.random()}@t.io` });
+    single.next = singlePost({ id: "7100000000000000002", shortcode: "7100000000000000002" });
+
+    const result = await enrichFromUrl(
+      user.id,
+      "https://www.tiktok.com/@stoolpresidente/video/7100000000000000002?is_from_webapp=1&sender_device=pc",
+      "127.0.0.1",
+    );
+
+    expect(result.kind).toBe("tiktok_post");
+    // The stored URL is the clean canonical permalink, not the tracking-tailed one.
+    expect(result.canonicalUrl).toBe(
+      "https://www.tiktok.com/@stoolpresidente/video/7100000000000000002",
+    );
+  });
+
+  it("[10-05] a vm. short-link paste reaches the adapter's short-link resolution", async () => {
+    const user = await seedUserDirectly({ email: `tk-enrich-short-${Math.random()}@t.io` });
+    shortLinkResolution = "https://www.tiktok.com/@stoolpresidente/video/7100000000000000003";
+    single.next = singlePost({ id: "7100000000000000003", shortcode: "7100000000000000003" });
+
+    const result = await enrichFromUrl(user.id, "https://vm.tiktok.com/ZGshort/", "127.0.0.1");
+
+    expect(result.kind).toBe("tiktok_post");
+    expect(result.externalId).toBe("7100000000000000003");
+    // The provider was called with the RESOLVED canonical URL, not the short link —
+    // proving the orchestrator routed the vm. host to the adapter's resolver seam.
+    expect(single.calls[0]!.url).toBe(
+      "https://www.tiktok.com/@stoolpresidente/video/7100000000000000003",
+    );
+  });
+
+  it("[10-05] recognition-only degrade when the provider is unconfigured (SOC-05)", async () => {
+    providerConfigured = false;
+    const user = await seedUserDirectly({ email: `tk-enrich-noprov-${Math.random()}@t.io` });
+
+    const result = await enrichFromUrl(
+      user.id,
+      "https://www.tiktok.com/@h/video/7100000000000000004",
+      "127.0.0.1",
+    );
+
+    // SOC-05: manual entry never dead-ends — the kind + canonical URL are
+    // recognized but title is empty + externalId is null (no live fetch resolved an
+    // aweme id; never the URL slug, which would strand the event on a pending badge).
+    expect(result.kind).toBe("tiktok_post");
+    expect(result.title).toBe("");
+    expect(result.externalId).toBeNull();
+    expect(result.canonicalUrl).toBe("https://www.tiktok.com/@h/video/7100000000000000004");
+    // No provider call (unconfigured) → no cache row.
+    expect(single.calls).toHaveLength(0);
+    const cached = await db
+      .select()
+      .from(tiktokPosts)
+      .where(eq(tiktokPosts.awemeId, "7100000000000000004"));
     expect(cached).toHaveLength(0);
   });
 });
