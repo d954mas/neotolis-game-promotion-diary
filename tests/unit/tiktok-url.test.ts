@@ -79,6 +79,31 @@ describe("tiktok URL parsers", () => {
       );
     });
 
+    it("[10-03] an @-prefixed DOTTED handle resolves (RAW_HANDLE_RE allows dots — FIX 5)", () => {
+      // The leading @ is unambiguous, so a dotted handle is safely a handle, not a
+      // hostname. Pre-fix the dot-gate (!includes('.')) sent it to the URL branch →
+      // null, breaking a legitimate paste like `@game.studio`.
+      expect(tiktokParseSourceUrl("@game.studio")).toEqual({
+        kind: "tiktok_account",
+        handle: "game.studio",
+        externalUrl: "https://www.tiktok.com/@game.studio",
+      });
+    });
+
+    it("[10-03] a BARE dotted string stays null/URL-branch (hostname-ambiguous)", () => {
+      // No leading @ + a dot → could be a domain; it must NOT be treated as a bare
+      // handle. Falls to the URL branch, where `game.studio` is a foreign host → null.
+      expect(tiktokParseSourceUrl("game.studio")).toBeNull();
+    });
+
+    it("[10-03] @charlidamelio (dotless @handle) still resolves", () => {
+      expect(tiktokParseSourceUrl("@charlidamelio")).toEqual({
+        kind: "tiktok_account",
+        handle: "charlidamelio",
+        externalUrl: "https://www.tiktok.com/@charlidamelio",
+      });
+    });
+
     it("[10-03] a video permalink returns null (caller meant the post parser)", () => {
       expect(tiktokParseSourceUrl("https://www.tiktok.com/@h/video/9")).toBeNull();
     });

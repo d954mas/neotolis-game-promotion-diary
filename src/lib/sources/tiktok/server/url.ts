@@ -114,8 +114,25 @@ export function tiktokParseUrl(input: string): ParsedUrl | null {
 export function tiktokParseSourceUrl(input: string): ParsedSourceUrl | null {
   const trimmed = input.trim();
 
-  // Raw `@handle` / bare `handle` FIRST — no scheme, so `new URL()` would reject
-  // them. A slash/dot/colon means it is a path or URL (handled by the URL branch).
+  // An @-prefixed raw handle FIRST — the leading `@` is unambiguous (a TikTok
+  // profile path is `/@handle`, never a bare `@handle` URL), so a DOTTED @handle
+  // (e.g. `@game.studio` — RAW_HANDLE_RE allows dots) is safely a handle, not a
+  // hostname. No scheme/slash/colon → not a URL or path.
+  if (trimmed.startsWith("@") && !trimmed.includes("/") && !trimmed.includes(":")) {
+    const raw = RAW_HANDLE_RE.exec(trimmed);
+    if (raw !== null) {
+      const handle = raw[1]!;
+      return {
+        kind: "tiktok_account",
+        handle,
+        externalUrl: `https://www.tiktok.com/@${handle}`,
+      };
+    }
+  }
+
+  // Bare `handle` (no @, no scheme) — DOT-GATED: a bare dotted string (`game.studio`)
+  // is hostname-ambiguous (could be a domain), so it falls through to the URL branch
+  // below. Only a dotless bare handle (`charlidamelio`) resolves here.
   if (!trimmed.includes("/") && !trimmed.includes(".") && !trimmed.includes(":")) {
     const raw = RAW_HANDLE_RE.exec(trimmed);
     if (raw !== null) {
