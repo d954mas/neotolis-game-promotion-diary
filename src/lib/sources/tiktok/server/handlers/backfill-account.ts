@@ -57,6 +57,7 @@ import {
 import { getSocialProvider } from "../provider/registry.js";
 import { writeSnapshot, upsertTikTokAccount } from "../snapshots.js";
 import { readTikTokBackfillState, writeTikTokBackfillState } from "../backfill-state.js";
+import { buildTikTokTitle } from "../normalize.js";
 import { env } from "$lib/server/config/env.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import type { RawEvent, SourceKind } from "$lib/sources/adapter.js";
@@ -84,25 +85,15 @@ interface BackfillAccountJob {
 
 const KIND = "tiktok_account" as const;
 
-/** D-09: the event title is the caption's FIRST line. Falls back to the TikTok
- *  fallback ("TikTok <mediaType> · <date>") when the post is caption-less. */
-function buildTitle(post: NormalizedPost): string {
-  const caption = post.caption?.trim();
-  if (caption !== undefined && caption !== "") {
-    const firstLine = caption.split("\n", 1)[0]!.trim();
-    if (firstLine !== "") return firstLine;
-  }
-  const date = post.publishedAt.toISOString().slice(0, 10);
-  return `TikTok ${post.kind} · ${date}`;
-}
-
 /** Map a NormalizedPost → cross-source RawEvent (SOC-04: the ScrapeCreators field
- *  shape is already gone — the provider seam returns NormalizedPost). */
+ *  shape is already gone — the provider seam returns NormalizedPost). The D-09
+ *  title (caption first line, "TikTok <kind> · <date>" fallback) is the shared
+ *  buildTikTokTitle (one spelling with the paste-preview path). */
 function postToRawEvent(post: NormalizedPost): RawEvent {
   return {
     externalId: post.id,
     url: post.permalink ?? `https://www.tiktok.com/video/${post.id}`,
-    title: buildTitle(post),
+    title: buildTikTokTitle(post.caption, post.kind, post.publishedAt),
     occurredAt: post.publishedAt,
     kind: "tiktok_post",
     metadata: {

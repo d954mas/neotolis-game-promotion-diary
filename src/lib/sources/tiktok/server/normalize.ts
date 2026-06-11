@@ -98,6 +98,24 @@ const AWEME = z.object({
 
 type Aweme = z.infer<typeof AWEME>;
 
+/** D-09 event/preview title = the caption's FIRST line, falling back to the
+ *  "TikTok <kind> · <date>" shape so a caption-less post still produces a
+ *  meaningful, non-empty title (the Add Event form requires one). One spelling for
+ *  both the walker (handlers/backfill-account.ts) and the paste preview (index.ts).
+ *  Lives here — the pure-mapping home — alongside the other aweme→event mappers. */
+export function buildTikTokTitle(
+  caption: string | null,
+  kind: string,
+  publishedAt: Date,
+): string {
+  const trimmed = caption?.trim();
+  if (trimmed !== undefined && trimmed !== "") {
+    const firstLine = trimmed.split("\n", 1)[0]!.trim();
+    if (firstLine !== "") return firstLine;
+  }
+  return `TikTok ${kind} · ${publishedAt.toISOString().slice(0, 10)}`;
+}
+
 /** Photo-mode discriminator → cross-platform content kind. A post is "carousel"
  *  when aweme_type === 150 OR image_post_info is present (10-SPIKE.md finding
  *  (b)); otherwise "video". Per CONTEXT D-03 the media vocabulary for TikTok is

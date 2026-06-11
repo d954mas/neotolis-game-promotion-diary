@@ -50,6 +50,7 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { tiktokAccountAdapterCore } from "./adapter.js";
 import { tiktokParseUrl, tiktokParseSourceUrl } from "./url.js";
+import { buildTikTokTitle } from "./normalize.js";
 import { resolveTikTokShortLink } from "./short-link.js";
 import { resetTikTokBackfillState } from "./backfill-state.js";
 import { getSocialThrottleState } from "./quota.js";
@@ -535,7 +536,7 @@ async function fetchEventPreviewMetadata(
 
   return {
     kind: "ok",
-    title: buildPreviewTitle(post.caption, post.kind, post.publishedAt),
+    title: buildTikTokTitle(post.caption, post.kind, post.publishedAt),
     authorName: post.ownerUsername ?? "",
     authorUrl: ownerUrl,
     occurredAt: post.publishedAt,
@@ -547,18 +548,6 @@ async function fetchEventPreviewMetadata(
     // explicitly to mirror IG's media-id contract.
     externalId: post.id,
   };
-}
-
-/** Title = caption's FIRST line (D-09), falling back to the "TikTok <mediaType> ·
- *  <date>" shape so a caption-less paste still produces a meaningful, non-empty
- *  title (which the Add Event form requires). */
-function buildPreviewTitle(caption: string | null, mediaType: string, publishedAt: Date): string {
-  const trimmed = caption?.trim();
-  if (trimmed !== undefined && trimmed !== "") {
-    const firstLine = trimmed.split("\n", 1)[0]!.trim();
-    if (firstLine !== "") return firstLine;
-  }
-  return `TikTok ${mediaType} · ${publishedAt.toISOString().slice(0, 10)}`;
 }
 
 /**
