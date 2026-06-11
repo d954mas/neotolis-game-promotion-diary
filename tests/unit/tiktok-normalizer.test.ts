@@ -141,7 +141,18 @@ describe("tiktok normalizer (PLAT-02)", () => {
       fullName: "Dave Portnoy",
       avatarUrl: "https://cdn/avatar.jpeg",
       followerCount: 4_700_000,
+      // C2: sec_uid is read off the SAME profile response (no extra fetch) and
+      // threaded into the create-time tiktok_accounts seed.
+      secUid: "MS4wLjABAAAA",
     });
+  });
+
+  it("[10-03] normalizeProfile maps secUid → null when the profile omits it", () => {
+    const account = normalizeProfile({
+      success: true,
+      user: { id: "1", uniqueId: "h", nickname: "N" },
+    });
+    expect(account?.secUid).toBeNull();
   });
 
   it("[10-03] normalizeProfile returns null for the missing-handle 200 body (no user)", () => {

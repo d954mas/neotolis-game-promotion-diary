@@ -12,18 +12,39 @@
 // partial feed refresh, and the share_count INSERT.
 //
 // Requirements: PLAT-02.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { db } from "../../src/lib/server/db/client.js";
-import {
-  tiktokAccounts,
-  tiktokPosts,
-  tiktokPostSnapshots,
-} from "../../src/lib/server/db/schema/index.js";
-import {
-  writeSnapshot,
-  upsertTikTokAccount,
-} from "../../src/lib/sources/tiktok/server/snapshots.js";
+import type { ResolvedAccount } from "../../src/lib/sources/social-provider.js";
+
+// Provider seam mock for the ADAPTER-PATH test (resolveHandleToAccountId): the
+// provider's resolveAccount returns a ResolvedAccount carrying secUid, so we prove
+// the create-time resolve THREADS sec_uid through to upsertTikTokAccount (not just
+// the direct-upsert tests below). The DB is real.
+let scriptedResolved: ResolvedAccount | null = null;
+vi.mock("../../src/lib/sources/tiktok/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    isTikTokConfigured: () => true,
+    getSocialProvider: (platform: string) => {
+      if (platform !== "tiktok") return null;
+      return {
+        name: "scrapecreators",
+        async resolveAccount(): Promise<ResolvedAccount | null> {
+          return scriptedResolved;
+        },
+      };
+    },
+  };
+});
+
+const { db } = await import("../../src/lib/server/db/client.js");
+const { tiktokAccounts, tiktokPosts, tiktokPostSnapshots } =
+  await import("../../src/lib/server/db/schema/index.js");
+const { writeSnapshot, upsertTikTokAccount } =
+  await import("../../src/lib/sources/tiktok/server/snapshots.js");
+const { tiktokAccountAdapterCore } =
+  await import("../../src/lib/sources/tiktok/server/adapter.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -61,6 +82,31 @@ describe("tiktok account subject entity (CHECKLIST §1a)", () => {
     expect(row!.secUid).toBe("MS4wLjABAAAA-secuid");
     expect(row!.handleAliases).toEqual(["stoolpresidente"]);
     expect(row!.lastRefreshedAt).not.toBeNull();
+  });
+
+  it("[10-04] resolveHandleToAccountId threads sec_uid through to tiktok_accounts (C2 — adapter path)", async () => {
+    const accountId = `acct_${uniq()}`;
+    // The provider resolveAccount returns a ResolvedAccount carrying secUid (read off
+    // the SAME profile response — no extra credit). The adapter must thread it into
+    // upsertTikTokAccount; pre-fix normalizeProfile dropped sec_uid so it never landed.
+    scriptedResolved = {
+      accountId,
+      displayName: "Adapter Path",
+      username: "adapterpath",
+      fullName: "Adapter Path",
+      avatarUrl: "https://cdn/adapter.awebp",
+      followerCount: 1234,
+      secUid: "MS4wLjABAAAA-adapter-secuid",
+    };
+
+    const result = await tiktokAccountAdapterCore.resolveHandleToAccountId("adapterpath");
+    expect(result).toEqual({ accountId, displayName: "Adapter Path" });
+
+    const row = await readAccount(accountId);
+    expect(row!.accountId).toBe(accountId);
+    expect(row!.username).toBe("adapterpath");
+    // The load-bearing assertion: sec_uid landed via the adapter path.
+    expect(row!.secUid).toBe("MS4wLjABAAAA-adapter-secuid");
   });
 
   it("[10-04] the walker opportunistically refreshes username/avatar from the free feed owner (COALESCE-preserves the rich profile fields)", async () => {

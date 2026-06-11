@@ -80,6 +80,7 @@ export const tiktokAccountAdapterCore: TikTokAccountAdapterCore = {
         nickname: resolved.fullName,
         avatarUrl: resolved.avatarUrl,
         followerCount: resolved.followerCount,
+        secUid: resolved.secUid ?? null,
       });
     } catch (err) {
       logger.warn(

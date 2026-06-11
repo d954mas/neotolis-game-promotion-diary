@@ -283,5 +283,8 @@ export function normalizeProfile(json: unknown): ResolvedAccount | null {
     fullName: user.nickname ?? null,
     avatarUrl: user.avatarLarger ?? null,
     followerCount: parsed.stats?.followerCount ?? null,
+    // secUid is TikTok's opaque secondary id (read off the SAME profile response —
+    // no extra fetch). Seeds tiktok_accounts.sec_uid via the create-time resolve.
+    secUid: user.secUid ?? null,
   };
 }

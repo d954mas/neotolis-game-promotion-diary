@@ -129,6 +129,9 @@ export interface ResolvedAccount {
   avatarUrl: string | null;
   /** Follower count when the profile response exposes it; else null. */
   followerCount: number | null;
+  /** Platform secondary opaque id (TikTok secUid) when the profile response carries
+   *  it; else null/absent. OPTIONAL so the IG provider impl (no secUid) is untouched. */
+  secUid?: string | null;
 }
 
 /**
