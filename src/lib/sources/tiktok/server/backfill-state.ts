@@ -103,11 +103,7 @@ export async function resetTikTokBackfillState(
   channelKey: string,
   dbCtx: DbOrTx = db,
 ): Promise<void> {
-  await writeTikTokBackfillState(
-    channelKey,
-    { cursor: null, complete: false, collected: 0, operatorPaused: false },
-    dbCtx,
-  );
+  await writeTikTokBackfillState(channelKey, { ...EMPTY }, dbCtx);
 }
 
 /** Read the TikTok backfill sub-state directly by channelKey (one SELECT). */
@@ -126,5 +122,3 @@ export async function getTikTokBackfillState(
     rows[0] ? ({ metadata: rows[0].metadata } as ChannelStateRow) : undefined,
   );
 }
-
-export { EMPTY as EMPTY_TIKTOK_BACKFILL_STATE };
