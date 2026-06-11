@@ -140,6 +140,9 @@ export function buildDayGroups(
  *     externalId IS the video id, part of the canonical URL).
  *   - Reddit → the enrichment `linkUrl` when it's image-like, else the
  *     `metadata.media.url` snapshot (same chain the RedditFeedCard renders).
+ *   - Twitter → `metadata.media.url` (no enrichment object; the same chain
+ *     derive-card-data.ts serves on the card). The D-09 refactor dropped this
+ *     branch — restoring it keeps the chart marker in sync with the card.
  *   - Instagram → `instagramEnrichment.thumbnailUrl` (set by
  *     sources/instagram/server/feed-enrichment.ts).
  *   - Telegram → `telegramEnrichment.thumbnailUrl` (set by
@@ -171,6 +174,14 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
   if (event.kind === "reddit_post") {
     const link = event.redditEnrichment?.linkUrl ?? null;
     if (link && isImageLikeUrl(link)) return link;
+    return readMediaUrlFromMetadata(event.metadata);
+  }
+  if (event.kind === "twitter_post") {
+    // Twitter has no enrichment object — its thumbnail lives on metadata.media.url
+    // (the same chain derive-card-data.ts serves on the feed card). The D-09
+    // refactor dropped this branch; restoring it keeps the chart marker in sync
+    // with the card. (telegram stays enrichment-only per D-09 — its metadata is
+    // intentionally NOT read here.)
     return readMediaUrlFromMetadata(event.metadata);
   }
   if (event.kind === "instagram_post") {

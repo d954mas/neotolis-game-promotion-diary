@@ -80,6 +80,27 @@ describe("eventThumbnail resolves through the adapter enrichment seam (D-09)", (
     expect(out).toBe(url);
   });
 
+  it("twitter_post returns the metadata.media.url thumbnail (restored — derive-card-data still serves it)", () => {
+    // Twitter has no enrichment object; its thumbnail lives on metadata.media.url
+    // (the same chain the card renders via derive-card-data.ts). The D-09 refactor
+    // dropped this branch, blanking every twitter marker on /games/[id]; restoring
+    // it keeps the chart marker in sync with the card.
+    const url = "https://pbs.twimg.com/media/abc.jpg";
+    const out = eventThumbnail(
+      evt({
+        kind: "twitter_post",
+        externalId: "tw555",
+        metadata: { media: { url } },
+      }),
+    );
+    expect(out).toBe(url);
+  });
+
+  it("twitter_post with no metadata.media.url returns null (placeholder fallback)", () => {
+    expect(eventThumbnail(evt({ kind: "twitter_post", metadata: null }))).toBeNull();
+    expect(eventThumbnail(evt({ kind: "twitter_post", metadata: { media: {} } }))).toBeNull();
+  });
+
   it("youtube_video returns the intrinsic img.youtube.com URL (no enrichment needed)", () => {
     const out = eventThumbnail(evt({ kind: "youtube_video", externalId: "dQw4w9WgXcQ" }));
     expect(out).toBe("https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg");
@@ -93,6 +114,7 @@ describe("eventThumbnail resolves through the adapter enrichment seam (D-09)", (
     expect(eventThumbnail(evt({ kind: "telegram_post" }))).toBeNull();
     expect(eventThumbnail(evt({ kind: "instagram_post" }))).toBeNull();
     expect(eventThumbnail(evt({ kind: "tiktok_post" }))).toBeNull();
+    expect(eventThumbnail(evt({ kind: "twitter_post" }))).toBeNull();
     expect(eventThumbnail(evt({ kind: "post" }))).toBeNull();
   });
 });
