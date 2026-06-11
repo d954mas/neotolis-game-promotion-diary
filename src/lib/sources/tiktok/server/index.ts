@@ -55,7 +55,8 @@ import { resetTikTokBackfillState } from "./backfill-state.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import { writeSnapshot } from "./snapshots.js";
-import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
+import { adapterRefreshQueue, tiktokPosts } from "$lib/server/db/schema/index.js";
+import { eq, desc } from "drizzle-orm";
 import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
 import { handleBackfillAccount } from "./handlers/backfill-account.js";
 import { handleTikTokPollCron } from "./handlers/poll-cron.js";
@@ -455,6 +456,12 @@ async function fetchEventPreviewMetadata(
   if (parsed === null) {
     return { kind: "unreachable", cause: "url_not_tiktok_post" };
   }
+  // The CANONICAL permalink (query tail stripped) computed by the parser. This is
+  // the SAME key resolveCachedExternalId looks the aweme id up by — writeSnapshot
+  // MUST store this, not the raw videoUrl (which carries ?is_from_webapp=… on a
+  // share paste, or a redirect Location), or the create-time cache lookup misses.
+  const canonicalPermalink =
+    (parsed.metadata as { permalink?: string } | undefined)?.permalink ?? videoUrl;
 
   // Per-user fair-share cap — runs BEFORE the fetch so a cap-exhausted user never
   // burns a credit they aren't allowed to consume. Throws AppError 429 which
@@ -494,7 +501,7 @@ async function fetchEventPreviewMetadata(
     accountId: post.ownerId,
     mediaType: post.kind,
     caption: post.caption,
-    permalink: videoUrl,
+    permalink: canonicalPermalink,
     thumbnailUrl: post.thumbnailUrl,
     publishedAt: post.publishedAt,
     metrics: {
@@ -568,15 +575,19 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
   const parsed = tiktokParseUrl(url);
   const permalink = (parsed?.metadata as { permalink?: string } | undefined)?.permalink;
   if (typeof permalink !== "string") return null;
-  const { tiktokPosts } = await import("$lib/server/db/schema/index.js");
-  const { eq, desc } = await import("drizzle-orm");
   const [row] = await db
     .select({ awemeId: tiktokPosts.awemeId })
     .from(tiktokPosts)
     .where(eq(tiktokPosts.permalink, permalink))
     .orderBy(desc(tiktokPosts.updatedAt))
     .limit(1);
-  return row?.awemeId ?? null;
+  // On a cache HIT the canonical-permalink lookup wins (untrusted body — a client
+  // could pair video A's URL with video B's id, #70). On a MISS (no prior preview)
+  // fall back to the URL-INTRINSIC aweme id: TikTok's id IS the /@handle/video/<id>
+  // URL slug (10-SPIKE), so the URL itself is the authoritative key when our cache
+  // has nothing. Without this fallback a no-preview create discards the id entirely
+  // and strands the event on a permanently-pending stats badge.
+  return row?.awemeId ?? parsed?.externalId ?? null;
 }
 
 // tiktokAdapter — composes the core (./adapter.ts) with the infrastructure-touching

@@ -84,7 +84,9 @@ const { tiktokPosts, tiktokPostSnapshots } =
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
 const { tiktokAdapter: adapter } = await import("../../src/lib/sources/tiktok/server/index.js");
-const { enrichFromUrl } = await import("../../src/lib/server/services/events-mutation.js");
+const { enrichFromUrl, createEvent } =
+  await import("../../src/lib/server/services/events-mutation.js");
+const { events } = await import("../../src/lib/server/db/schema/events.js");
 
 const PLATFORM = "tiktok";
 
@@ -217,11 +219,46 @@ describe("tiktok paste preview (single-video fetch, adapter seam)", () => {
     const derived = await resolveCachedExternalId(canonical);
     expect(derived).toBe("7649569886871522573");
 
-    // A URL with no cache row → null (honest stats-less card; never a guess).
+    // A URL with no cache row → the URL-INTRINSIC aweme id (FIX 4). The aweme id IS
+    // the /@handle/video/<id> URL slug (10-SPIKE), so on a no-preview miss the URL
+    // itself is the authoritative key — NOT null (which would strand a no-preview
+    // create on a permanently-pending stats badge).
     const miss = await resolveCachedExternalId(
-      "https://www.tiktok.com/@nobody/video/0000000000000000000",
+      "https://www.tiktok.com/@nobody/video/9990000000000000000",
     );
-    expect(miss).toBeNull();
+    expect(miss).toBe("9990000000000000000");
+
+    // A non-TikTok / unparseable URL → null (no id derivable).
+    expect(await resolveCachedExternalId("https://example.com/not-a-tiktok")).toBeNull();
+  });
+
+  it("[10-04] a query-tailed paste still hits the create-time cache lookup (canonical permalink stored)", async () => {
+    // FIX 3: fetchEventPreviewMetadata must store the CANONICAL permalink (query tail
+    // stripped) on the cache row, not the raw share URL — otherwise resolveCachedExternalId
+    // (which keys on the canonical permalink) misses on a real share paste and the saved
+    // event renders stats-less despite a fresh preview.
+    const user = await seedUserDirectly({ email: `tk-preview-tail-${Math.random()}@t.io` });
+    const tailed =
+      "https://www.tiktok.com/@stoolpresidente/video/7200000000000000001?is_from_webapp=1&sender_device=pc";
+    single.next = singlePost({ id: "7200000000000000001", shortcode: "7200000000000000001" });
+    await fetchEventPreviewMetadata(tailed, { userId: user.id, ipAddress: "127.0.0.1" });
+
+    // The cache row's permalink is the canonical (no-query) URL.
+    const [cached] = await db
+      .select()
+      .from(tiktokPosts)
+      .where(eq(tiktokPosts.awemeId, "7200000000000000001"));
+    expect(cached!.permalink).toBe(
+      "https://www.tiktok.com/@stoolpresidente/video/7200000000000000001",
+    );
+
+    // The create-time lookup hits whether the saved URL carries the query tail or not.
+    expect(await resolveCachedExternalId(tailed)).toBe("7200000000000000001");
+    expect(
+      await resolveCachedExternalId(
+        "https://www.tiktok.com/@stoolpresidente/video/7200000000000000001",
+      ),
+    ).toBe("7200000000000000001");
   });
 
   it("[10-04] a deleted/private video (null body) degrades to unavailable (no cache row)", async () => {
@@ -374,5 +411,30 @@ describe("tiktok enrichFromUrl wiring (the cross-source paste seam)", () => {
       .from(tiktokPosts)
       .where(eq(tiktokPosts.awemeId, "7100000000000000004"));
     expect(cached).toHaveLength(0);
+  });
+
+  it("[10-05] creating a tiktok_post WITHOUT a prior preview keys on the URL aweme id (FIX 4)", async () => {
+    // No preview ran (provider unconfigured / user skipped Fetch), so the cache has
+    // no row for this URL. createEvent runs resolveCachedExternalId AUTHORITATIVELY;
+    // pre-fix it returned null on a miss and the saved event had externalId=null —
+    // permanently stats-less. FIX 4 falls back to the URL-intrinsic aweme id.
+    providerConfigured = false;
+    const user = await seedUserDirectly({ email: `tk-create-nopreview-${Math.random()}@t.io` });
+
+    const row = await createEvent(
+      user.id,
+      {
+        kind: "tiktok_post",
+        title: "No-preview TikTok create",
+        occurredAt: new Date("2026-06-01T12:00:00Z"),
+        url: "https://www.tiktok.com/@stoolpresidente/video/7300000000000000001",
+      },
+      "127.0.0.1",
+    );
+
+    // The saved event keys on the URL-derived aweme id (the URL slug IS the id).
+    expect(row.externalId).toBe("7300000000000000001");
+    const [persisted] = await db.select().from(events).where(eq(events.id, row.id));
+    expect(persisted!.externalId).toBe("7300000000000000001");
   });
 });
