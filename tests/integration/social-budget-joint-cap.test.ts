@@ -32,11 +32,7 @@ const { reserveSocialCredits, getSocialThrottleState, resetSocialDailyCap, today
 const PROVIDER = "scrapecreators";
 
 /** Seed a platform's pool counter directly so a test can park usage. */
-async function seedSpend(
-  platform: string,
-  pool: "cron" | "user",
-  credits: number,
-): Promise<void> {
+async function seedSpend(platform: string, pool: "cron" | "user", credits: number): Promise<void> {
   await db
     .insert(socialProviderSpend)
     .values({
@@ -67,10 +63,7 @@ async function seedBalance(credits: number): Promise<void> {
     });
 }
 
-async function readPlatformPool(
-  platform: string,
-  pool: "cron" | "user",
-): Promise<number> {
+async function readPlatformPool(platform: string, pool: "cron" | "user"): Promise<number> {
   const rows = await db
     .select({ used: socialProviderSpend.creditsUsed })
     .from(socialProviderSpend)
