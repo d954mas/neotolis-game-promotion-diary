@@ -11,6 +11,13 @@
 // cron pool=80, user pool=20. Prepaid balance defaults high (100000) so the
 // pool/throttle gates fire first; the hard-ceiling test writes a small balance
 // row directly to assert the "cannot spend what isn't there" path.
+//
+// D-01: the daily-cap pool limits + 80/95 bands are JOINT across all platforms
+// on a provider. These tests exercise a SINGLE platform (instagram), so the
+// joint total equals that platform's spend — they prove the band math per
+// reservation. The CROSS-platform case (IG spend eating into TikTok's cap) lives
+// in social-budget-joint-cap.test.ts, which is the guard against a regression
+// that re-splits the cap per-platform.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
