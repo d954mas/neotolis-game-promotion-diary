@@ -31,6 +31,7 @@ const FUNCTIONAL: ReadonlySet<SourceKind> = new Set<SourceKind>([
   "reddit_subreddit",
   "instagram_account",
   "telegram_channel",
+  "tiktok_account",
 ]);
 
 // Build a stub adapter exposing only the field buildKindMatrix reads.
@@ -66,6 +67,7 @@ const ALL_CONFIGURED: Partial<Record<SourceKind, boolean>> = {
   reddit_account: true,
   instagram_account: true,
   telegram_channel: true,
+  tiktok_account: true,
 };
 
 afterEach(() => {
@@ -136,12 +138,13 @@ describe("buildKindMatrix — derives disabled/statusKey from the single source 
     expect(tg!.disabled).toBe(false);
   });
 
-  it("exposes exactly the six UI kinds in render order", async () => {
+  it("exposes exactly the seven UI kinds in render order", async () => {
     const matrix = await loadMatrix(ALL_CONFIGURED);
     expect(matrix.map((e) => e.value)).toEqual([
       "youtube_channel",
       "reddit",
       "instagram_account",
+      "tiktok_account",
       "twitter_account",
       "telegram_channel",
       "discord_server",
