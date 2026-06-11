@@ -98,6 +98,7 @@
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import { getCardComponent } from "$lib/sources/registry-ui-client.js";
+  import { FEED_KIND_FILTER_KINDS } from "$lib/sources/kind-display.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
 
   import type { EventKind } from "$lib/sources/adapter.js";
@@ -466,19 +467,17 @@
     gamesPicker.close();
   }
 
-  // KIND axis order + labels. Hard-coded to mirror prototype
-  // docs/design/v2/ui-kit/app.jsx lines 1645-1657 — YouTube first (the
-  // marquee promotion channel), Press second (highest-leverage low-volume
-  // surface), then Reddit/Twitter/Telegram/Discord (social), then Post (the
-  // catch-all manual entry), then Conference/Talk (offline), then Other
-  // (escape hatch). Hoisted above activeAxes so the strip's kind-label
-  // lookup sees it. Empty kinds still render so the user can predict
-  // counts; data-empty="1" dims their count badge.
-  // Only kinds with a real adapter or manual-entry path are surfaced in
-  // the KIND axis. Twitter / Telegram / Discord are declared in the
-  // schema enum but have no adapter or paste flow — PROJECT.md flags
-  // them as out-of-scope for v1. They stay in the DB enum (forward
-  // compatibility) but never appear in the filter UI.
+  // KIND axis order + labels. Order comes from FEED_KIND_FILTER_KINDS
+  // (kind-display.ts) — the single ORDERED source of truth, validated for
+  // exact-set equality against FEED_FILTERABLE_EVENT_KINDS by
+  // tests/unit/feed-filter-derivation.test.ts. Phase 10 D-08: this REPLACES
+  // the hand-maintained KIND_AXIS_ORDER array that lived here and was never
+  // updated when instagram_post / telegram_post / tiktok_post shipped, so the
+  // social adapter kinds silently dropped out of the LIVE /feed KIND axis (the
+  // user-reported regression). A new adapter kind now auto-appears the moment
+  // it's marked feedFilterable:true and placed in FEED_KIND_FILTER_KINDS.
+  // Empty kinds still render so the user can predict counts; data-empty="1"
+  // dims their count badge.
   // Deterministic per-game color from id hash → HSL. GameDto has no
   // color field, so derive client-side. Same id always produces the same
   // hue so the color flows consistently across FeedCard footer chips,
@@ -490,15 +489,7 @@
     return `hsl(${hue} 62% 52%)`;
   }
 
-  const KIND_AXIS_ORDER: readonly EventKind[] = [
-    "youtube_video",
-    "reddit_post",
-    "press",
-    "post",
-    "conference",
-    "talk",
-    "other",
-  ] as const;
+  const KIND_AXIS_ORDER: readonly EventKind[] = FEED_KIND_FILTER_KINDS;
   const KIND_AXIS_LABEL: Record<EventKind, () => string> = {
     youtube_video: m.feed_axis_kind_youtube_video,
     press: m.feed_axis_kind_press,

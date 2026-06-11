@@ -38,7 +38,7 @@
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
   import { auditActionLabel, AUDIT_ACTION_LIST } from "$lib/audit-labels.js";
-  import { eventKindLabel, FEED_FILTERABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
+  import { eventKindLabel, FEED_KIND_FILTER_KINDS } from "$lib/sources/kind-display.js";
   // Source list shows a kind glyph + short kind label adjacent to
   // displayName. Reuses SourceKindIcon and the shared sourceKindLabel
   // helper.
@@ -148,18 +148,17 @@
   let fromVal = $state<string>(filters.from ?? "");
   let toVal = $state<string>(filters.to ?? "");
 
-  // KIND options are DERIVED from kind-display.ts (FEED_FILTERABLE_EVENT_KINDS)
-  // — NO hand-maintained allowlist. Phase 10 D-08: the previous local
-  // FUNCTIONAL_KIND_OPTIONS array was never updated when instagram_post /
-  // telegram_post shipped, so the social adapter kinds silently dropped out of
-  // the /feed filter (the user-reported regression). Deriving from the
-  // feedFilterable flag means a new adapter kind auto-appears here the moment
-  // it's marked feedFilterable:true in kind-display, with no sheet edit.
-  // Label + alphabetical-by-label sort resolve through the same central
-  // kind-display config (eventKindLabel) FilterChips / FeedCard use.
-  const KIND_OPTIONS = $derived(
-    sortByLabel([...FEED_FILTERABLE_EVENT_KINDS], (k) => eventKindLabel(k)),
-  );
+  // KIND options are the SAME ordered binding the live /feed KIND axis uses
+  // (FEED_KIND_FILTER_KINDS from kind-display.ts) — NO hand-maintained
+  // allowlist. Phase 10 D-08: the previous local FUNCTIONAL_KIND_OPTIONS array
+  // was never updated when instagram_post / telegram_post shipped, so the
+  // social adapter kinds silently dropped out of the /feed filter (the
+  // user-reported regression). Sharing the one ordered list with feed/+page.svelte
+  // means a new adapter kind auto-appears here the moment it's marked
+  // feedFilterable:true and placed in FEED_KIND_FILTER_KINDS, with no sheet edit.
+  // Label resolves through the same central kind-display config (eventKindLabel)
+  // FilterChips / FeedCard use; the order is the shared chip order.
+  const KIND_OPTIONS = FEED_KIND_FILTER_KINDS;
 
   // auditActionLabel + AUDIT_ACTIONS imported directly. The shared
   // $lib/audit-labels.ts is the single source of truth

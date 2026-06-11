@@ -225,6 +225,37 @@ export const FEED_FILTERABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
   ),
 );
 
+/** The /feed KIND filter axis chips, in render ORDER. The live /feed page
+ *  (feed/+page.svelte) renders the KIND axis as an explicit ordered chip strip
+ *  — paste-flow platforms first (YouTube / Reddit / Instagram / Telegram /
+ *  TikTok), then Press, then the free-form catch-alls (Post / Conference / Talk
+ *  / Other) — so an ORDER list is required (the boolean feedFilterable flag
+ *  alone can't express chip order). FEED_FILTERABLE_EVENT_KINDS stays the source
+ *  of MEMBERSHIP; this list is the source of ORDER, and
+ *  tests/unit/feed-filter-derivation.test.ts asserts the two never drift (the
+ *  set of kinds here MUST equal exactly FEED_FILTERABLE_EVENT_KINDS — same
+ *  exact-set-equality guard MANUAL_EVENT_KINDS carries).
+ *
+ *  Phase 10 D-08: this REPLACES the hand-maintained KIND_AXIS_ORDER array that
+ *  lived in feed/+page.svelte. That hand-list was never updated when
+ *  instagram_post / telegram_post / tiktok_post shipped, so the social kinds
+ *  silently dropped out of the LIVE /feed KIND axis (the FiltersSheet was the
+ *  /audit-only mount, not /feed) — the user-reported regression. Deriving from
+ *  this list means a new adapter kind auto-appears in the axis the moment it's
+ *  marked feedFilterable:true and placed here, with the drift test as the guard. */
+export const FEED_KIND_FILTER_KINDS = [
+  "youtube_video",
+  "reddit_post",
+  "instagram_post",
+  "telegram_post",
+  "tiktok_post",
+  "press",
+  "post",
+  "conference",
+  "talk",
+  "other",
+] as const satisfies readonly EventKind[];
+
 /** The Add Event manual kind picker (AddEventForm) chip list, in render
  *  order. EXPLICIT order list because chip order is a deliberate UX choice
  *  (platform-with-paste-flow kinds first, then free-form) that the boolean
