@@ -44,7 +44,11 @@ import { getBoss } from "$lib/server/queue-client.js";
 import { db } from "$lib/server/db/client.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { getChannelState } from "$lib/server/services/channel-state.js";
-import { getUserQuotaUsedToday, nextPacificMidnight } from "$lib/server/services/quota.js";
+import {
+  enforceAdapterUserQuota,
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+} from "$lib/server/services/quota.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
@@ -467,7 +471,6 @@ async function fetchEventPreviewMetadata(
   // Per-user fair-share cap — runs BEFORE the fetch so a cap-exhausted user never
   // burns a credit they aren't allowed to consume. Throws AppError 429 which
   // enrichFromUrl soft-handles.
-  const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
   await enforceAdapterUserQuota(db, tiktokAdapter, ctx.userId, ctx.ipAddress, "post-refresh", {
     platform: PLATFORM,
   });
