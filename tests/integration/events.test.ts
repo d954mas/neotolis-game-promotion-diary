@@ -41,6 +41,19 @@ describe("events CRUD — unified table", () => {
     expect(fromConst).toEqual(fromEnum);
   });
 
+  it("the route-layer kind enum mirrors VALID_EVENT_KINDS (no drift behind a new kind)", async () => {
+    // The events route validates request bodies against its own z.enum; pre-fix it
+    // was a hand-maintained literal list that silently lagged the pgEnum (e.g.
+    // tiktok_post was added to VALID_EVENT_KINDS/pgEnum but not the route → POST
+    // 422). The route now DERIVES its enum from VALID_EVENT_KINDS; this guard
+    // fails loudly if anyone reverts to a hand-kept copy.
+    const { eventKindEnum: routeKindEnum } =
+      await import("../../src/lib/server/http/routes/events.js");
+    const fromRoute = [...routeKindEnum.options].sort();
+    const fromConst = [...VALID_EVENT_KINDS].sort();
+    expect(fromRoute).toEqual(fromConst);
+  });
+
   it("EVENTS-01 create conference event with gameId", async () => {
     const u = await seedUserDirectly({ email: "ev1@test.local" });
     const gameId = uuidv7();
@@ -600,6 +613,37 @@ describe("event soft-delete recovery routes", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.id).toBe(ev.id);
     expect(body.deletedAt).toBeNull();
+    // DTO discipline: userId MUST NOT cross the wire.
+    expect(body).not.toHaveProperty("userId");
+  });
+
+  it("authenticated POST /api/events with kind=tiktok_post succeeds (route enum accepts the kind)", async () => {
+    // Regression guard for the route-enum drift class (FIX 1): tiktok_post was in
+    // the pgEnum + VALID_EVENT_KINDS + AddEventForm but missing from the route's
+    // hand-kept z.enum → POST /api/events 422'd for a fully-valid kind. This drives
+    // the REAL route + REAL service + REAL DB (no mocks below the route). A
+    // tiktok_post is free-form at the URL layer (no URL_REQUIRED_KINDS entry), so a
+    // bare manual create with no url is a clean accept.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev-tiktok-route@test.local" });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "tiktok_post",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        title: "A TikTok post event",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.kind).toBe("tiktok_post");
+    expect(body.title).toBe("A TikTok post event");
     // DTO discipline: userId MUST NOT cross the wire.
     expect(body).not.toHaveProperty("userId");
   });

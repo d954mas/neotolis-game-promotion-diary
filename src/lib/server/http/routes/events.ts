@@ -76,19 +76,12 @@ import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
-const eventKindEnum = z.enum([
-  "youtube_video",
-  "reddit_post",
-  "instagram_post",
-  "twitter_post",
-  "telegram_post",
-  "discord_drop",
-  "conference",
-  "talk",
-  "press",
-  "other",
-  "post",
-]);
+// Route enum DERIVED from the service's VALID_EVENT_KINDS (itself asserted equal
+// to the pgEnum's enumValues by a unit test) so the route can NEVER drift behind a
+// new kind — adding `tiktok_post` to the pgEnum + VALID_EVENT_KINDS now flows here
+// automatically. The `as` cast satisfies z.enum's `[string, ...string[]]` tuple
+// shape; VALID_EVENT_KINDS is `as const` so the literal union is preserved.
+export const eventKindEnum = z.enum(VALID_EVENT_KINDS as unknown as [EventKind, ...EventKind[]]);
 
 /**
  * URL-required validator for pollable event kinds. youtube_video AND
