@@ -44,6 +44,7 @@ import { getBoss } from "$lib/server/queue-client.js";
 import { db } from "$lib/server/db/client.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { getChannelState } from "$lib/server/services/channel-state.js";
+import { backfillWindowToDate } from "$lib/server/services/data-sources.js";
 import {
   enforceAdapterUserQuota,
   getUserQuotaUsedToday,
@@ -75,13 +76,11 @@ const PLATFORM = "tiktok";
 /** Resolve the depth-bound ISO for a backfill from a source's resolved target.
  *  backfillTargetSince is derived by createSource from backfillWindow (default 30d,
  *  D-10); when null (no historical pull) the walker still needs a floor — use the
- *  window default. */
+ *  window default. The window→date mapping is the shared backfillWindowToDate (one
+ *  spelling with createSource's backfill_target_since derivation; 'everything' maps
+ *  to the 1970 epoch = EPOCH_ISO). */
 function depthBoundIsoForWindow(window: BackfillWindow, targetSince: Date | null): string {
-  if (targetSince !== null) return targetSince.toISOString();
-  if (window === "everything") return EPOCH_ISO;
-  const days =
-    window === "1d" ? 1 : window === "7d" ? 7 : window === "30d" ? 30 : window === "90d" ? 90 : 365;
-  return new Date(Date.now() - days * 86_400_000).toISOString();
+  return targetSince?.toISOString() ?? backfillWindowToDate(window).toISOString();
 }
 
 async function registerQueues(boss: MinimalBoss): Promise<void> {

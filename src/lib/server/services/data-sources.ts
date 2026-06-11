@@ -406,7 +406,7 @@ export async function assertNoChannelConflict(
  * route validation (sources.ts) rejects user-pasted dates older than 2005
  * to prevent the sentinel being indistinguishable from legitimate input.
  */
-function backfillWindowToDate(window: BackfillWindow): Date {
+export function backfillWindowToDate(window: BackfillWindow): Date {
   const now = Date.now();
   switch (window) {
     case "1d":
