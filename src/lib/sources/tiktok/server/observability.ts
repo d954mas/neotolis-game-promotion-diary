@@ -16,7 +16,7 @@
 //   - getTikTokProviderBlock() — the additive /admin/quota block (counts +
 //     spend/cap + remaining balance) for Plan 05's read.
 
-import { desc, inArray } from "drizzle-orm";
+import { and, desc, inArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { env } from "$lib/server/config/env.js";
@@ -69,6 +69,10 @@ const SOCIAL_AUDIT_ACTIONS = ["social.budget_exhausted", "social.provider_thrott
  * are system-emitted under the operator's resolved user_id.
  */
 async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]> {
+  // The social.* verbs are emitted for EVERY ScrapeCreators platform (IG +
+  // TikTok share the same audit actions), so the TikTok tab must only surface
+  // rows with metadata.platform = 'tiktok' (the 10-04 plan's per-platform audit
+  // scope). The Instagram twin carries the mirror filter.
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- /admin/quota observability is allowlist-gated; cross-tenant audit aggregation is the intended operator view. Mirrors instagram/reddit/youtube getRecentAudit.
   const rows = await db
     .select({
@@ -77,7 +81,12 @@ async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]>
       metadata: auditLog.metadata,
     })
     .from(auditLog)
-    .where(inArray(auditLog.action, [...SOCIAL_AUDIT_ACTIONS]))
+    .where(
+      and(
+        inArray(auditLog.action, [...SOCIAL_AUDIT_ACTIONS]),
+        sql`${auditLog.metadata}->>'platform' = ${PLATFORM}`,
+      ),
+    )
     .orderBy(desc(auditLog.createdAt))
     .limit(limit);
   return rows.map((r) => ({
