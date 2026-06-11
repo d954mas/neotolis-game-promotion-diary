@@ -57,9 +57,24 @@
   </details>
 
   <details class="admin-quota__section" open>
-    <summary><h2>{m.admin_quota_section_providers_title()}</h2></summary>
+    <summary><h2>{m.admin_quota_section_instagram_title()}</h2></summary>
     <div class="admin-quota__section-body">
-      <ProviderSpendPanel block={data.instagram} />
+      <ProviderSpendPanel
+        block={data.instagram}
+        heading={m.admin_quota_section_instagram_title()}
+        disabledHint={m.sources_new_instagram_disabled_hint()}
+      />
+    </div>
+  </details>
+
+  <details class="admin-quota__section" open>
+    <summary><h2>{m.admin_quota_section_tiktok_title()}</h2></summary>
+    <div class="admin-quota__section-body">
+      <ProviderSpendPanel
+        block={data.tiktok}
+        heading={m.admin_quota_section_tiktok_title()}
+        disabledHint={m.sources_new_tiktok_disabled_hint()}
+      />
     </div>
   </details>
 

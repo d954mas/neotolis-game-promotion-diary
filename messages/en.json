@@ -101,6 +101,7 @@
   "sources_new_reddit_listing_limit": "Reddit caps each subreddit and user listing at ~1000 most recent posts. Older posts can't be backfilled — Reddit doesn't expose them through the public API.",
   "sources_new_reddit_disabled": "Reddit is not configured by the operator (REDDIT_USER_AGENT env empty).",
   "sources_new_instagram_disabled_hint": "Instagram import is off because no provider is configured. A self-host operator enables it by setting the `INSTAGRAM_PROVIDER` and provider API-key environment variables. See the self-host docs.",
+  "sources_new_tiktok_disabled_hint": "TikTok import is off because no provider is configured. A self-host operator enables it by setting the `TIKTOK_PROVIDER` and provider API-key environment variables. See the self-host docs.",
 
   "quota_banner_reddit_tab_title": "Reddit",
   "quota_banner_reddit_not_configured": "Reddit not configured",
@@ -317,6 +318,8 @@
   "admin_quota_audit_empty_body": "Throttle events, purge runs, and poll failures will appear here as they happen.",
   "admin_quota_load_failed": "Couldn't load quota data. Try refreshing the page.",
   "admin_quota_section_providers_title": "Provider spend",
+  "admin_quota_section_instagram_title": "Instagram spend",
+  "admin_quota_section_tiktok_title": "TikTok spend",
   "admin_quota_provider_requests_label": "Requests today",
   "admin_quota_provider_spend_label": "Spend / cap",
   "admin_quota_provider_balance_label": "Remaining balance",

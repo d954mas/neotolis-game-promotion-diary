@@ -27,6 +27,7 @@ import type {
   AdminRedditBlock,
   AdminYoutubeBlock,
   AdminInstagramBlock,
+  AdminTiktokBlock,
 } from "$lib/server/services/admin-quota-read.js";
 
 interface AdminQuotaResponse {
@@ -36,6 +37,7 @@ interface AdminQuotaResponse {
   reddit: AdminRedditBlock;
   youtube: AdminYoutubeBlock;
   instagram: AdminInstagramBlock;
+  tiktok: AdminTiktokBlock;
 }
 
 export const load: PageServerLoad = async ({ fetch }) => {
