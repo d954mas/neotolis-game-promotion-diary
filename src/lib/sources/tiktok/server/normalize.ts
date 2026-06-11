@@ -184,11 +184,12 @@ export function normalizeVideosResponse(json: unknown): ProviderPage {
   return {
     posts: parsed.aweme_list.map((aweme) => normalizeAweme(aweme)),
     // 10-SPIKE.md deviation 1: max_cursor is a NUMBER → coerce to the port's
-    // string cursor. null/absent at end of feed.
-    nextCursor:
-      parsed.max_cursor !== null && parsed.max_cursor !== undefined
-        ? String(parsed.max_cursor)
-        : null,
+    // string cursor. A FALSY 0 (or null/absent) is end-of-feed, NOT a resumable
+    // position: live cursors are epoch-millis scale (e.g. 1779902811265), so 0 is
+    // never a real next-page key. Coercing 0 → "0" would defeat backfill-account's
+    // Pitfall-4 empty-first-page heuristic (which requires cursor===null) and make
+    // the walker re-enqueue a dead page forever.
+    nextCursor: parsed.max_cursor ? String(parsed.max_cursor) : null,
     // has_more === 1 means MORE pages; anything else (0 / absent) is end-of-feed.
     endOfFeed: parsed.has_more !== 1,
     creditsUsed: 1,

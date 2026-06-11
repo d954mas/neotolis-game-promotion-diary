@@ -173,6 +173,16 @@ describe("tiktok normalizer (PLAT-02)", () => {
     expect(page.endOfFeed).toBe(true);
   });
 
+  it("[10-03] a FALSY max_cursor (0) coerces to nextCursor null, not '0' (FIX 6)", () => {
+    // 0 is never a resumable position (live cursors are epoch-millis scale); coercing
+    // it to "0" would defeat backfill-account's Pitfall-4 heuristic (cursor===null)
+    // and re-enqueue a dead page forever. Empty feed at end-of-feed → null cursor.
+    const page = normalizeVideosResponse({ aweme_list: [], max_cursor: 0, has_more: 0 });
+    expect(page.nextCursor).toBeNull();
+    expect(page.endOfFeed).toBe(true);
+    expect(page.posts).toHaveLength(0);
+  });
+
   it("[10-03] normalizeSingleVideoResponse reads body.aweme_detail, null when absent", () => {
     expect(normalizeSingleVideoResponse({ aweme_detail: VIDEO_AWEME })?.id).toBe(
       "7649569886871522573",
