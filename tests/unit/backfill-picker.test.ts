@@ -79,12 +79,15 @@ describe("BackfillPicker", () => {
     const yt = render(BackfillPicker, { props: { value: "30d", kind: "youtube_channel" } });
     expect(yt.body).toContain("past videos");
     expect(yt.body).toContain("every 6 hours");
-    // A paid daily-poller (TikTok) gets DAILY + the hourly warm-stats note —
-    // it must NOT inherit YouTube's 6h cadence (the stale-copy bug this fixes).
+    // A paid daily-poller (TikTok) gets DAILY for both new posts and stats —
+    // the warm lane WAKES hourly but the 26h staleness gate means each post is
+    // paid-refreshed ~once a day, and the label states that per-post rate
+    // (never "hourly"). It must NOT inherit YouTube's 6h cadence either.
     const tt = render(BackfillPicker, { props: { value: "30d", kind: "tiktok_account" } });
     expect(tt.body).toContain("past posts");
     expect(tt.body.toLowerCase()).toContain("daily");
-    expect(tt.body.toLowerCase()).toContain("hourly");
+    expect(tt.body.toLowerCase()).toContain("once a day");
+    expect(tt.body.toLowerCase()).not.toContain("hourly");
     expect(tt.body).not.toContain("every 6 hours");
   });
 
