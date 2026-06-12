@@ -184,6 +184,25 @@ describe("tiktok normalizer (PLAT-02)", () => {
     expect(page.endOfFeed).toBe(true);
   });
 
+  it("BOOLEAN has_more variant (small single-page accounts): false = end-of-feed, true = more", () => {
+    // Live failure 2026-06-12 (@d954mas_make_games): the upstream returns
+    // has_more as a BOOLEAN for single-page accounts while large accounts get
+    // numeric 1/0 — the schema must accept both shapes.
+    const done = normalizeVideosResponse({
+      aweme_list: [VIDEO_AWEME],
+      max_cursor: 0,
+      has_more: false,
+    });
+    expect(done.endOfFeed).toBe(true);
+    const more = normalizeVideosResponse({
+      aweme_list: [VIDEO_AWEME],
+      max_cursor: 1779902811265,
+      has_more: true,
+    });
+    expect(more.endOfFeed).toBe(false);
+    expect(more.nextCursor).toBe("1779902811265");
+  });
+
   it("[10-03] a FALSY max_cursor (0) coerces to nextCursor null, not '0' (FIX 6)", () => {
     // 0 is never a resumable position (live cursors are epoch-millis scale); coercing
     // it to "0" would defeat backfill-account's Pitfall-4 heuristic (cursor===null)

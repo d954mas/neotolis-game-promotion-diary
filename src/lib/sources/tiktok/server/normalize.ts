@@ -103,11 +103,7 @@ type Aweme = z.infer<typeof AWEME>;
  *  meaningful, non-empty title (the Add Event form requires one). One spelling for
  *  both the walker (handlers/backfill-account.ts) and the paste preview (index.ts).
  *  Lives here — the pure-mapping home — alongside the other aweme→event mappers. */
-export function buildTikTokTitle(
-  caption: string | null,
-  kind: string,
-  publishedAt: Date,
-): string {
+export function buildTikTokTitle(caption: string | null, kind: string, publishedAt: Date): string {
   const trimmed = caption?.trim();
   if (trimmed !== undefined && trimmed !== "") {
     const firstLine = trimmed.split("\n", 1)[0]!.trim();
@@ -186,11 +182,15 @@ function pickFeedOwner(author: Aweme["author"]): FeedOwner | null {
 
 // ---- VIDEOS feed response (/v3/tiktok/profile/videos — 10-SPIKE.md Call 1) ----
 // FLAT nesting: aweme_list / max_cursor / has_more are TOP-LEVEL. max_cursor is
-// a NUMBER (coerce to string for the port). has_more === 1 means more pages.
+// a NUMBER (coerce to string for the port). has_more is 1 for more pages — BUT
+// the upstream is shape-inconsistent: large accounts return numeric 1/0 (the
+// spike's sample), while single-page small accounts return BOOLEAN false (live
+// failure 2026-06-12, @d954mas_make_games — ZodError "expected number, received
+// boolean"). Accept both; the truthiness collapses in normalizeVideosResponse.
 const VIDEOS_RESPONSE = z.object({
   aweme_list: z.array(AWEME),
   max_cursor: z.number().nullable().optional(),
-  has_more: z.number().nullable().optional(),
+  has_more: z.union([z.number(), z.boolean()]).nullable().optional(),
 });
 
 /** Validate + map a videos-feed response → uniform ProviderPage. The cursor
@@ -208,8 +208,9 @@ export function normalizeVideosResponse(json: unknown): ProviderPage {
     // Pitfall-4 empty-first-page heuristic (which requires cursor===null) and make
     // the walker re-enqueue a dead page forever.
     nextCursor: parsed.max_cursor ? String(parsed.max_cursor) : null,
-    // has_more === 1 means MORE pages; anything else (0 / absent) is end-of-feed.
-    endOfFeed: parsed.has_more !== 1,
+    // has_more 1 (numeric) or true (boolean variant) means MORE pages; anything
+    // else (0 / false / absent) is end-of-feed.
+    endOfFeed: parsed.has_more !== 1 && parsed.has_more !== true,
     creditsUsed: 1,
     owner: pickFeedOwner(parsed.aweme_list[0]?.author),
   };
