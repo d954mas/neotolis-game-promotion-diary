@@ -140,6 +140,13 @@ export const ALLOWLIST_TABLES = new Set([
   "tiktokAccounts", // public external data, no tenant scope (account subject entity)
   "tiktokPosts", // public external data, no tenant scope
   "tiktokPostSnapshots", // public external data, no tenant scope (time-series)
+  // Phase 11 Twitter/X public-data tables (no user_id by design — a tweet's
+  // view/like/comment/share count is identical regardless of which tenant
+  // looked it up; same public-data semantics as the YouTube/IG/Telegram/TikTok
+  // caches).
+  "twitterAccounts", // public external data, no tenant scope (account subject entity)
+  "twitterPosts", // public external data, no tenant scope
+  "twitterPostSnapshots", // public external data, no tenant scope (time-series)
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({

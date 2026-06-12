@@ -463,6 +463,13 @@
       "when": 1781260209996,
       "tag": "0065_chemical_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1781286482384,
+      "tag": "0066_nebulous_boom_boom",
+      "breakpoints": true
     }
   ]
 }

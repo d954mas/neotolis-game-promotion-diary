@@ -42,3 +42,8 @@ export * from "$lib/sources/telegram/server/schema/index.js";
 // the re-export keeps cross-source call sites (`import { tiktokPosts } from
 // "$lib/server/db/schema/index.js"`) compiling.
 export * from "$lib/sources/tiktok/server/schema/index.js";
+// Twitter/X schemas — same per-source plugin layout. Drizzle's schema glob
+// discovers twitter_accounts / twitter_posts / twitter_post_snapshots for
+// migrate; the re-export keeps cross-source call sites (`import { twitterPosts }
+// from "$lib/server/db/schema/index.js"`) compiling.
+export * from "$lib/sources/twitter/server/schema/index.js";
