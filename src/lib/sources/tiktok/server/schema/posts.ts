@@ -71,6 +71,17 @@ export const tiktokPosts = pgTable(
     publishedAtIdx: index("idx_tiktok_posts_published_at")
       .on(t.publishedAt)
       .where(sql`${t.publishedAt} IS NOT NULL`),
+    // Poll-cron picker — the per-candidate correlated `MAX(published_at) WHERE
+    // account_id = …` newest-post subquery (one per candidate, up to 200/tick).
+    // The composite lets Postgres satisfy the MAX from the index tail without a
+    // per-account heap scan.
+    accountPublishedAtIdx: index("idx_tiktok_posts_account_published_at").on(
+      t.accountId,
+      t.publishedAt,
+    ),
+    // resolveCachedExternalId — the canonical-permalink lookup on every event
+    // create (untrusted-body trust boundary, #70). Filters by permalink.
+    permalinkIdx: index("idx_tiktok_posts_permalink").on(t.permalink),
   }),
 );
 
