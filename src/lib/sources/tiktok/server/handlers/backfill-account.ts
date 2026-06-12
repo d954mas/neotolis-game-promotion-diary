@@ -594,13 +594,19 @@ async function writeBackfillAudit(args: {
   // from this row; a swallowed insert silently undercounts user usage. The
   // EXISTING source.refresh_content_requested verb + flow/platform tags so the same
   // cross-source cap counter applies (Pitfall 5: trigger pays once).
+  //
+  // platform = the SOURCE KIND ("tiktok_account"), NOT the social-budget label
+  // "tiktok" — this row feeds the USER-QUOTA keyspace (getUserQuotaUsedToday /
+  // quota-read.ts loadQuotaPlatforms read by adapter.kind). IG tags the twin row
+  // "instagram_account" for the same reason; "tiktok" here would make the quota
+  // banner read 0 forever (it queries by "tiktok_account").
   await writeAuditStrict({
     userId: args.triggerUserId,
     action: "source.refresh_content_requested",
     ipAddress: "0.0.0.0",
     metadata: {
       kind: KIND,
-      platform: "tiktok",
+      platform: KIND,
       channel_key: args.channelKey,
       flow: args.flow,
       queue: "tiktok.backfill.account",

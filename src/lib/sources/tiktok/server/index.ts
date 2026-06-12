@@ -74,7 +74,26 @@ import { tiktokRefreshQueueTick, TIKTOK_REFRESH_SLOTS } from "./handlers/refresh
 
 const KIND = "tiktok_account" as const;
 const EPOCH_ISO = "1970-01-01T00:00:00Z";
-const PLATFORM = "tiktok";
+
+// TWO platform keyspaces meet in this barrel — they are NOT interchangeable:
+//
+//   SOCIAL_PLATFORM ("tiktok") — the SOCIAL-BUDGET keyspace. Keys the shared
+//     prepaid-credit ledger (social_provider_spend.platform, reserveSocialCredits /
+//     getSocialSpendToday / getSocialThrottleState args, the social.* operator audit
+//     verbs' metadata.platform, observability getRecentAudit). IG uses "instagram"
+//     here. The provider arg of getSocialProvider/fetchPosts/fetchPostByUrl is this
+//     same SocialPlatform value. DO NOT change these to the source kind.
+//
+//   QUOTA_PLATFORM (= KIND, "tiktok_account") — the USER-QUOTA keyspace. Keys the
+//     per-user fair-share cap counter: getUserQuotaUsedToday / enforceAdapterUserQuota
+//     filter audit_log on metadata.platform = <source kind>, and the /sources +
+//     /audit QuotaStatusBanner reads getUserQuotaUsedToday(userId, adapter.kind)
+//     (quota-read.ts loadQuotaPlatforms). IG writes "instagram_account" (its KIND)
+//     for these so the UI's per-kind read matches the writers. Using "tiktok" here
+//     would make the banner read 0 forever (it queries by "tiktok_account") and
+//     diverge from the canon every other adapter follows.
+const SOCIAL_PLATFORM = "tiktok";
+const QUOTA_PLATFORM = KIND;
 
 /** Resolve the depth-bound ISO for a backfill from a source's resolved target.
  *  backfillTargetSince is derived by createSource from backfillWindow (default 30d,
@@ -352,7 +371,7 @@ async function resetWalkerStateOnWidening(
   // a deep walk through the PATCH path.
   const cap = tiktokAccountAdapterCore.observability.userQuotaCap;
   if (cap?.requestsPerDay !== undefined) {
-    const used = await getUserQuotaUsedToday(ctx.triggerUserId, PLATFORM);
+    const used = await getUserQuotaUsedToday(ctx.triggerUserId, QUOTA_PLATFORM);
     const resetAt = nextPacificMidnight();
     const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
     if (used.requests >= cap.requestsPerDay) {
@@ -428,15 +447,17 @@ async function enqueueRefreshNow(input: {
  * SHORT-LINK: resolve vm./vt. FIRST so a shared short link previews the real video.
  *
  * Cap + budget order (mirrors IG):
- *   1. enforceAdapterUserQuota (platform="tiktok") — the per-user social cap.
+ *   1. enforceAdapterUserQuota (QUOTA_PLATFORM="tiktok_account") — the per-user
+ *      social cap (USER-QUOTA keyspace, = the source kind, like IG's
+ *      "instagram_account").
  *   2. reserveSocialCredits (origin="user") inside provider.fetchPostByUrl — the
- *      operator prepaid budget gate (shared with IG, D-01).
+ *      operator prepaid budget gate (SOCIAL_PLATFORM="tiktok", shared with IG, D-01).
  */
 async function fetchEventPreviewMetadata(
   canonicalUrl: string,
   ctx: { userId: string; ipAddress: string },
 ): Promise<EventPreviewMetadata> {
-  const provider = getSocialProvider("tiktok");
+  const provider = getSocialProvider(SOCIAL_PLATFORM);
   if (provider === null) {
     return { kind: "unreachable", cause: "tiktok_not_configured" };
   }
@@ -474,14 +495,14 @@ async function fetchEventPreviewMetadata(
   // burns a credit they aren't allowed to consume. Throws AppError 429 which
   // enrichFromUrl soft-handles.
   await enforceAdapterUserQuota(db, tiktokAdapter, ctx.userId, ctx.ipAddress, "post-refresh", {
-    platform: PLATFORM,
+    platform: QUOTA_PLATFORM,
   });
 
   let post;
   try {
     // origin="user" → reserveSocialCredits charges the user pool inside the HTTP
     // seam. A null permit → AdapterError(operator-issue / rate-limited).
-    post = await provider.fetchPostByUrl("tiktok", videoUrl, { origin: "user" });
+    post = await provider.fetchPostByUrl(SOCIAL_PLATFORM, videoUrl, { origin: "user" });
   } catch (err) {
     if (err instanceof AppError) throw err;
     if (err instanceof AdapterError) {
@@ -519,9 +540,11 @@ async function fetchEventPreviewMetadata(
     status: "ok",
   });
 
-  // Cap-counter audit row (mirrors IG). This is what getUserQuotaUsedToday(userId,
-  // "tiktok") SUMs — without it the per-user cap reads 0 forever and the
-  // enforceAdapterUserQuota gate above never fires on the SECOND paste.
+  // Cap-counter audit row (mirrors IG). This is what
+  // getUserQuotaUsedToday(userId, "tiktok_account") SUMs (USER-QUOTA keyspace) —
+  // without the QUOTA_PLATFORM tag the per-user cap reads 0 forever and the
+  // enforceAdapterUserQuota gate above never fires on the SECOND paste. IG tags this
+  // row "instagram_account" (its KIND) for the same reason — the banner reads by kind.
   await writeAudit({
     userId: ctx.userId,
     action: "event.poll_refreshed",
@@ -529,7 +552,7 @@ async function fetchEventPreviewMetadata(
     metadata: {
       external_id: post.id,
       kind: "tiktok_post",
-      platform: PLATFORM,
+      platform: QUOTA_PLATFORM,
       flow: "stats_refresh",
       requests_used: 1,
       events_inserted: 0,
@@ -626,10 +649,10 @@ export const tiktokAdapter: SourceAdapter & typeof tiktokAccountAdapterCore = {
       // OFF when getSocialProvider is null, so an enqueued row would NEVER run — an
       // orphan pending row + a forever-spinning Refresh button. getSocialThrottleState
       // reads the budget, not provider-constructability, so it can't catch this.
-      if (getSocialProvider("tiktok") === null) {
+      if (getSocialProvider(SOCIAL_PLATFORM) === null) {
         return { action: "skip", reason: "tiktok not configured" };
       }
-      const throttle = await getSocialThrottleState("tiktok", "scrapecreators");
+      const throttle = await getSocialThrottleState(SOCIAL_PLATFORM, "scrapecreators");
       return throttle === "ninetyfive"
         ? { action: "skip", reason: "tiktok budget at 95%" }
         : { action: "run" };
@@ -654,7 +677,7 @@ export const tiktokAdapter: SourceAdapter & typeof tiktokAccountAdapterCore = {
           fallthrough: TIKTOK_REFRESH_SLOTS,
           batchScope: "global",
         },
-        isEnabled: () => getSocialProvider("tiktok") !== null,
+        isEnabled: () => getSocialProvider(SOCIAL_PLATFORM) !== null,
         tick: tiktokRefreshQueueTick,
       },
     ],

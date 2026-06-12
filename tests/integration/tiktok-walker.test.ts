@@ -254,7 +254,7 @@ describe("tiktok account walker (single-feed, resumable, cursor-persisted)", () 
     expect(cs?.backfillComplete).toBe(false);
   });
 
-  it('[10-04] the backfill audit row carries platform: "tiktok"', async () => {
+  it('[10-04] the backfill audit row carries platform: "tiktok_account" (the user-quota keyspace)', async () => {
     const user = await seedUserDirectly({
       email: `walker-tk-audit-${Math.random().toString(36).slice(2)}@t.io`,
     });
@@ -282,12 +282,19 @@ describe("tiktok account walker (single-feed, resumable, cursor-persisted)", () 
       },
     });
 
+    // The cap-counter audit row tags the SOURCE KIND ("tiktok_account"), the
+    // USER-QUOTA keyspace getUserQuotaUsedToday / the QuotaStatusBanner read by —
+    // NOT the social-budget label "tiktok" (mirrors IG's "instagram_account").
     const rows = await db.select().from(auditLog).where(eq(auditLog.userId, user.id));
     const backfillRows = rows.filter(
-      (r) => (r.metadata as { platform?: string }).platform === "tiktok",
+      (r) => (r.metadata as { platform?: string }).platform === "tiktok_account",
     );
     expect(backfillRows.length).toBeGreaterThanOrEqual(1);
     expect((backfillRows[0]!.metadata as { requests_used?: number }).requests_used).toBe(1);
+    // The social-budget label "tiktok" must NOT appear on a user-quota row.
+    expect(
+      rows.filter((r) => (r.metadata as { platform?: string }).platform === "tiktok"),
+    ).toHaveLength(0);
   });
 });
 

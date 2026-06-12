@@ -88,7 +88,10 @@ const { enrichFromUrl, createEvent } =
   await import("../../src/lib/server/services/events-mutation.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 
-const PLATFORM = "tiktok";
+// USER-QUOTA keyspace = the source kind (mirrors IG's "instagram_account"), NOT the
+// social-budget label "tiktok". getUserQuotaUsedToday / the QuotaStatusBanner read by
+// adapter.kind, so the cap-counter audit rows MUST carry this value.
+const PLATFORM = "tiktok_account";
 
 // The SourceAdapter contract types these as optional (`?:`); the barrel spreads
 // them in, so they are present at runtime. Bind the non-optional functions once.
@@ -191,7 +194,8 @@ describe("tiktok paste preview (single-video fetch, adapter seam)", () => {
     });
 
     // A successful preview wrote exactly ONE cap-counter audit row
-    // (event.poll_refreshed / flow=stats_refresh / platform=tiktok / requests_used=1).
+    // (event.poll_refreshed / flow=stats_refresh / platform=tiktok_account /
+    // requests_used=1 — the USER-QUOTA keyspace tag the banner reads by kind).
     const after = await getUserQuotaUsedToday(user.id, PLATFORM);
     expect(after.requests).toBe(1);
 
