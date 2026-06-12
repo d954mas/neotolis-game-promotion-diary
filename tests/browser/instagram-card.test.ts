@@ -160,9 +160,11 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
     }
   });
 
-  it("media-type pill sits over the IMAGE, not the empty placeholder (no thumbnail → no pill)", () => {
-    // No thumbnail URL → BaseFeedCard shows the .card-thumb.empty placeholder
-    // and the pill is gated off (it marks a picture, not a placeholder).
+  it("media-type pill renders over the placeholder too (thumb-less card keeps its marker)", () => {
+    // No thumbnail URL → BaseFeedCard shows the .card-thumb.empty placeholder.
+    // The pill still renders (UAT 2026-06-12): the content type must stay
+    // readable on thumb-less manual events and expired/blocked covers —
+    // matching the event-detail behavior.
     const { card, component } = mountCard(
       makeEvent({
         stats: { viewCount: 1, likeCount: 1, commentCount: 1, polledAt: new Date() },
@@ -170,7 +172,9 @@ describe("InstagramFeedCard (Phase 08 Plan 07)", () => {
         mediaType: "short",
       }),
     );
-    expect(card.querySelector(".media-type-pill")).toBeNull();
+    const pill = card.querySelector(".media-type-pill");
+    expect(pill).not.toBeNull();
+    expect(pill!.getAttribute("aria-label")).toBe("Short");
     unmount(component);
   });
 
