@@ -111,25 +111,36 @@ describe("eventThumbnail resolves through the adapter enrichment seam (D-09)", (
     ).toBeNull();
   });
 
-  it("twitter_post returns the metadata.media.url thumbnail (restored — derive-card-data still serves it)", () => {
-    // Twitter has no enrichment object; its thumbnail lives on metadata.media.url
-    // (the same chain the card renders via derive-card-data.ts). The D-09 refactor
-    // dropped this branch, blanking every twitter marker on /games/[id]; restoring
-    // it keeps the chart marker in sync with the card.
+  it("twitter_post returns the twitterEnrichment thumbnail — the raw pbs.twimg.com hotlink (Phase 11 D-09)", () => {
+    // Phase 11: Twitter now has an enrichment object (twitterEnrichment); the chart
+    // marker reads twitterEnrichment.thumbnailUrl (the RAW pbs.twimg.com cover
+    // hotlinked directly — NO proxy, 11-SPIKE.md Q6), the SAME source the feed card
+    // reads, so the marker stays in sync with the card. The old metadata.media.url
+    // branch is gone (the D-09 enrichment-seam parity Telegram/IG/TikTok established).
     const url = "https://pbs.twimg.com/media/abc.jpg";
     const out = eventThumbnail(
       evt({
         kind: "twitter_post",
         externalId: "tw555",
-        metadata: { media: { url } },
+        twitterEnrichment: { thumbnailUrl: url },
       }),
     );
     expect(out).toBe(url);
   });
 
-  it("twitter_post with no metadata.media.url returns null (placeholder fallback)", () => {
+  it("twitter_post with no enrichment thumbnail returns null (no stale metadata read)", () => {
+    // A null enrichment thumbnail (text-only tweet) → null; a stale metadata.media.url
+    // must be IGNORED by the seam-routed resolver (the D-09 parity Telegram has).
     expect(eventThumbnail(evt({ kind: "twitter_post", metadata: null }))).toBeNull();
-    expect(eventThumbnail(evt({ kind: "twitter_post", metadata: { media: {} } }))).toBeNull();
+    expect(
+      eventThumbnail(
+        evt({
+          kind: "twitter_post",
+          metadata: { media: { url: "https://example.com/stale.jpg" } },
+          twitterEnrichment: { thumbnailUrl: null },
+        }),
+      ),
+    ).toBeNull();
   });
 
   it("youtube_video returns the intrinsic img.youtube.com URL (no enrichment needed)", () => {

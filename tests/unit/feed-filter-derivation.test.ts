@@ -42,6 +42,8 @@ describe("/feed KIND-filter binding is the shared ordered FEED_KIND_FILTER_KINDS
     // TikTok ships in this phase — it must be present from day one so it can
     // never be the NEXT silently-dropped adapter.
     expect(FEED_KIND_FILTER_KINDS).toContain("tiktok_post");
+    // Twitter/X joins the /feed KIND axis in Phase 11 (twitterapi.io adapter).
+    expect(FEED_KIND_FILTER_KINDS).toContain("twitter_post");
   });
 
   it("includes the long-present pollable + free-form kinds", () => {
@@ -54,8 +56,8 @@ describe("/feed KIND-filter binding is the shared ordered FEED_KIND_FILTER_KINDS
     expect(FEED_KIND_FILTER_KINDS).toContain("other");
   });
 
-  it("excludes the no-adapter kinds (filtering to an un-creatable kind is a footgun)", () => {
-    expect(FEED_KIND_FILTER_KINDS).not.toContain("twitter_post");
+  it("excludes the no-adapter kind (filtering to an un-creatable kind is a footgun)", () => {
+    // discord_drop is the last remaining schema-only kind (no adapter, no paste flow).
     expect(FEED_KIND_FILTER_KINDS).not.toContain("discord_drop");
   });
 

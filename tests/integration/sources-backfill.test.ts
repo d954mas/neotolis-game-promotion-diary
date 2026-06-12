@@ -97,12 +97,15 @@ describe("createSource backfillWindow -> YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () =
 
   it("non-functional kinds reject before the enqueue path runs (kind_not_yet_functional)", async () => {
     const u = await seedUserDirectly({ email: "p12-bf-nonyt@test.local" });
+    // discord_server is the remaining schema-only kind (Phase 11 activated
+    // twitter_account, which now degrades to kind_not_configured, not
+    // kind_not_yet_functional — see twitter-not-configured.test.ts).
     await expect(
       createSource(
         u.id,
         {
-          kind: "twitter_account",
-          handleUrl: "https://twitter.com/p12",
+          kind: "discord_server",
+          handleUrl: "https://discord.gg/p12",
           autoImport: true,
           backfillWindow: "everything",
         },

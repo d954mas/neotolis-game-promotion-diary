@@ -143,6 +143,26 @@ export interface CardEventLite {
     thumbnailUrl: string | null;
     mediaType: string | null;
   };
+  /** Twitter/X public-data decoration attached by
+   *  sources/twitter/server/feed-enrichment.ts (mirrors tiktokEnrichment — the
+   *  same FOUR metrics incl shares). Each stat is INDEPENDENTLY nullable —
+   *  metrics-by-presence (D-05): a protected/limited tweet may hide impressions
+   *  (null), NEVER coerced to 0; shareCount is the DERIVED retweet+quote sum.
+   *  thumbnailUrl is the RAW pbs.twimg.com cover HOTLINKED directly (11-SPIKE.md
+   *  Q6 — NO proxy, unlike TikTok/IG; onerror fallback in the card); mediaType
+   *  ("video" | "image" | "text") drives the adaptive media-vs-text card layout
+   *  (null/"text" = text-only tweet) + the media-type overlay. */
+  twitterEnrichment?: {
+    stats: {
+      viewCount: number | null;
+      likeCount: number | null;
+      commentCount: number | null;
+      shareCount: number | null;
+      polledAt: Date | string;
+    } | null;
+    thumbnailUrl: string | null;
+    mediaType: string | null;
+  };
   /** YouTube public-data decoration attached by
    *  sources/youtube/server/feed-enrichment.ts. Carries the Shorts
    *  classification (youtube_videos.media_type): 'short' drives the "Short"

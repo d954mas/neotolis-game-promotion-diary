@@ -181,13 +181,14 @@ describe("register data sources via POST /api/sources", () => {
     });
   });
 
-  it("kinds twitter_account / discord_server reject with 'kind_not_yet_functional'", async () => {
-    // telegram_channel was in this list pre-Phase-9; Plan 09-05 made it
-    // functional (free t.me/s scrape, no operator config), so it now CREATES
-    // rather than rejecting and is excluded here. Only the still-schema-only
-    // kinds (Twitter — paid API; Discord — coming soon) reject.
+  it("kind discord_server rejects with 'kind_not_yet_functional'", async () => {
+    // telegram_channel was in this list pre-Phase-9 (Plan 09-05 made it functional);
+    // twitter_account was here pre-Phase-11 (Plan 11-04 made it functional — it now
+    // degrades to kind_not_configured when the provider is unset, see
+    // twitter-not-configured.test.ts). Only the still-schema-only kind (Discord —
+    // coming soon) rejects with the schema-only kind_not_yet_functional.
     const userA = await seedUserDirectly({ email: "ds3@test.local" });
-    const rejectedKinds = ["twitter_account", "discord_server"] as const;
+    const rejectedKinds = ["discord_server"] as const;
     for (const kind of rejectedKinds) {
       await expect(
         createSource(userA.id, { kind, handleUrl: `https://example.test/${kind}` }, "127.0.0.1"),

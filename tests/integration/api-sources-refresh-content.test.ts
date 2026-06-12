@@ -191,15 +191,16 @@ describe("POST /api/sources/:id/refresh-content", () => {
 
     // Direct INSERT bypassing createSource (which gates non-functional
     // kinds out at write time per FUNCTIONAL_KINDS). The schema enum
-    // accepts all 6 kinds; today only youtube_channel + reddit_* are
-    // wired. twitter_account is the canonical "not-yet-supported" probe
-    // until its adapter lands.
+    // accepts all kinds; twitter_account was wired in Phase 11, so the
+    // canonical "no adapter registered → kind_not_yet_functional" probe is now
+    // discord_server (the last remaining schema-only kind) — getAdapter throws
+    // on it, which the route maps to 422 kind_not_yet_functional.
     const id = uuidv7();
     await db.insert(dataSources).values({
       id,
       userId: u.id,
-      kind: "twitter_account",
-      handleUrl: `https://twitter.com/${uniq()}`,
+      kind: "discord_server",
+      handleUrl: `https://discord.gg/${uniq()}`,
       isOwnedByMe: false,
       autoImport: false,
       metadata: {},
