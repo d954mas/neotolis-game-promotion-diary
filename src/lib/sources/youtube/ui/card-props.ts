@@ -9,6 +9,9 @@
 // per-source override escape hatch is available but currently unused.
 import type { CardProps } from "$lib/sources/card-props.js";
 import { m } from "$lib/paraglide/messages.js";
+// Shared K/M stat formatter (loader-safe: derive-card-data imports only the pure
+// telegram-handle util). One spelling across every feed card mapper.
+import { formatStat } from "$lib/components/feed/parts/derive-card-data.js";
 
 interface YoutubeEventLite {
   id: string;
@@ -41,10 +44,4 @@ export function toCardProps(event: YoutubeEventLite): CardProps {
       : [],
     href: `/events/${event.id}`,
   };
-}
-
-function formatStat(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
