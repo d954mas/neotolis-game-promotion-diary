@@ -24,6 +24,10 @@ import {
   isTikTokConfigured,
   tiktokProvider,
 } from "$lib/sources/tiktok/server/provider/registry.js";
+import {
+  isTwitterConfigured,
+  twitterProvider,
+} from "$lib/sources/twitter/server/provider/registry.js";
 import type { SocialPlatform, SocialProvider } from "$lib/sources/social-provider.js";
 
 /**
@@ -39,8 +43,9 @@ export function getSocialProvider(platform: SocialPlatform): SocialProvider | nu
       return isInstagramConfigured() ? instagramProvider : null;
     case "tiktok":
       return isTikTokConfigured() ? tiktokProvider : null;
+    case "twitter":
+      return isTwitterConfigured() ? twitterProvider : null;
     default:
-      // Twitter / X provider lands in Phase 11.
       return null;
   }
 }
