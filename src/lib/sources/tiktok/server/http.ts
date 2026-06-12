@@ -27,8 +27,12 @@
 // request reserves one prepaid credit via reserveSocialCredits BEFORE the HTTP
 // call when an `origin` pool is set. A null permit (prepaid balance exhausted OR
 // the daily pool / 95% throttle full) STOPS the request — the provider is never
-// over-spent past the prepaid balance. Unmetered paths (resolveAccount during
-// canonicalize, the additive credit-balance read) omit `origin`.
+// over-spent past the prepaid balance. resolveAccount (create-time profile
+// resolution) now meters against the "user" pool — the profile endpoint costs a
+// credit (10-SPIKE), so leaving it unmetered let add-source floods bypass the
+// budget guardrails. The only remaining unmetered path is the additive
+// credit-balance read (getCreditBalance — D-23, never depended on), which omits
+// `origin`.
 
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
@@ -76,8 +80,11 @@ export interface TikTokFetchContext {
    * When set, reserveSocialCredits(units=creditsUsed??1) runs first; a null
    * permit throws AdapterError (operator-issue when the prepaid balance is the
    * blocker, rate-limited when the daily pool / 95% throttle is the blocker) so
-   * the walker pauses + persists its cursor. When omitted, the request is
-   * unmetered — those paths are cheap one-shots outside the page budget.
+   * the walker pauses + persists its cursor. resolveAccount (create-time profile
+   * resolution) meters against the "user" pool — the profile endpoint costs a
+   * credit (10-SPIKE), so leaving it unmetered let add-source floods bypass the
+   * budget guardrails. The only remaining unmetered path is the additive
+   * credit-balance read, which omits `origin`.
    */
   origin?: SocialQuotaPool;
 }

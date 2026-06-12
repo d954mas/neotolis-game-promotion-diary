@@ -100,6 +100,16 @@ export const scrapeCreatorsTikTokProvider: SocialProvider = {
       platform,
       provider: this.name,
       logTag: "tiktok.profile",
+      // resolveAccount is the create-time handle→account-id resolution (the ONLY
+      // caller is resolveHandleToAccountId from canonicalizeOnCreate). The
+      // /v1/tiktok/profile endpoint costs 1 prepaid credit (10-SPIKE), so it MUST
+      // reserve against the budget ledger like every other paid request — an
+      // unmetered profile call would let a flood of add-source attempts drain the
+      // shared prepaid balance below the budget guardrails. The create flow is
+      // user-initiated → the "user" pool. A null permit (budget/throttle) throws
+      // AdapterError, which canonicalizeOnCreate maps to a clean 429/503 BEFORE the
+      // INSERT (no phantom source).
+      origin: "user",
     });
     const json: unknown = await resp.json();
     // Missing handle is HTTP 200 + no `user` body — the normalizer maps the

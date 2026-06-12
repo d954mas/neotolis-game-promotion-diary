@@ -143,6 +143,17 @@ export const scrapeCreatorsProvider: SocialProvider = {
       platform,
       provider: this.name,
       logTag: "ig.profile",
+      // resolveAccount is the create-time handle→account-id resolution (the ONLY
+      // caller is resolveHandleToAccountId from canonicalizeOnCreate). The profile
+      // endpoint costs 1 prepaid credit, so it MUST reserve against the budget ledger
+      // like every other paid request — an unmetered profile call would let a flood
+      // of add-source attempts drain the shared prepaid balance below the guardrails.
+      // The create flow is user-initiated → the "user" pool. A null permit
+      // (budget/throttle) throws AdapterError, which canonicalizeOnCreate maps to a
+      // clean 429/503 BEFORE the INSERT (no phantom source). Kept in lockstep with
+      // the TikTok twin — the two ScrapeCreators platforms bill identically (D-01
+      // shared ledger).
+      origin: "user",
     });
     const body = (await resp.json()) as ProfileBody;
     const user = body.data?.user ?? body.user ?? null;
