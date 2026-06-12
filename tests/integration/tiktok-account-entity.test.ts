@@ -43,8 +43,7 @@ const { tiktokAccounts, tiktokPosts, tiktokPostSnapshots } =
   await import("../../src/lib/server/db/schema/index.js");
 const { writeSnapshot, upsertTikTokAccount } =
   await import("../../src/lib/sources/tiktok/server/snapshots.js");
-const { tiktokAccountAdapterCore } =
-  await import("../../src/lib/sources/tiktok/server/adapter.js");
+const { tiktokAccountAdapterCore } = await import("../../src/lib/sources/tiktok/server/adapter.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
