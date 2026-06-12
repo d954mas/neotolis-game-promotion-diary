@@ -7,9 +7,9 @@
 // The browser opens for login, then auto-collects everything.
 // Output: scripts/grafana-audit-output/ (JSON report + PNG screenshots)
 
-import { chromium } from "playwright";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openGrafana } from "./lib/grafana-session.mjs";
 
 const GRAFANA_URL = process.argv[2] || "https://neotolis-diary.dev/grafana";
 const OUT_DIR = "scripts/grafana-audit-output";
@@ -68,15 +68,10 @@ function extractValue(result) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
-  const page = await context.newPage();
-
-  await page.goto(`${GRAFANA_URL}/login`, { waitUntil: "load" });
-  console.log(">>> Grafana login page opened. Please log in...");
-  await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 120_000 });
-  console.log(">>> Logged in. Collecting data...\n");
-  await page.waitForTimeout(2000);
+  // Persistent session (scripts/.grafana-session/) — log in ONCE, every
+  // subsequent run reuses the cookie. Same helper as grafana-logs.mjs.
+  const { page, close } = await openGrafana(GRAFANA_URL);
+  console.log(">>> Collecting data...\n");
 
   const report = { timestamp: new Date().toISOString(), grafanaUrl: GRAFANA_URL };
 
@@ -226,7 +221,7 @@ async function main() {
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
   console.log(`Full report: ${reportPath}`);
 
-  await browser.close();
+  await close();
 }
 
 main().catch((e) => {
