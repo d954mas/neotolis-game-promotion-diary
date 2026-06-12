@@ -147,16 +147,20 @@ export async function getInstagramProviderBlock(
 
 /**
  * instagramObservability — surface composed into instagramAdapter via the
- * barrel (index.ts). isOperatorConfigured is computed at read time via the
- * Plan 02 registry check (INSTAGRAM_PROVIDER === "scrapecreators" &&
- * SCRAPECREATORS_API_KEY !== ""). Cheap pure env read; recomputing per-read is
- * harmless (env doesn't change mid-process).
+ * barrel (index.ts). isOperatorConfigured is a GETTER so it is evaluated at READ
+ * time via the Plan 02 registry check (INSTAGRAM_PROVIDER === "scrapecreators" &&
+ * SCRAPECREATORS_API_KEY !== ""), matching the CHECKLIST "runtime-evaluated"
+ * contract — a plain `isInstagramConfigured()` value would freeze the answer at
+ * module load. Cheap pure env read; recomputing per-read is harmless (env
+ * doesn't change mid-process), and the getter keeps it honest.
  */
 export const instagramObservability: AdapterObservability = {
   auth: {
     kind: "scrape",
     requiresUserSetup: false,
-    isOperatorConfigured: isInstagramConfigured(),
+    get isOperatorConfigured(): boolean {
+      return isInstagramConfigured();
+    },
   },
   quota: {
     getDailyStats,

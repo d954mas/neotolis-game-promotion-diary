@@ -131,14 +131,19 @@ export async function getTikTokProviderBlock(now: Date = new Date()): Promise<Ti
 
 /**
  * tiktokObservability — surface composed into tiktokAdapter via the barrel
- * (index.ts). isOperatorConfigured is computed at read time via the registry check
- * (TIKTOK_PROVIDER === "scrapecreators" && SCRAPECREATORS_API_KEY !== "").
+ * (index.ts). isOperatorConfigured is a GETTER so it is evaluated at READ time via
+ * the registry check (TIKTOK_PROVIDER === "scrapecreators" &&
+ * SCRAPECREATORS_API_KEY !== ""), matching the CHECKLIST "runtime-evaluated"
+ * contract — a plain `isTikTokConfigured()` value would freeze the answer at
+ * module load.
  */
 export const tiktokObservability: AdapterObservability = {
   auth: {
     kind: "scrape",
     requiresUserSetup: false,
-    isOperatorConfigured: isTikTokConfigured(),
+    get isOperatorConfigured(): boolean {
+      return isTikTokConfigured();
+    },
   },
   quota: {
     getDailyStats,
