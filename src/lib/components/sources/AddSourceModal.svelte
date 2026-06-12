@@ -32,6 +32,7 @@
     inferSourceKindFromUrl,
     normalizeHandleUrl,
   } from "$lib/components/sources/infer-source-kind.js";
+  import { addSourceUiCadenceLabel } from "$lib/sources/kind-display.js";
 
   // Mirror the synthetic UI kind picker from /sources/new — "reddit" is
   // resolved server-side to reddit_account / reddit_subreddit by URL
@@ -164,6 +165,14 @@
   // (free t.me/s scrape) than IG. Read from the loader value, never hardcoded.
   const pickerPostCap = $derived(
     pickerKind === "telegram_channel" ? telegramBackfillMaxPosts : socialBackfillMaxPosts,
+  );
+  // Auto-import toggle copy: the per-platform cadence once the URL pins the kind
+  // (submitKind), else a neutral fallback before detection. Single source of
+  // truth — addSourceUiCadenceLabel resolves the synthetic "reddit" chip too.
+  const autoImportLabel = $derived(
+    submitKind === null
+      ? m.source_auto_import_toggle_label_fallback()
+      : m.source_auto_import_toggle_label({ cadence: addSourceUiCadenceLabel(submitKind) }),
   );
 
   // Picker collapse → reset value (same effect as /sources/new).
@@ -458,7 +467,7 @@
 
       <label class="toggle">
         <input type="checkbox" bind:checked={autoImport} />
-        <span>Auto-import (poll every 6 hours)</span>
+        <span>{autoImportLabel}</span>
       </label>
 
       <details class="description-details">

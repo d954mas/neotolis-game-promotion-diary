@@ -74,6 +74,20 @@ describe("BackfillPicker", () => {
     expect(sourceText).toContain("backfill_picker_section_blurb");
   });
 
+  it("blurb states the per-platform poll cadence (not a global 'every 6 hours')", () => {
+    // YouTube (the default kind) keeps the "videos" noun + its 6h cadence.
+    const yt = render(BackfillPicker, { props: { value: "30d", kind: "youtube_channel" } });
+    expect(yt.body).toContain("past videos");
+    expect(yt.body).toContain("every 6 hours");
+    // A paid daily-poller (TikTok) gets DAILY + the hourly warm-stats note —
+    // it must NOT inherit YouTube's 6h cadence (the stale-copy bug this fixes).
+    const tt = render(BackfillPicker, { props: { value: "30d", kind: "tiktok_account" } });
+    expect(tt.body).toContain("past posts");
+    expect(tt.body.toLowerCase()).toContain("daily");
+    expect(tt.body.toLowerCase()).toContain("hourly");
+    expect(tt.body).not.toContain("every 6 hours");
+  });
+
   it("source no longer references the deprecated quota cost / default-helper Paraglide keys", () => {
     // Quota cost is operator concern; default-helper collapsed into
     // per-preset helpers.

@@ -28,6 +28,7 @@
     inferSourceKindFromUrl,
     normalizeHandleUrl,
   } from "$lib/components/sources/infer-source-kind.js";
+  import { addSourceUiCadenceLabel } from "$lib/sources/kind-display.js";
   import type {
     AddSourceUiKind,
     KindLabelKey,
@@ -94,6 +95,14 @@
 
   const showPicker = $derived(submitKind !== null && autoImport);
   const pickerKind: AddSourceUiKind = $derived(submitKind ?? "youtube_channel");
+  // Auto-import toggle copy: the per-platform cadence once the URL pins the kind
+  // (submitKind), else a neutral fallback before detection. Single source of
+  // truth — addSourceUiCadenceLabel resolves the synthetic "reddit" chip too.
+  const autoImportLabel = $derived(
+    submitKind === null
+      ? m.source_auto_import_toggle_label_fallback()
+      : m.source_auto_import_toggle_label({ cadence: addSourceUiCadenceLabel(submitKind) }),
+  );
   // Kind-appropriate post-cap ceiling for the picker honesty note: Telegram
   // caps deeper (free t.me/s scrape) than IG. Read from the loader, not hardcoded.
   const pickerPostCap = $derived(
@@ -369,7 +378,7 @@
 
     <label class="toggle">
       <input type="checkbox" bind:checked={autoImport} />
-      <span>Auto-import (poll every 6 hours)</span>
+      <span>{autoImportLabel}</span>
     </label>
 
     <details class="description-details">

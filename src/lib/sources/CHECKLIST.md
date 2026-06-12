@@ -110,6 +110,7 @@ In `<kind>/server/handlers/`:
 - [ ] Create `<kind>/ui/index.ts` — optional client-side `cardComponent` override if FeedCard default doesn't fit.
 - [ ] Register both in `src/lib/sources/registry-ui.ts` and `src/lib/sources/registry-ui-client.ts` — **one line each**.
 - [ ] **Feed kind-filter visibility.** Set `feedFilterable: true` on the new EventKind in `src/lib/sources/kind-display.ts` (EVENT_KIND_DISPLAY). The /feed FiltersSheet derives its KIND axis from `FEED_FILTERABLE_EVENT_KINDS` — do NOT add the kind to any hand-list. Verify the kind appears in the /feed Filters sheet after wiring.
+- [ ] **Auto-import poll-cadence label.** Add a `cadence: () => m.source_cadence_<kind>()` entry to `SOURCE_KIND_DISPLAY` in `src/lib/sources/kind-display.ts` stating what the new adapter's `scheduleCronTicks` ACTUALLY does (new-content interval + any warm stats lane) — `satisfies Record<SourceKind, …>` makes a missing entry a compile error. The Add-Source toggle, source-settings card, and BackfillPicker blurb all read it via `sourceCadenceLabel` / `addSourceUiCadenceLabel` — never a per-surface "every 6 hours" literal.
 - [ ] **Chart event-marker thumbnail.** Ensure the adapter's `enrichFeedDtos` hangs a `<kind>Enrichment.thumbnailUrl` on the dto AND that `eventThumbnail` in `src/lib/components/charts/wishlist-chart-shared.ts` reads it (add the `<kind>Enrichment` field to its ThumbnailEvent type). The games-chart markers resolve through this seam — a missing thumbnail field means a blank marker. Verify a marker shows the preview on /games/[id].
 
 ---

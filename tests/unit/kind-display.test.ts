@@ -21,9 +21,12 @@ import {
   SOURCE_PLATFORM_GROUPS,
   eventKindLabel,
   sourceKindDisplayLabel,
+  sourceCadenceLabel,
+  addSourceUiCadenceLabel,
   sourcePlatformGroupKey,
 } from "../../src/lib/sources/kind-display.js";
 import type { EventKind, SourceKind } from "../../src/lib/sources/adapter.js";
+import type { AddSourceUiKind } from "../../src/lib/sources/kind-matrix.js";
 
 // Authoritative rosters (mirror the adapter.ts unions). `satisfies` keeps these
 // honest: if they drift from EventKind / SourceKind, tsc flags it here.
@@ -117,6 +120,68 @@ describe("kind-display config — SOURCE_KIND_DISPLAY", () => {
   it("sourceKindDisplayLabel resolves the config label", () => {
     expect(sourceKindDisplayLabel("instagram_account")).toBe(
       SOURCE_KIND_DISPLAY.instagram_account.label(),
+    );
+  });
+});
+
+describe("kind-display config — per-platform auto-import cadence labels", () => {
+  // The `satisfies Record<SourceKind, SourceKindDisplay>` on SOURCE_KIND_DISPLAY
+  // is the COMPILE-TIME guard that every SourceKind carries a `cadence`
+  // resolver (a new adapter kind that forgets it fails `pnpm typecheck`). This
+  // test is the runtime complement: every key resolves a NON-EMPTY string and
+  // the paraglide wiring isn't vacuous (the stale global "every 6 hours" copy
+  // is gone, replaced by the real per-platform cadence).
+
+  it("every SourceKind resolves a non-empty cadence label", () => {
+    for (const k of ALL_SOURCE_KINDS) {
+      const label = sourceCadenceLabel(k);
+      expect(typeof label, `${k} cadence must be a string`).toBe("string");
+      expect(label.length, `${k} cadence must be non-empty`).toBeGreaterThan(0);
+    }
+  });
+
+  it("cadence strings state the REAL per-platform cadence, not a global 'every 6 hours'", () => {
+    // The whole point of this change: the copy is per-platform, not a stale
+    // global constant. IG/TikTok poll DAILY + an hourly warm stats lane;
+    // YouTube/Telegram poll every 6h. Assert the load-bearing distinctions so a
+    // regression to a single hardcoded string fails here.
+    expect(sourceCadenceLabel("youtube_channel")).toContain("6 hours");
+    expect(sourceCadenceLabel("instagram_account").toLowerCase()).toContain("daily");
+    expect(sourceCadenceLabel("instagram_account").toLowerCase()).toContain("hourly");
+    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("daily");
+    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("hourly");
+    // The two paid daily-pollers must NOT inherit the YouTube 6h cadence.
+    expect(sourceCadenceLabel("instagram_account")).not.toContain("6 hours");
+    expect(sourceCadenceLabel("tiktok_account")).not.toContain("6 hours");
+    // reddit_account + reddit_subreddit share one cadence (same enqueue crons).
+    expect(sourceCadenceLabel("reddit_subreddit")).toBe(sourceCadenceLabel("reddit_account"));
+  });
+
+  it("addSourceUiCadenceLabel resolves the synthetic 'reddit' chip to reddit_account", () => {
+    expect(addSourceUiCadenceLabel("reddit")).toBe(sourceCadenceLabel("reddit_account"));
+  });
+
+  it("addSourceUiCadenceLabel covers every Add-Source UI kind with a non-empty string", () => {
+    const ALL_UI_KINDS = [
+      "youtube_channel",
+      "reddit",
+      "twitter_account",
+      "telegram_channel",
+      "discord_server",
+      "instagram_account",
+      "tiktok_account",
+    ] as const satisfies readonly AddSourceUiKind[];
+    for (const k of ALL_UI_KINDS) {
+      const label = addSourceUiCadenceLabel(k);
+      expect(label.length, `${k} UI cadence must be non-empty`).toBeGreaterThan(0);
+    }
+  });
+
+  it("addSourceUiCadenceLabel falls back to the neutral default for an unknown widened string", () => {
+    // The BackfillPicker prop is `kind?: string`; an unrecognized value must
+    // not crash the lookup (returns the neutral default instead).
+    expect(addSourceUiCadenceLabel("not_a_real_kind" as AddSourceUiKind)).toBe(
+      SOURCE_KIND_DISPLAY.twitter_account.cadence(),
     );
   });
 });

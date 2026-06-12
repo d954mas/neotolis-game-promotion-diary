@@ -24,6 +24,7 @@
 
 import { m } from "$lib/paraglide/messages.js";
 import type { EventKind, SourceKind } from "./adapter.js";
+import type { AddSourceUiKind } from "./kind-matrix.js";
 
 export interface EventKindDisplay {
   /** Paraglide resolver for the human label (e.g. "Instagram"). */
@@ -76,6 +77,16 @@ export interface SourceKindDisplay {
   /** Drives the `/sources` list grouping. reddit_account + reddit_subreddit
    *  share one "Reddit" group (same `key`); `order` is the group sort key. */
   platformGroup: { key: string; label: string; order: number };
+  /** Paraglide resolver for the per-platform auto-import poll cadence, surfaced
+   *  in the Add-Source auto-import toggle, the source-settings card, and the
+   *  BackfillPicker blurb. The string states what THIS kind's crons actually do
+   *  (scheduleCronTicks in `<kind>/server/index.ts`) — NOT a global "every 6
+   *  hours" (the stale copy this field replaced). The two free-form not-built
+   *  kinds (twitter / discord) carry a neutral string since they have no
+   *  auto-import cron yet; `satisfies Record<SourceKind, …>` still forces an
+   *  explicit entry for every future kind, so a new adapter can't ship with a
+   *  wrong-but-inherited cadence label. */
+  cadence: () => string;
 }
 
 // One entry per EventKind. `satisfies Record<EventKind, …>` is the compile-time
@@ -168,38 +179,60 @@ export const EVENT_KIND_DISPLAY = {
 } satisfies Record<EventKind, EventKindDisplay>;
 
 // One entry per SourceKind. Same compile-time guard via `satisfies`.
+//
+// `cadence` mirrors each kind's scheduleCronTicks in <kind>/server/index.ts:
+//   - youtube_channel : active poll "0 */6 * * *" (every 6h).
+//   - reddit_*        : enqueue-service-sources "0 0,6,12,18" + posts
+//                        "0 3,9,15,21" → a fresh walk every 6h, no warm lane.
+//   - instagram_account: active poll "0 6 * * *" (daily) + warm per-post lane
+//                        "0 * * * *" (hourly, >24h staleness gate → ~1 paid
+//                        stats refresh/day per recent post).
+//   - tiktok_account  : active poll "0 6 * * *" (daily) + warm lane "0 * * * *"
+//                        (hourly, >26h gate → ~1 paid refresh/day).
+//   - telegram_channel: active listing "0 */6 * * *" (every 6h) + warm lane
+//                        "0 * * * *" (hourly, 12h staleness gate → view counts
+//                        refresh ~twice/day).
+//   - twitter / discord: no adapter, no auto-import cron yet → neutral string.
 export const SOURCE_KIND_DISPLAY = {
   youtube_channel: {
     label: () => m.source_kind_label_youtube_channel(),
     platformGroup: { key: "youtube", label: "YouTube", order: 0 },
+    cadence: () => m.source_cadence_youtube_channel(),
   },
   reddit_account: {
     label: () => m.source_kind_label_reddit_account(),
     platformGroup: { key: "reddit", label: "Reddit", order: 1 },
+    cadence: () => m.source_cadence_reddit_account(),
   },
   reddit_subreddit: {
     label: () => m.source_kind_label_reddit_account(),
     platformGroup: { key: "reddit", label: "Reddit", order: 1 },
+    cadence: () => m.source_cadence_reddit_account(),
   },
   instagram_account: {
     label: () => m.source_kind_label_instagram_account(),
     platformGroup: { key: "instagram", label: "Instagram", order: 2 },
+    cadence: () => m.source_cadence_instagram_account(),
   },
   tiktok_account: {
     label: () => m.source_kind_label_tiktok_account(),
     platformGroup: { key: "tiktok", label: "TikTok", order: 6 },
+    cadence: () => m.source_cadence_tiktok_account(),
   },
   twitter_account: {
     label: () => m.source_kind_label_twitter_account(),
     platformGroup: { key: "twitter", label: "Twitter", order: 3 },
+    cadence: () => m.source_cadence_default(),
   },
   telegram_channel: {
     label: () => m.source_kind_label_telegram_channel(),
     platformGroup: { key: "telegram", label: "Telegram", order: 4 },
+    cadence: () => m.source_cadence_telegram_channel(),
   },
   discord_server: {
     label: () => m.source_kind_label_discord_server(),
     platformGroup: { key: "discord", label: "Discord", order: 5 },
+    cadence: () => m.source_cadence_default(),
   },
 } satisfies Record<SourceKind, SourceKindDisplay>;
 
@@ -296,6 +329,43 @@ export function eventKindLabel(kind: string): string {
 /** Human label for any SourceKind. */
 export function sourceKindDisplayLabel(kind: SourceKind): string {
   return SOURCE_KIND_DISPLAY[kind].label();
+}
+
+/** The per-platform auto-import poll cadence string for a SourceKind (e.g.
+ *  "New videos every 6 hours" / "New posts daily; stats of recent posts refresh
+ *  hourly"). The SINGLE source of truth the Add-Source toggle, source-settings
+ *  card, and BackfillPicker blurb all read — no surface re-states "every 6
+ *  hours". The synthetic Add-Source UI kind "reddit" is resolved via
+ *  addSourceUiCadenceLabel below before reaching here. */
+export function sourceCadenceLabel(kind: SourceKind): string {
+  return SOURCE_KIND_DISPLAY[kind].cadence();
+}
+
+/** Maps the synthetic Add-Source UI kind "reddit" (a single chip the server
+ *  resolves to reddit_account vs reddit_subreddit by URL shape) onto the
+ *  representative DB SourceKind whose cadence we surface. Every other
+ *  AddSourceUiKind IS already a SourceKind. The `satisfies Record<…>` makes a
+ *  new Add-Source UI kind a COMPILE error here, so the Add-Source surfaces can
+ *  never paste a kind the cadence map doesn't cover. */
+const ADD_SOURCE_UI_KIND_TO_SOURCE_KIND = {
+  youtube_channel: "youtube_channel",
+  reddit: "reddit_account",
+  twitter_account: "twitter_account",
+  telegram_channel: "telegram_channel",
+  discord_server: "discord_server",
+  instagram_account: "instagram_account",
+  tiktok_account: "tiktok_account",
+} as const satisfies Record<AddSourceUiKind, SourceKind>;
+
+/** The cadence string for an Add-Source UI kind (the chip-picker union that
+ *  carries the synthetic "reddit"). Both Add-Source surfaces (/sources/new +
+ *  AddSourceModal) call THIS so the auto-import toggle + BackfillPicker blurb
+ *  speak the real per-platform cadence with ONE shared map — never a per-surface
+ *  copy. An unknown string (the picker's widened `kind?: string` prop) falls
+ *  back to the neutral default rather than crashing. */
+export function addSourceUiCadenceLabel(kind: AddSourceUiKind): string {
+  const sourceKind = ADD_SOURCE_UI_KIND_TO_SOURCE_KIND[kind];
+  return sourceKind ? sourceCadenceLabel(sourceKind) : m.source_cadence_default();
 }
 
 /** The `/sources` platform groups in render order, de-duplicated by group key
