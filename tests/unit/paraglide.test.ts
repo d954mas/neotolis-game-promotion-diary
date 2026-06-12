@@ -686,6 +686,7 @@ describe("paraglide i18n", () => {
       "sources_error_duplicate",
       "sources_error_duplicate_channel",
       "sources_error_duplicate_channel_soft_deleted",
+      "sources_error_handle_unresolvable",
       "sources_error_kind_not_yet_functional",
       "sources_error_no_youtube_keys",
       "sources_error_not_a_reddit_url",

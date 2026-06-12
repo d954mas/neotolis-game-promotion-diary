@@ -286,11 +286,22 @@
         onClose();
         return;
       }
-      let body: { error?: string; metadata?: { kind?: string; status?: string } } = {};
+      let body: { error?: string; metadata?: { kind?: string; status?: string; handle?: string } } =
+        {};
       try {
         body = (await res.json()) as typeof body;
       } catch {
         // ignore parse failures
+      }
+      // Adapter resolved the handle against the live platform and it doesn't
+      // exist / isn't public — surface the handle, not the generic copy.
+      if (
+        res.status === 422 &&
+        (body.error === "tiktok_handle_unresolvable" ||
+          body.error === "instagram_handle_unresolvable")
+      ) {
+        formError = m.sources_error_handle_unresolvable({ handle: body.metadata?.handle ?? "" });
+        return;
       }
       if (res.status === 422 && body.error === "kind_not_yet_functional") {
         const kindLabel = body.metadata?.kind ?? submitKind ?? "";

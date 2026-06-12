@@ -580,7 +580,8 @@
   "add_source_supported_legend": "Supported",
   "add_source_detected": "Detected: {kind}",
   "add_source_not_supported_yet": "{kind} isn't supported yet.",
-  "add_source_link_unrecognized": "We don't recognize this link yet. Supported: YouTube, Reddit, Telegram, Instagram.",
+  "add_source_link_unrecognized": "We don't recognize this link yet. Supported: YouTube, Reddit, Telegram, Instagram, TikTok.",
+  "sources_error_handle_unresolvable": "Account @{handle} doesn't exist or isn't available. Check the handle and try again.",
 
   "privacy_title": "Privacy Policy",
   "privacy_last_updated": "Last updated: {date}",
