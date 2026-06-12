@@ -22,7 +22,7 @@
 // omits it. This is the ONE genuine per-platform behavioral difference the shared
 // factory pushes down to the per-tree writeSnapshot config.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { events } from "$lib/server/db/schema/events.js";
 import { tiktokPosts } from "$lib/server/db/schema/index.js";
 import { db } from "$lib/server/db/client.js";
@@ -36,6 +36,7 @@ import { env } from "$lib/server/config/env.js";
 import { getSocialProvider } from "../provider/registry.js";
 import { getSocialSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
+import { tiktokParseUrl } from "../url.js";
 
 export const TIKTOK_REFRESH_SLOTS = REFRESH_SLOTS;
 export type TikTokRefreshQueueName = SocialRefreshQueueName;
@@ -61,16 +62,48 @@ async function resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | nu
   return event?.externalId ?? null;
 }
 
-// The single-video endpoint needs the permalink, which lives on the public-data
-// tiktok_posts row. No row / no permalink (e.g. a paste before the first account
-// poll) → null → graceful skip; the next scheduled poll fills it.
+// The single-video endpoint needs the permalink. It normally lives on the
+// public-data tiktok_posts row (written by the account poll / a paste preview).
+//
+// CACHE-MISS FALLBACK (TikTok-only, Finding 2): a tiktok_post event can exist with
+// a valid aweme id but NO tiktok_posts row — the create boundary's
+// resolveCachedExternalId falls back to the URL-INTRINSIC aweme id (TikTok's id IS
+// the /@handle/video/<id> URL slug, 10-SPIKE) when no preview ran. IG has no such
+// state (its media id is NOT URL-derivable → no-preview events are saved id-less and
+// aren't refreshable), so IG's resolvePermalink correctly stops at the cache miss.
+// For TikTok, stopping here would charge the user a cooldown + audit row on Refresh
+// yet fetch nothing. Recover the canonical permalink from the event's own URL
+// (tiktokParseUrl yields the same /@handle/video/<id> permalink the endpoint needs).
+// On a successful fetch writeSnapshot UPSERTs the tiktok_posts row, self-healing the
+// cache so subsequent refreshes hit the fast path.
 async function resolvePermalink(awemeId: string): Promise<string | null> {
   const [postRow] = await db
     .select({ permalink: tiktokPosts.permalink })
     .from(tiktokPosts)
     .where(eq(tiktokPosts.awemeId, awemeId))
     .limit(1);
-  return postRow?.permalink ?? null;
+  if (postRow?.permalink != null) return postRow.permalink;
+
+  // No cache row — recover the permalink from the tiktok_post event keyed by this
+  // aweme id (the URL slug IS the id, so external_id == aweme id). PUBLIC-DATA: the
+  // permalink is intrinsic to the URL, identical across every tenant who saved it, so
+  // no userId scope (any tenant's row yields the same canonical permalink).
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- the permalink is URL-intrinsic public data (TikTok's aweme id IS the /@handle/video/<id> slug); any tenant's tiktok_post event for this id parses to the SAME canonical permalink, so the cache-miss recovery is tenant-agnostic by construction.
+  const [eventRow] = await db
+    .select({ url: events.url })
+    .from(events)
+    .where(
+      and(
+        eq(events.externalId, awemeId),
+        eq(events.kind, "tiktok_post"),
+        isNotNull(events.url),
+        isNull(events.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (eventRow?.url == null) return null;
+  const parsed = tiktokParseUrl(eventRow.url);
+  return (parsed?.metadata as { permalink?: string } | undefined)?.permalink ?? null;
 }
 
 const tiktokRefreshLane = createSocialRefreshLane({
