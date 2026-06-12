@@ -75,6 +75,30 @@ describe("instagram URL parsers (SOC-01)", () => {
       expect(bare!.handle).toBe("natgeo");
     });
 
+    it("an @-prefixed DOTTED handle resolves (RAW_HANDLE_RE allows dots)", () => {
+      // The leading @ is unambiguous, so a dotted handle is safely a handle, not a
+      // hostname. Pre-fix the dot-gate (!includes('.')) sent it to the URL branch →
+      // null, breaking a legitimate paste like `@some.handle`.
+      expect(instagramParseSourceUrl("@some.handle")).toEqual({
+        kind: "instagram_account",
+        handle: "some.handle",
+        externalUrl: "https://www.instagram.com/some.handle/",
+      });
+    });
+
+    it("a BARE dotted string stays null/URL-branch (hostname-ambiguous)", () => {
+      // No leading @ + a dot → could be a domain; it must NOT be treated as a bare
+      // handle. Falls to the URL branch, where `some.handle` is a foreign host → null.
+      expect(instagramParseSourceUrl("some.handle")).toBeNull();
+    });
+
+    it("@natgeo (dotless @handle) still resolves", () => {
+      const parsed = instagramParseSourceUrl("@natgeo");
+      expect(parsed).not.toBeNull();
+      expect(parsed!.kind).toBe("instagram_account");
+      expect(parsed!.handle).toBe("natgeo");
+    });
+
     it("a /p/ permalink returns null (caller meant the post parser)", () => {
       expect(instagramParseSourceUrl("https://www.instagram.com/p/XYZ789/")).toBeNull();
     });
