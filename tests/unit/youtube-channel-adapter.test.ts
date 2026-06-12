@@ -14,8 +14,11 @@
 //     'auth_error'; 404 → 'not_found'; videoId missing from response items
 //     → 'not_found' for that index.
 //   - quotaUser=hash(userId) parameter on every call (Google fairness gate).
-//   - Shorts detection: contentDetails.duration ≤ 60s → metadata.is_short
-//     === true.
+//   - Shorts duration PREFILTER: contentDetails.duration → metadata
+//     .duration_seconds (parsed ISO-8601). The adapter NO LONGER emits a
+//     duration-only is_short guess — duration is only a prefilter, the redirect
+//     probe (shorts-probe.ts, exercised in tests/unit/sources/youtube/
+//     shorts-probe.test.ts) is the decider (user-locked 2026-06-12).
 //   - 30 000 ms AbortController.timeout on every HTTP call (never hold a
 //     DB tx across HTTP).
 
@@ -323,8 +326,12 @@ describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
   });
 });
 
-describe("youtubeChannelAdapter.pollStats — Shorts detection", () => {
-  it("Test 9: duration='PT15S' (15s ≤ 60s) → metadata.is_short=true", async () => {
+describe("youtubeChannelAdapter.pollStats — Shorts duration PREFILTER", () => {
+  // The adapter carries duration_seconds (the prefilter INPUT) and NOTHING
+  // else — no is_short guess. Whether a ≤3min video is actually a Short is the
+  // redirect probe's call (decider), not the adapter's. These tests pin that
+  // the adapter parses ISO-8601 correctly and never invents a verdict.
+  it("Test 9: duration='PT15S' → metadata.duration_seconds=15 (no is_short guess)", async () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     installFetchMock([
       {
@@ -336,10 +343,11 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection", () => {
     const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.metadata?.duration_seconds).toBe(15);
-    expect(snap!.metadata?.is_short).toBe(true);
+    // The adapter no longer emits is_short — duration alone never decides.
+    expect(snap!.metadata).not.toHaveProperty("is_short");
   });
 
-  it("Test 10: duration='PT4M13S' (253s > 60s) → metadata.is_short=false", async () => {
+  it("Test 10: duration='PT4M13S' → metadata.duration_seconds=253", async () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     installFetchMock([
       {
@@ -351,10 +359,10 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection", () => {
     const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.metadata?.duration_seconds).toBe(253);
-    expect(snap!.metadata?.is_short).toBe(false);
+    expect(snap!.metadata).not.toHaveProperty("is_short");
   });
 
-  it("Test 10b: duration='PT1M' (60s, boundary) → is_short=true", async () => {
+  it("Test 10b: duration='PT1M' (boundary) → metadata.duration_seconds=60", async () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     installFetchMock([
       {
@@ -366,7 +374,6 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection", () => {
     const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.metadata?.duration_seconds).toBe(60);
-    expect(snap!.metadata?.is_short).toBe(true);
   });
 });
 

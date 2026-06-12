@@ -68,6 +68,23 @@ export const youtubeVideos = pgTable(
     // History: this column existed and was dropped in 0048; see
     // docs/denormalization-policy.md.
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    // Short / full-video classification (user-locked 2026-06-12). Values:
+    //   'short' — a YouTube Short (the redirect probe of
+    //             youtube.com/shorts/<id> returned 200, OR the user pasted a
+    //             /shorts/ URL — that paste IS the answer, no probe needed).
+    //   'video' — a regular video (duration > 181s prefilter, OR the probe
+    //             3xx-redirected to /watch).
+    //   NULL    — unknown / not-yet-classified. EVERY existing prod row starts
+    //             NULL and heals lazily as the poll worker touches it (the
+    //             duration prefilter + per-tick-budgeted probe). NULL classifies
+    //             as "video" downstream (the media-type filter's safe default —
+    //             a YouTube video is a video at worst; never guessed into Short).
+    //
+    // WHY duration is ONLY a prefilter, not the decider: a ≤3min video CAN be a
+    // regular (horizontal) video, not a Short. The DECIDER is the redirect probe
+    // (server/shorts-probe.ts) which asks YouTube itself. Duration > 181s only
+    // SKIPS the probe (such a video can never be a Short — Shorts are ≤3min).
+    mediaType: text("media_type"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
     // Polling state lives here (not on `events`). NULL on rows freshly
     // inserted by ingest before channel-context-backfill has fetched

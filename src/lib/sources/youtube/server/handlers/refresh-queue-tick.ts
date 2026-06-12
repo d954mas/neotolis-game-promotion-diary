@@ -5,8 +5,9 @@
 // enqueue and recorded in audit_log; service_video rows run under the cron
 // pool.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { events } from "$lib/server/db/schema/events.js";
+import { youtubeVideos } from "../schema/index.js";
 import { db, type DbOrTx } from "$lib/server/db/client.js";
 import {
   createAdapterBatchLaneWorker,
@@ -19,6 +20,8 @@ import {
 import { logger } from "$lib/server/logger.js";
 import { youtubeChannelAdapterCore, YOUTUBE_VIDEOS_BATCH_SIZE } from "../adapter.js";
 import { writeSnapshot } from "../snapshots.js";
+import { durationPrefilter } from "../duration.js";
+import { probeIsShort, PROBE_BUDGET_PER_TICK } from "../shorts-probe.js";
 import {
   hasYoutubeApiKeys,
   msUntilMidnightPacific,
@@ -139,9 +142,38 @@ async function refreshVideoGroup(
   if (videoIds.length === 0) return;
   const snapshots = await youtubeChannelAdapterCore.pollStatsByVideoId(videoIds, quotaUser, permit);
   const snapshotByVideoId = new Map(videoIds.map((videoId, i) => [videoId, snapshots[i]!]));
+
+  // Shorts classification — only for videos this tick already touches whose
+  // media_type is still NULL (lazy heal: existing prod rows start NULL, classify
+  // as the poll worker walks them). Already-classified rows are skipped (one
+  // probe per video, ever). The per-tick probe budget bounds network round-trips
+  // so a large legacy NULL backlog heals across many ticks, not all at once.
+  const unclassified = await loadUnclassifiedVideoIds(videoIds);
+  let probeBudget = PROBE_BUDGET_PER_TICK;
+
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshotByVideoId.get(videoId)!;
+
+    // Decide the media_type verdict (undefined = leave the column untouched):
+    //   - already classified (not in `unclassified`)  → undefined.
+    //   - a failed poll (status !== ok)                → undefined (no signal).
+    //   - duration > Shorts ceiling                    → "video" (no probe).
+    //   - duration ≤ ceiling / unknown AND budget left → probe (decider).
+    //   - budget exhausted                             → undefined (next tick).
+    let mediaType: "short" | "video" | undefined;
+    if (snap.status === "ok" && unclassified.has(videoId)) {
+      const prefilter = durationPrefilter(snap.metadata?.duration_seconds ?? null);
+      if (prefilter === "skip-video") {
+        mediaType = "video";
+      } else if (probeBudget > 0) {
+        probeBudget -= 1;
+        // null (ambiguous / probe failure) → leave NULL: classifies as video
+        // downstream, never guessed. Heals on a future tick's probe.
+        mediaType = (await probeIsShort(videoId)) ?? undefined;
+      }
+    }
+
     await writeSnapshot({
       videoId,
       metrics:
@@ -156,8 +188,22 @@ async function refreshVideoGroup(
       unitsUsed: 0,
       poolKind,
       status: snap.status,
+      mediaType,
     });
   }
+}
+
+/** The subset of `videoIds` whose youtube_videos.media_type is still NULL —
+ *  the classification candidates. Public-data table (no userId scope); a video
+ *  row may not exist yet (paste-only pre-backfill) and is simply absent from the
+ *  result (no classification attempted until the row exists). */
+async function loadUnclassifiedVideoIds(videoIds: string[]): Promise<Set<string>> {
+  if (videoIds.length === 0) return new Set();
+  const rows = await db
+    .select({ videoId: youtubeVideos.videoId })
+    .from(youtubeVideos)
+    .where(and(inArray(youtubeVideos.videoId, videoIds), isNull(youtubeVideos.mediaType)));
+  return new Set(rows.map((r) => r.videoId));
 }
 
 async function loadVideoWork(

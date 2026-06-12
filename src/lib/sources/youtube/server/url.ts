@@ -168,3 +168,24 @@ function makeParsed(videoId: string, originalInput: string): ParsedUrl {
     metadata: { canonicalUrl: canonical, originalUrl: originalInput },
   };
 }
+
+/**
+ * Is this a youtube.com/shorts/<id> URL? A /shorts/ paste IS the answer — the
+ * media type is intrinsic to the path, so the paste flow can persist
+ * media_type='short' with NO redirect probe (the canonicalizer collapses
+ * /shorts/<id> → /watch?v=<id>, erasing the signal, so we read it off the raw
+ * input here BEFORE canonicalization). Returns false for /watch, youtu.be,
+ * /embed, /live, and non-YouTube hosts (those carry no Short signal — the poll
+ * worker's probe decides them later).
+ */
+export function isYoutubeShortsUrl(input: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  if (!YT_HOSTS.has(host)) return false;
+  return /^\/shorts\/[\w-]+/.test(url.pathname);
+}

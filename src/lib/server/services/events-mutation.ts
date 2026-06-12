@@ -918,11 +918,16 @@ export async function enrichFromUrl(
   try {
     const { handleVideoSingle } =
       await import("$lib/sources/youtube/server/handlers/video-single.js");
+    const { isYoutubeShortsUrl } = await import("$lib/sources/youtube/server/url.js");
     await handleVideoSingle({
       videoId: parsed.videoId,
       userId,
       paste: true,
       ipAddress,
+      // /shorts/ paste intrinsic: the pasted URL's path IS the verdict. The
+      // canonicalizer already collapsed /shorts/<id> → /watch?v=<id>, so we read
+      // the Short signal off the RAW pasted url before that erasure.
+      ...(isYoutubeShortsUrl(url) ? { mediaTypeHint: "short" as const } : {}),
     });
   } catch (err) {
     logger.warn(
