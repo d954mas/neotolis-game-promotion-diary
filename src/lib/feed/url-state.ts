@@ -49,6 +49,7 @@
 // top level — breaks unit tests / SSR client bundles).
 
 import type { EventKind } from "$lib/sources/adapter.js";
+import { EVENT_KIND_DISPLAY } from "$lib/sources/kind-display.js";
 
 /**
  * Off-topic sentinel value in the GAME axis multi-select. Carried as a
@@ -69,26 +70,15 @@ export const OFF_TOPIC_TAG = "off_topic";
  */
 export type ShowFilter = { kind: "any" } | { kind: "inbox" };
 
-// Local kind-axis validation. We cannot reuse `filterValidKinds` from
-// `$lib/util/filter-event-kinds.js` because that helper imports
-// `VALID_EVENT_KINDS` from the server-only events service, which would
-// drag the env-loading chain into the client bundle / unit-test runner.
-// Documented as Plan 03.4-02 deviation Rule 3 (auto-fix blocking issue);
-// follow-up: extract VALID_EVENT_KINDS to a client-safe shared module
-// so all three callers (events service, filter-event-kinds helper, this
-// URL parser) reuse a single source of truth.
-const URL_VALID_KINDS: ReadonlySet<EventKind> = new Set<EventKind>([
-  "youtube_video",
-  "reddit_post",
-  "twitter_post",
-  "telegram_post",
-  "discord_drop",
-  "conference",
-  "talk",
-  "press",
-  "other",
-  "post",
-]);
+// Local kind-axis validation, DERIVED from kind-display (client-safe, the
+// compile-enforced `satisfies Record<EventKind, …>` map) — the same single
+// source of truth the /feed KIND axis renders from (D-08). The previous
+// hand-list here silently dropped `instagram_post` / `tiktok_post` from
+// `?kind=` URLs, so clicking those filter chips did nothing (Phase 10 UAT,
+// 2026-06-12) — a kind that renders in the axis MUST round-trip the URL.
+const URL_VALID_KINDS: ReadonlySet<EventKind> = new Set<EventKind>(
+  Object.keys(EVENT_KIND_DISPLAY) as EventKind[],
+);
 function filterValidKindsLocal(raw: string[]): EventKind[] {
   return raw.filter((k): k is EventKind => URL_VALID_KINDS.has(k as EventKind));
 }

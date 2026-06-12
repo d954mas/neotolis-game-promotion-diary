@@ -21,8 +21,20 @@ import {
   FEED_FILTERABLE_EVENT_KINDS,
   eventKindLabel,
 } from "../../src/lib/sources/kind-display.js";
+import { parseSearchParams } from "../../src/lib/feed/url-state.js";
 
 describe("/feed KIND-filter binding is the shared ordered FEED_KIND_FILTER_KINDS (D-08)", () => {
+  it("every renderable filter kind ROUND-TRIPS the URL state (the click actually filters)", () => {
+    // Phase 10 UAT regression #2: the axis RENDERED instagram_post/tiktok_post
+    // but url-state.ts's hand-list URL_VALID_KINDS silently dropped them from
+    // `?kind=` — clicking the chip did nothing. A kind offered by the axis MUST
+    // survive parseSearchParams, or the filter is a dead button.
+    for (const k of FEED_KIND_FILTER_KINDS) {
+      const state = parseSearchParams(new URL(`https://x/feed?kind=${k}`));
+      expect(state.kind, `?kind=${k} must survive URL parsing`).toContain(k);
+    }
+  });
+
   it("includes the social adapter kinds that were the regression", () => {
     // The regression: these were ABSENT from the live /feed KIND_AXIS_ORDER.
     expect(FEED_KIND_FILTER_KINDS).toContain("instagram_post");
