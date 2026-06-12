@@ -1,58 +1,31 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { db } from "$lib/server/db/client.js";
-import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
+// YouTube service_video stats producer — enqueues service_video rows into
+// adapter_refresh_queue. Thin wrapper over the shared producer
+// (src/lib/sources/server/social-warm-lane.ts createServiceStatsEnqueuer): advisory-lock
+// per id (serialize concurrent producers) + skip-if-pending dedup. user_id=NULL →
+// public-data cron lane.
+//
+// The producer ALGORITHM is identical to the social warm lanes' (same sorted-lock +
+// pending/processing dedup scan + row shape), so it shares the same factory. The
+// two YouTube-only differences are pure parameters: the payload id key is
+// `video_id` (not `post_id`), and the payload carries a `flow` discriminator that
+// varies per call site (active/cold/backfill/no_data/rehab) — supplied per call as
+// the extra payload.
+
+import { createServiceStatsEnqueuer } from "$lib/sources/server/social-warm-lane.js";
 
 export type YoutubeServiceVideoFlow = "active" | "cold" | "backfill" | "no_data" | "rehab";
+
+const enqueue = createServiceStatsEnqueuer<{ flow: YoutubeServiceVideoFlow }>({
+  adapterKind: "youtube_channel",
+  queueName: "service_video",
+  lockPrefix: "youtube_service_video:",
+  rowType: "video_stats",
+  payloadIdKey: "video_id",
+});
 
 export async function enqueueServiceVideoStats(
   videoIds: string[],
   flow: YoutubeServiceVideoFlow,
 ): Promise<number> {
-  const uniqueVideoIds = [...new Set(videoIds.filter((id) => id.length > 0))];
-  if (uniqueVideoIds.length === 0) return 0;
-
-  return db.transaction(async (tx) => {
-    for (const videoId of [...uniqueVideoIds].sort()) {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext(${"youtube_service_video:" + videoId}))`,
-      );
-    }
-
-    // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- service_video lane scan: cron writes user_id=NULL across all tenants
-    const existing = await tx
-      .select({
-        videoId: sql<string>`${adapterRefreshQueue.payload}->>'video_id'`,
-      })
-      .from(adapterRefreshQueue)
-      .where(
-        and(
-          eq(adapterRefreshQueue.adapterKind, "youtube_channel"),
-          eq(adapterRefreshQueue.queueName, "service_video"),
-          inArray(adapterRefreshQueue.status, ["pending", "processing"]),
-          sql`${adapterRefreshQueue.payload}->>'video_id' IN (${sql.join(
-            uniqueVideoIds.map((id) => sql`${id}`),
-            sql`, `,
-          )})`,
-        ),
-      );
-    const existingIds = new Set(existing.map((row) => row.videoId));
-    const rows = uniqueVideoIds
-      .filter((videoId) => !existingIds.has(videoId))
-      .map((videoId) => ({
-        adapterKind: "youtube_channel" as const,
-        queueName: "service_video",
-        type: "video_stats",
-        payload: { video_id: videoId, flow },
-        userId: null,
-        priority: 10,
-        status: "pending" as const,
-      }));
-
-    if (rows.length === 0) return 0;
-    const inserted = await tx
-      .insert(adapterRefreshQueue)
-      .values(rows)
-      .returning({ id: adapterRefreshQueue.id });
-    return inserted.length;
-  });
+  return enqueue(videoIds, { flow });
 }
