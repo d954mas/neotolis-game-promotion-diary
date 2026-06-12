@@ -132,6 +132,27 @@ describe("parseSearchParams", () => {
     expect(s.kind).toEqual(["youtube_video", "reddit_post"]);
   });
 
+  it("defaults mediaType to [] when no ?type= param", () => {
+    expect(parseSearchParams(new URL("https://x")).mediaType).toEqual([]);
+  });
+
+  it("handles multi-value ?type=short&type=video and filters unknown categories", () => {
+    const s = parseSearchParams(new URL("https://x?type=short&type=bogus&type=video"));
+    // 'bogus' is dropped (DERIVED validation from MEDIA_FILTER_CATEGORIES); the
+    // two valid categories survive in URL order.
+    expect(s.mediaType).toEqual(["short", "video"]);
+  });
+
+  it("every media-type category round-trips the URL (the chip actually filters)", () => {
+    // The TYPE axis renders Short / Video / Other; each MUST survive
+    // parseSearchParams or the chip is a dead button (the lesson commit 187a8da
+    // learned for the KIND axis).
+    for (const c of ["short", "video", "other"] as const) {
+      const s = parseSearchParams(new URL(`https://x/feed?type=${c}`));
+      expect(s.mediaType, `?type=${c} must survive URL parsing`).toContain(c);
+    }
+  });
+
   it("parses authorIsMe=true / authorIsMe=false / omitted", () => {
     expect(parseSearchParams(new URL("https://x?authorIsMe=true")).authorIsMe).toBe(true);
     expect(parseSearchParams(new URL("https://x?authorIsMe=false")).authorIsMe).toBe(false);
@@ -154,6 +175,7 @@ describe("serializeFilterState", () => {
       source: [],
       kind: [],
       gameTags: [],
+      mediaType: [],
       authorIsMe: undefined,
       // Default preset is "month" (matches parseSearchParams default).
       dateRange: { preset: "month" },
@@ -216,12 +238,27 @@ describe("serializeFilterState", () => {
     expect(sp.getAll("game")).toEqual(["g1", OFF_TOPIC_TAG]);
   });
 
+  it("encodes mediaType as repeated ?type= params in MEDIA_FILTER_CATEGORIES order (canonical)", () => {
+    // Input order is reversed; the serializer emits in category order (short
+    // before video before other) so the URL is canonical regardless of click
+    // order. Empty mediaType emits no ?type= param.
+    const sp = serializeFilterState({
+      ...defaultState(),
+      mediaType: ["other", "short"],
+    });
+    expect(sp.getAll("type")).toEqual(["short", "other"]);
+    expect(serializeFilterState(defaultState()).has("type")).toBe(false);
+  });
+
   it("round-trips identity: parseSearchParams(new URL('https://x?' + serializeFilterState(s).toString())) === s", () => {
     const original: FilterState = {
       show: { kind: "any" },
       source: ["src_a", "src_b"],
       kind: ["youtube_video", "reddit_post"],
       gameTags: ["g1", "g2", OFF_TOPIC_TAG],
+      // MEDIA-TYPE axis round-trips (serialized in MEDIA_FILTER_CATEGORIES order:
+      // short before video) so the identity holds regardless of input order.
+      mediaType: ["short", "video"],
       authorIsMe: true,
       dateRange: { preset: "custom", from: "2026-04-01", to: "2026-05-01" },
       sortDir: "asc",

@@ -59,7 +59,7 @@
     onClearAxis,
   }: {
     label: string;
-    axisKey: "show" | "game" | "kind" | "source" | "author";
+    axisKey: "show" | "game" | "kind" | "source" | "author" | "type";
     options: Array<{
       value: string;
       label: string;

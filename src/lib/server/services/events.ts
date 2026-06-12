@@ -14,6 +14,7 @@ import { games } from "../db/schema/games.js";
 import { events } from "../db/schema/events.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { EventKind } from "$lib/sources/adapter.js";
+import type { MediaTypeCategory } from "$lib/feed/media-type-filter.js";
 import { NotFoundError } from "./errors.js";
 
 // ── Shared types ───────────────────────────────────────────────────────
@@ -103,6 +104,20 @@ export interface FeedFilters {
    * selected simultaneously.
    */
   gameTags?: string[];
+  /**
+   * MEDIA-TYPE axis multi-select (Short / Video / Other). Each entry is a
+   * MediaTypeCategory. When non-empty, listFeedPage + listFeedFacets add an OR
+   * of, per selected category: (a) `events.kind IN (kind-level-default kinds for
+   * that category)` and (b) for the per-post kinds (instagram_post /
+   * tiktok_post) an EXISTS subquery against the platform cache table
+   * (instagram_posts / tiktok_posts) matching media_type values for that
+   * category. "other" additionally matches per-post events whose cache row is
+   * MISSING (NOT EXISTS) so no event silently vanishes from all three
+   * categories — the three categories PARTITION the feed (selecting all three ==
+   * no filter). Filtered in SQL (not post-enrichment) so pagination stays
+   * honest. Empty / undefined = no media-type filter.
+   */
+  mediaType?: MediaTypeCategory[];
   authorIsMe?: boolean;
   from?: Date;
   to?: Date;
@@ -189,6 +204,15 @@ export interface FeedFacets {
    * attached games AND not dismissed AND not off-topic).
    */
   show: { all: number; inbox: number };
+  /**
+   * MEDIA-TYPE axis facet (Short / Video / Other). Each category → count of
+   * events classifying into it after the rest of the axes are applied (the
+   * mediaType axis itself excluded). `all` is the sentinel = total matching
+   * every other axis with the MEDIA-TYPE axis cleared (stable across same-axis
+   * toggles, mirrors kindsAll). Drives the predicted-count tails on the TYPE
+   * axis chips.
+   */
+  mediaType: { short: number; video: number; other: number; all: number };
   /**
    * AUTHOR axis facet. `anyone` is the same as show.all; `mine` filters
    * authorIsMe=true; `others` filters authorIsMe=false.

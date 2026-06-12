@@ -131,7 +131,7 @@ export interface CardEventLite {
    *  metrics-by-presence (D-05): a photo-mode post has no views (null), NEVER
    *  coerced to 0; shareCount is TikTok's first-class share metric. thumbnailUrl
    *  is the raw TikTok CDN hotlink (D-07, signed + expiring — onerror fallback in
-   *  the card); mediaType ("video" | "carousel") drives the media-type overlay. */
+   *  the card); mediaType ("short" | "carousel") drives the media-type overlay. */
   tiktokEnrichment?: {
     stats: {
       viewCount: number | null;

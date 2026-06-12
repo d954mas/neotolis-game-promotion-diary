@@ -29,6 +29,13 @@
 
 import { OFF_TOPIC_TAG, type FilterState } from "./url-state.js";
 import { dateInRange } from "./date-range.js";
+import {
+  EVENT_KIND_MEDIA_CATEGORY,
+  postMediaKindToCategory,
+  type MediaTypeCategory,
+  type PostMediaKind,
+} from "./media-type-filter.js";
+import type { EventKind } from "$lib/sources/adapter.js";
 
 export interface FilterableEvent {
   id: string;
@@ -39,6 +46,46 @@ export interface FilterableEvent {
   author_is_me?: boolean;
   gameIds: string[];
   metadata?: { triage?: { offTopic?: boolean } } | null;
+  // Per-post media kind from the platform cache enrichment (instagram_post /
+  // tiktok_post). Drives the MEDIA-TYPE axis classification for the per-post
+  // kinds. Absent / null → the event falls into "other" (matches the server's
+  // missing-cache-row → "other" rule, so client predicted-counts agree with
+  // the server's honest pagination).
+  instagramEnrichment?: { mediaType?: string | null } | null;
+  tiktokEnrichment?: { mediaType?: string | null } | null;
+}
+
+/**
+ * Classify one event into a MEDIA-TYPE category (Short / Video / Other),
+ * mirroring the server SQL filter in events-query.ts. Per-post kinds
+ * (instagram_post / tiktok_post) consult the enrichment media kind; a missing /
+ * unrecognized media row → "other" (no event vanishes from all three
+ * categories). Every other kind uses its kind-level default from
+ * EVENT_KIND_MEDIA_CATEGORY. Pure — exported for the unit partition test.
+ */
+export function eventMediaCategory(e: FilterableEvent): MediaTypeCategory {
+  const classification = EVENT_KIND_MEDIA_CATEGORY[e.kind as EventKind];
+  // Unknown kind (widened string) → other, matching the server default.
+  if (classification === undefined) return "other";
+  if (classification !== "per-post") return classification;
+  // Per-post kind — read the cache media kind off the matching enrichment.
+  const raw =
+    e.kind === "instagram_post"
+      ? e.instagramEnrichment?.mediaType
+      : e.kind === "tiktok_post"
+        ? e.tiktokEnrichment?.mediaType
+        : null;
+  if (
+    raw === "short" ||
+    raw === "video" ||
+    raw === "image" ||
+    raw === "carousel" ||
+    raw === "text"
+  ) {
+    return postMediaKindToCategory(raw as PostMediaKind);
+  }
+  // Missing / unrecognized cache row → other (mirrors the server NOT EXISTS arm).
+  return "other";
 }
 
 export function passes(e: FilterableEvent, state: FilterState, today: Date): boolean {
@@ -67,6 +114,14 @@ export function passes(e: FilterableEvent, state: FilterState, today: Date): boo
 
   // 2. kind axis — non-empty array = restrict
   if (state.kind.length > 0 && !state.kind.includes(e.kind as (typeof state.kind)[number])) {
+    return false;
+  }
+
+  // 2b. MEDIA-TYPE axis (Short / Video / Other) — non-empty array = restrict to
+  // events whose media category is in the selection. Each event classifies into
+  // exactly one category, so the three categories PARTITION the feed (selecting
+  // all three === no filter). Mirrors the server SQL clause in events-query.ts.
+  if (state.mediaType.length > 0 && !state.mediaType.includes(eventMediaCategory(e))) {
     return false;
   }
 
@@ -124,6 +179,24 @@ export function countWithKind(
   const next: FilterState = {
     ...state,
     kind: [kind as (typeof state.kind)[number]],
+  };
+  return events.filter((e) => passes(e, next, today)).length;
+}
+
+/**
+ * countWithMediaType — predicted count if `category` were the SOLE selection in
+ * the MEDIA-TYPE axis (other axes preserved). Same single-tag semantics as
+ * countWithKind / countWithGame.
+ */
+export function countWithMediaType(
+  events: FilterableEvent[],
+  category: MediaTypeCategory,
+  state: FilterState,
+  today: Date,
+): number {
+  const next: FilterState = {
+    ...state,
+    mediaType: [category],
   };
   return events.filter((e) => passes(e, next, today)).length;
 }

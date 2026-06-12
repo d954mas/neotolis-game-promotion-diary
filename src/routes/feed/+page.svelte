@@ -99,6 +99,7 @@
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import { getCardComponent } from "$lib/sources/registry-ui-client.js";
   import { FEED_KIND_FILTER_KINDS } from "$lib/sources/kind-display.js";
+  import { MEDIA_FILTER_CATEGORIES, type MediaTypeCategory } from "$lib/feed/media-type-filter.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
 
   import type { EventKind } from "$lib/sources/adapter.js";
@@ -196,6 +197,9 @@
   function setKind(next: EventKind[]): void {
     pushUrl({ ...urlState, kind: next, cursor: undefined });
   }
+  function setMediaType(next: MediaTypeCategory[]): void {
+    pushUrl({ ...urlState, mediaType: next, cursor: undefined });
+  }
   function setSource(next: string[]): void {
     pushUrl({ ...urlState, source: next, cursor: undefined });
   }
@@ -220,6 +224,7 @@
       show: { kind: "any" },
       gameTags: [],
       kind: [],
+      mediaType: [],
       source: [],
       authorIsMe: undefined,
       dateRange: { preset: "all" },
@@ -489,6 +494,18 @@
     return `hsl(${hue} 62% 52%)`;
   }
 
+  // TYPE axis (Short / Video / Other) order + labels. Order comes from
+  // MEDIA_FILTER_CATEGORIES (media-type-filter.ts) — the single source of
+  // ORDER + MEMBERSHIP; the URL validator derives its allowed values from the
+  // SAME const, so a chip that renders always round-trips the URL (no hand-list
+  // drift, the lesson this branch already learned four times).
+  const TYPE_AXIS_ORDER: readonly MediaTypeCategory[] = MEDIA_FILTER_CATEGORIES;
+  const TYPE_AXIS_LABEL: Record<MediaTypeCategory, () => string> = {
+    short: m.feed_axis_type_short,
+    video: m.feed_axis_type_video,
+    other: m.feed_axis_type_other,
+  };
+
   const KIND_AXIS_ORDER: readonly EventKind[] = FEED_KIND_FILTER_KINDS;
   const KIND_AXIS_LABEL: Record<EventKind, () => string> = {
     youtube_video: m.feed_axis_kind_youtube_video,
@@ -554,6 +571,13 @@
         onRemove: () => setKind(urlState.kind.filter((x) => x !== k)),
       });
     }
+    for (const c of urlState.mediaType) {
+      chips.push({
+        axis: "type",
+        label: TYPE_AXIS_LABEL[c]?.() ?? c,
+        onRemove: () => setMediaType(urlState.mediaType.filter((x) => x !== c)),
+      });
+    }
     for (const sid of urlState.source) {
       const src = data.sources.find((s) => s.id === sid);
       chips.push({
@@ -593,6 +617,13 @@
       author_is_me: e.authorIsMe,
       gameIds: e.gameIds,
       metadata: e.metadata as { triage?: { offTopic?: boolean } } | null,
+      // Per-post media kind from the feed enrichment — drives the client-side
+      // MEDIA-TYPE axis classification (predicted counts + the header's
+      // filtered-count display). Mirrors the server's per-post cache-row arm.
+      instagramEnrichment: (e as { instagramEnrichment?: { mediaType?: string | null } | null })
+        .instagramEnrichment,
+      tiktokEnrichment: (e as { tiktokEnrichment?: { mediaType?: string | null } | null })
+        .tiktokEnrichment,
     })),
   );
 
@@ -870,6 +901,44 @@
           setKind(next);
         }}
         onClearAxis={() => setKind([])}
+      />
+
+      <!-- TYPE axis (Short / Video / Other) — sentinel "All" + per-category
+        multi-select chips. Options derived from MEDIA_FILTER_CATEGORIES (the
+        single source of truth shared with the URL validator + the server
+        filter). Cross-source: classifies every feed event by content SHAPE
+        (TikTok/IG Reels → Short, YouTube/IG feed video → Video, everything else
+        → Other). -->
+      <AxisRow
+        label={m.axis_row_type_label()}
+        axisKey="type"
+        options={[
+          {
+            value: "all",
+            label: m.feed_axis_type_all(),
+            // "All types" sentinel — total events matching every other axis with
+            // the TYPE axis cleared. Stable across same-axis (TYPE) toggles.
+            predictedCount: data.facets.mediaType.all,
+          },
+          ...TYPE_AXIS_ORDER.map((c) => ({
+            value: c,
+            label: TYPE_AXIS_LABEL[c](),
+            predictedCount: data.facets.mediaType[c],
+          })),
+        ]}
+        selectedValues={urlState.mediaType.length === 0 ? ["all"] : urlState.mediaType}
+        onToggle={(v) => {
+          if (v === "all") {
+            setMediaType([]);
+            return;
+          }
+          const cat = v as MediaTypeCategory;
+          const next = urlState.mediaType.includes(cat)
+            ? urlState.mediaType.filter((x) => x !== cat)
+            : [...urlState.mediaType, cat];
+          setMediaType(next);
+        }}
+        onClearAxis={() => setMediaType([])}
       />
     </div>
   {/if}

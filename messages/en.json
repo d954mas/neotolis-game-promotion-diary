@@ -825,6 +825,7 @@
   "axis_row_game_label": "Game",
   "axis_row_author_label": "Author",
   "axis_row_kind_label": "Kind",
+  "axis_row_type_label": "Type",
   "axis_row_clear_axis_aria": "Clear {axis} filter",
   "axis_row_count_chip": "{count}",
 
@@ -848,6 +849,10 @@
   "feed_axis_kind_conference": "Conference",
   "feed_axis_kind_talk": "Talk",
   "feed_axis_kind_other": "Other",
+  "feed_axis_type_all": "All",
+  "feed_axis_type_short": "Short",
+  "feed_axis_type_video": "Video",
+  "feed_axis_type_other": "Other",
 
   "sources_trash_banner_text": "You're viewing the trash. Items here are auto-removed after {days} days.",
   "sources_trash_back": "Back to Sources",

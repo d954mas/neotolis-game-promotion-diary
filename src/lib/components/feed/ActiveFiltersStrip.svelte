@@ -51,8 +51,8 @@
 
   export type AxisChip = {
     // Discriminates the chip's color treatment (kind / game / author /
-    // show / source — each may get an accent in a later sub-task).
-    axis: "show" | "game" | "kind" | "source" | "author";
+    // show / source / type — each may get an accent in a later sub-task).
+    axis: "show" | "game" | "kind" | "source" | "author" | "type";
     label: string;
     onRemove: () => void;
     // Optional kind for KIND chips — drives the leading icon + accent.

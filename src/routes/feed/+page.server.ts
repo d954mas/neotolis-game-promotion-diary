@@ -142,6 +142,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     source: state.source.length > 0 ? state.source : undefined,
     kind: state.kind.length > 0 ? state.kind : undefined,
     gameTags,
+    // MEDIA-TYPE axis (Short / Video / Other). Empty array dropped to undefined
+    // so the service appends no clause (mirrors kind / source).
+    mediaType: state.mediaType.length > 0 ? state.mediaType : undefined,
     authorIsMe: state.authorIsMe,
     from,
     to,
