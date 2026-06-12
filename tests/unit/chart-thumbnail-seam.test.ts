@@ -10,8 +10,10 @@
 // source deriveThumbnailUrl (the FeedCard's resolver) reads — so a marker shows
 // the SAME preview the card does. This test pins each kind's resolution path:
 // telegram + instagram via enrichment, youtube via the intrinsic CDN URL, and a
-// bare event (no enrichment, no externalId) → null. tiktok_post is wired for
-// free (its enrichment field lights the marker the moment Plan 04/05 ships).
+// bare event (no enrichment, no externalId) → null. tiktok_post routes through
+// the same-origin proxy /api/tiktok/thumbnail/<awemeId> (10-SPIKE.md Q3 RESOLVED
+// at Plan 05 UAT: the cover hotlinks ORB-blocked in a real browser), keyed +
+// ?v=-versioned exactly like the card's deriveThumbnailUrl.
 
 import { describe, it, expect } from "vitest";
 import { eventThumbnail } from "../../src/lib/components/charts/wishlist-chart-shared.js";
@@ -68,7 +70,13 @@ describe("eventThumbnail resolves through the adapter enrichment seam (D-09)", (
     expect(out).toBe(url);
   });
 
-  it("tiktok_post returns the tiktokEnrichment thumbnail (wired for free for Plan 04/05)", () => {
+  it("tiktok_post returns the same-origin proxy path keyed by the aweme id (Q3 RESOLVED — cover ORB-blocked)", () => {
+    // 10-SPIKE.md Q3 RESOLVED at Plan 05 UAT: the TikTok CDN cover hotlinks
+    // BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB), so the chart marker —
+    // like the card — must route through /api/tiktok/thumbnail/<awemeId>, NOT the
+    // raw enrichment URL. The marker uses the SAME seam the FeedCard's
+    // deriveThumbnailUrl does, so a TikTok marker shows the same preview the card
+    // does instead of rendering blank.
     const url = "https://p16.tiktokcdn.com/abc.jpg";
     const out = eventThumbnail(
       evt({
@@ -77,7 +85,30 @@ describe("eventThumbnail resolves through the adapter enrichment seam (D-09)", (
         tiktokEnrichment: { thumbnailUrl: url },
       }),
     );
-    expect(out).toBe(url);
+    expect(out).toBe("/api/tiktok/thumbnail/tt987");
+  });
+
+  it("tiktok_post versions the proxy URL by the latest poll timestamp (?v=) when a snapshot exists", () => {
+    const polledAt = new Date("2026-06-12T04:41:00Z");
+    const out = eventThumbnail(
+      evt({
+        kind: "tiktok_post",
+        externalId: "tt987",
+        tiktokEnrichment: {
+          thumbnailUrl: "https://p16.tiktokcdn-us.com/abc.awebp",
+          stats: { polledAt },
+        },
+      }),
+    );
+    expect(out).toBe(`/api/tiktok/thumbnail/tt987?v=${polledAt.getTime()}`);
+  });
+
+  it("tiktok_post with no cached thumbnail returns null (placeholder fallback)", () => {
+    expect(
+      eventThumbnail(
+        evt({ kind: "tiktok_post", externalId: "tt987", tiktokEnrichment: { thumbnailUrl: null } }),
+      ),
+    ).toBeNull();
   });
 
   it("twitter_post returns the metadata.media.url thumbnail (restored — derive-card-data still serves it)", () => {

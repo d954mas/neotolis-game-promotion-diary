@@ -11,13 +11,14 @@
   //     — the account owner can rename the handle after the post was logged;
   //     reading from the owning row is the only way to stay fresh. Falls back to
   //     "" when the source row is gone (honest state).
-  //   - thumbnail: tiktokEnrichment.thumbnailUrl via deriveThumbnailUrl — the raw
-  //     TikTok CDN cover hotlink (10-SPIKE.md Q3: tiktokcdn-us.com, signed +
-  //     expiring, .awebp). The spike left hotlink-vs-CORP docs-only, so the card
-  //     hotlinks (referrerpolicy=no-referrer, loading=lazy via BaseFeedCard) and
-  //     swaps to the .card-thumb.empty KindIcon placeholder on <img> onerror (a
-  //     same-origin proxy is added only if Plan 05 UAT finds the cover CORP-
-  //     blocked).
+  //   - thumbnail: deriveThumbnailUrl rewrites tiktokEnrichment.thumbnailUrl to the
+  //     same-origin proxy /api/tiktok/thumbnail/<awemeId> (10-SPIKE.md Q3 RESOLVED
+  //     at Plan 05 UAT: the TikTok CDN cover — tiktokcdn-us.com, signed + expiring,
+  //     .awebp — is hotlink-BLOCKED in a real browser, net::ERR_BLOCKED_BY_ORB, so
+  //     a raw <img> fails; the proxy re-serves the bytes same-origin, mirroring IG's
+  //     #69). BaseFeedCard still carries referrerpolicy=no-referrer + loading=lazy
+  //     and swaps to the .card-thumb.empty KindIcon placeholder on <img> onerror
+  //     (an expired signed cover → proxy 502 → onerror).
   //   - stats: tiktokEnrichment.stats.{viewCount,likeCount,commentCount,
   //     shareCount} — the post's own polling data (owned by
   //     tiktok_post_snapshots), not denormalized. Metrics-by-presence (D-05):

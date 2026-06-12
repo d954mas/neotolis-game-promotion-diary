@@ -18,14 +18,15 @@
 //     fetchEventPreviewMetadata (the seam stays consistent even though a SOURCE URL
 //     is a @handle, not a video).
 //   - +shareCount threaded through writeSnapshot → enrichment → metric-series.
-//   - NO thumbnail proxy / NO registerRoutes: 10-SPIKE.md left Q3 (cover
-//     hotlink-vs-CORP) docs-only/unconfirmed (covers on tiktokcdn-us.com, signed +
-//     expiring, .awebp preferred over .heic — NOT browser-tested). Per the plan's
-//     Q3 default for an unconfirmed spike → hotlink the raw CDN cover + onerror
-//     fallback (D-07/8-D-08); the proxy is OWED to Plan 05 UAT if the cover renders
-//     blocked in a real <img>. So this barrel omits registerRoutes entirely.
+//   - SAME-ORIGIN THUMBNAIL PROXY (10-SPIKE.md Q3 — RESOLVED at Plan 05 UAT):
+//     the TikTok cover (tiktokcdn-us.com, signed + expiring, .awebp) is
+//     hotlink-BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB; server-side
+//     fetch of the same URL returns 200). Per the spike's documented conditional,
+//     registerRoutes mounts the same-origin proxy (./thumbnail-proxy.ts), mirroring
+//     IG's #69 implementation exactly — a different CDN, the same ORB/CORP block.
 
 import type {
+  AdapterAppContext,
   AdapterContext,
   BackfillWindow,
   CanonicalizeInput,
@@ -38,6 +39,7 @@ import type {
   SourceAdapter,
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
+import type { Hono } from "hono";
 import type { DbOrTx, Tx } from "$lib/server/db/client.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { getBoss } from "$lib/server/queue-client.js";
@@ -61,6 +63,7 @@ import { resetTikTokBackfillState } from "./backfill-state.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import { writeSnapshot } from "./snapshots.js";
+import { tiktokThumbnailRoutes } from "./thumbnail-proxy.js";
 import { adapterRefreshQueue, tiktokPosts } from "$lib/server/db/schema/index.js";
 import { eq, desc } from "drizzle-orm";
 import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
@@ -581,16 +584,30 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
   return row?.awemeId ?? parsed?.externalId ?? null;
 }
 
+/**
+ * registerRoutes — mounts the per-source HTTP routes on the shared Hono app
+ * (createApp iterates allAdapters; mirrors youtube/reddit/instagram). TikTok
+ * mounts the same-origin thumbnail proxy: the TikTok CDN cover is hotlink-BLOCKED
+ * in a real browser (net::ERR_BLOCKED_BY_ORB — 10-SPIKE.md Q3 RESOLVED at Plan 05
+ * UAT; server-side fetch of the same URL returns 200), so a raw <img> hotlink
+ * fails — the proxy re-serves the bytes from our origin (mirrors IG's #69).
+ */
+function registerRoutes(app: Hono<AdapterAppContext>): void {
+  app.route("/api", tiktokThumbnailRoutes);
+}
+
 // tiktokAdapter — composes the core (./adapter.ts) with the infrastructure-touching
-// methods (registerQueues / scheduleCronTicks / backfillSource) and the create-time
-// hooks (canonicalizeOnCreate / onSourceCreated / resetWalkerStateOnWidening /
-// refreshQueue / fetchEventPreviewMetadata / resolveCachedExternalId). The
-// `SourceAdapter & typeof core` annotation fails the build if any required contract
-// method is missing from the spread — completeness check by construction.
+// methods (registerQueues / scheduleCronTicks / backfillSource / registerRoutes) and
+// the create-time hooks (canonicalizeOnCreate / onSourceCreated /
+// resetWalkerStateOnWidening / refreshQueue / fetchEventPreviewMetadata /
+// resolveCachedExternalId). The `SourceAdapter & typeof core` annotation fails the
+// build if any required contract method is missing from the spread — completeness
+// check by construction.
 //
-// NO registerRoutes: 10-SPIKE.md left Q3 (cover hotlink-vs-CORP) docs-only, so the
-// plan defaults to hotlinking the raw CDN cover (+ onerror). A same-origin thumbnail
-// proxy is OWED to Plan 05 UAT only if a real <img> shows the cover CORP-blocked.
+// registerRoutes mounts the same-origin thumbnail proxy: 10-SPIKE.md Q3 RESOLVED at
+// Plan 05 UAT — the TikTok cover hotlinks BLOCKED in a real browser
+// (net::ERR_BLOCKED_BY_ORB), so the proxy re-serves the bytes from our origin
+// (mirroring IG's #69).
 export const tiktokAdapter: SourceAdapter & typeof tiktokAccountAdapterCore = {
   ...tiktokAccountAdapterCore,
   registerQueues,
@@ -601,6 +618,7 @@ export const tiktokAdapter: SourceAdapter & typeof tiktokAccountAdapterCore = {
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
   resolveCachedExternalId,
+  registerRoutes,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "tiktok_post",
     canRun: async () => {

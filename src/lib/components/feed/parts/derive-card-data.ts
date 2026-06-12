@@ -292,13 +292,20 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
   }
   if (event.kind === "tiktok_post") {
-    // 10-SPIKE.md Q3: the TikTok cover is on tiktokcdn-us.com (signed + expiring,
-    // .awebp preferred over .heic). The spike left hotlink-vs-CORP docs-only, so
-    // the plan defaults to hotlinking the RAW CDN cover the normalizer already
-    // preferred (dynamic_cover .awebp) + an <img> onerror fallback. A same-origin
-    // proxy is added only if Plan 05 UAT finds the cover CORP-blocked in a real
-    // browser (the IG path needed one; TikTok's CDN is a different origin).
-    return event.tiktokEnrichment?.thumbnailUrl ?? null;
+    // 10-SPIKE.md Q3 RESOLVED (Plan 05 UAT): the TikTok cover on tiktokcdn-us.com
+    // is hotlink-BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB), exactly like
+    // IG's CORP block — a raw <img> hotlink fails even though the server fetches it
+    // 200. Route through the same-origin proxy keyed by the aweme id (mirrors IG's
+    // #69), only when a thumbnail actually exists in the cache (the enrichment URL
+    // is present) and we have the post id to key on.
+    if (event.tiktokEnrichment?.thumbnailUrl == null || !event.externalId) return null;
+    const base = `/api/tiktok/thumbnail/${encodeURIComponent(event.externalId)}`;
+    // Cache-buster: version the stable proxy URL by the latest poll timestamp. A
+    // re-poll (Refresh-Now or a scheduled tick) writes a new snapshot → new
+    // polledAt → new URL → the browser refetches the fresh cover; between polls it
+    // serves from the 1h cache. The proxy ignores the query param.
+    const polledAt = event.tiktokEnrichment.stats?.polledAt;
+    return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
   }
   return null;
 }

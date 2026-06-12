@@ -149,10 +149,13 @@ export function buildDayGroups(
  *     sources/telegram/server/feed-enrichment.ts). Phase 10 D-09: this was the
  *     bug — the old branch read empty `event.metadata` and the type didn't even
  *     carry telegramEnrichment, so every Telegram marker rendered blank.
- *   - TikTok → `tiktokEnrichment.thumbnailUrl` (set by Plan 04/05's
- *     feed-enrichment). Forward-compat: the field is in the type now so the
- *     marker lights up the moment TikTok enrichment ships — D-09 "TikTok
- *     markers for free", parallel to the kind-display feedFilterable wiring.
+ *   - TikTok → the same-origin proxy `/api/tiktok/thumbnail/{externalId}` (NOT
+ *     the raw `tiktokEnrichment.thumbnailUrl`). 10-SPIKE.md Q3 RESOLVED at Plan 05
+ *     UAT: the TikTok CDN cover is hotlink-BLOCKED in a real browser
+ *     (net::ERR_BLOCKED_BY_ORB), so the chart marker — like the card — must route
+ *     through the proxy or every TikTok marker renders blank. Versioned by the
+ *     latest poll timestamp (?v=) when present, exactly like the card's
+ *     deriveThumbnailUrl, so a re-poll busts the marker's cached cover too.
  *   - everything else → null (the marker falls back to a kind-colored
  *     placeholder symbol).
  */
@@ -163,7 +166,10 @@ type ThumbnailEvent = {
   redditEnrichment?: { linkUrl?: string | null } | null;
   instagramEnrichment?: { thumbnailUrl?: string | null } | null;
   telegramEnrichment?: { thumbnailUrl?: string | null } | null;
-  tiktokEnrichment?: { thumbnailUrl?: string | null } | null;
+  tiktokEnrichment?: {
+    thumbnailUrl?: string | null;
+    stats?: { polledAt?: Date | string } | null;
+  } | null;
 };
 
 export function eventThumbnail(event: ThumbnailEvent): string | null {
@@ -191,7 +197,14 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
     return event.telegramEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "tiktok_post") {
-    return event.tiktokEnrichment?.thumbnailUrl ?? null;
+    // 10-SPIKE.md Q3 RESOLVED (Plan 05 UAT): the TikTok CDN cover is hotlink-
+    // BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB), so route the marker
+    // through the same-origin proxy keyed by the aweme id — the SAME path the
+    // FeedCard's deriveThumbnailUrl uses — or every TikTok marker renders blank.
+    if (event.tiktokEnrichment?.thumbnailUrl == null || !event.externalId) return null;
+    const base = `/api/tiktok/thumbnail/${encodeURIComponent(event.externalId)}`;
+    const polledAt = event.tiktokEnrichment.stats?.polledAt;
+    return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
   }
   return null;
 }

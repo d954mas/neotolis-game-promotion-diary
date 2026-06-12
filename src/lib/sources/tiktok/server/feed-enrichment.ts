@@ -18,13 +18,15 @@
 //      event's metadata.operator_paused so the PollingBadge renders the paused
 //      variant. No per-event denormalization.
 //
-// THUMBNAIL (10-SPIKE.md Q3 — OWED to Plan 04/05): the spike left Q3 docs-only
-// (hotlink-vs-CORP NOT browser-tested; covers are on tiktokcdn-us.com, signed +
-// expiring, .awebp preferred over .heic). Per the plan's Q3 default (10-SPIKE.md
-// unconfirmed → NO proxy), thumbnailUrl is the RAW CDN cover URL the normalizer
-// already preferred (dynamic_cover .awebp). The card hotlinks it with onerror
-// fallback (D-07/8-D-08); if Plan 05 UAT finds the cover CORP-blocked in a real
-// <img>, a same-origin proxy is added then (mirroring IG's thumbnail-proxy).
+// THUMBNAIL (10-SPIKE.md Q3 — RESOLVED at Plan 05 UAT): the TikTok cover on
+// tiktokcdn-us.com (signed + expiring, .awebp preferred over .heic) is hotlink-
+// BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB; server-side fetch of the
+// same URL returns 200), so a same-origin proxy was added (mirroring IG's #69).
+// This reader still hangs the RAW CDN cover URL on thumbnailUrl — the proxy
+// rewrite happens at the card/chart seam (deriveThumbnailUrl / eventThumbnail),
+// keyed by the aweme id, EXACTLY like IG: the enrichment carries the raw URL (so
+// presence/absence drives the "has a cover?" branch), the surface rewrites it to
+// /api/tiktok/thumbnail/<awemeId>.
 //
 // Metrics-by-presence (D-05): a NULL snapshot column stays NULL on the dto (a
 // photo-mode post has no views → null, NOT 0). The shareCount is also independently
@@ -56,11 +58,13 @@ export interface TikTokEnrichment {
     shareCount: number | null;
     polledAt: Date;
   } | null;
-  /** The fresh TikTok CDN thumbnail URL (D-08 hotlink — signed + expiring) from
+  /** The fresh TikTok CDN thumbnail URL (signed + expiring) from
    *  tiktok_posts.thumbnail_url (the normalizer prefers dynamic_cover .awebp). The
-   *  RAW CDN URL: the spike left Q3 (hotlink-vs-CORP) docs-only, so the plan
-   *  defaults to hotlink + onerror; a proxy is added in Plan 05 only if UAT finds
-   *  it CORP-blocked. NULL until the post is resolved. */
+   *  RAW CDN URL — 10-SPIKE.md Q3 RESOLVED at Plan 05 UAT: the cover is hotlink-
+   *  BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB), so the card/chart seam
+   *  rewrites this to the same-origin proxy /api/tiktok/thumbnail/<awemeId>
+   *  (keyed by the aweme id, mirroring IG's #69). NULL until the post is
+   *  resolved. */
   thumbnailUrl: string | null;
   /** Content form from tiktok_posts.media_type ("video" | "carousel", D-03).
    *  Drives the per-form card affordance. NULL until resolved. */
