@@ -564,7 +564,10 @@
           {:else}
             <KindIcon kind={event.kind} size={48} />
           {/if}
-          {#if thumbnailUrl && detailMediaOverlay}
+          <!-- The detail media slot ALWAYS reserves space (facade/placeholder),
+               so the type pill renders even without a thumbnail — unlike feed
+               cards, where a thumb-less card has no media area (UAT 2026-06-12). -->
+          {#if detailMediaOverlay}
             <MediaTypePill pill={detailMediaOverlay} />
           {/if}
           <span class="detail-thumb-play" aria-hidden="true">
@@ -591,7 +594,7 @@
           {:else}
             <KindIcon kind={event.kind} size={48} />
           {/if}
-          {#if thumbnailUrl && detailMediaOverlay}
+          {#if detailMediaOverlay}
             <MediaTypePill pill={detailMediaOverlay} />
           {/if}
         </div>
