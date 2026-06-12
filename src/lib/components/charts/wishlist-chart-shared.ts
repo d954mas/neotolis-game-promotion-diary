@@ -140,9 +140,11 @@ export function buildDayGroups(
  *     externalId IS the video id, part of the canonical URL).
  *   - Reddit → the enrichment `linkUrl` when it's image-like, else the
  *     `metadata.media.url` snapshot (same chain the RedditFeedCard renders).
- *   - Twitter → `metadata.media.url` (no enrichment object; the same chain
- *     derive-card-data.ts serves on the card). The D-09 refactor dropped this
- *     branch — restoring it keeps the chart marker in sync with the card.
+ *   - Twitter → `twitterEnrichment.thumbnailUrl` (the raw pbs.twimg.com cover set
+ *     by sources/twitter/server/feed-enrichment.ts). Hotlinked directly — NO proxy
+ *     (11-SPIKE.md Q6 / Plan 11-03: pbs.twimg.com is historically permissive, unlike
+ *     TikTok's ORB-blocked CDN). Reads the enrichment object (the SAME source the feed
+ *     card uses), NOT `event.metadata` — Phase 11 D-09 parity with Telegram/IG/TikTok.
  *   - Instagram → `instagramEnrichment.thumbnailUrl` (set by
  *     sources/instagram/server/feed-enrichment.ts).
  *   - Telegram → `telegramEnrichment.thumbnailUrl` (set by
@@ -170,6 +172,10 @@ type ThumbnailEvent = {
     thumbnailUrl?: string | null;
     stats?: { polledAt?: Date | string } | null;
   } | null;
+  twitterEnrichment?: {
+    thumbnailUrl?: string | null;
+    stats?: { polledAt?: Date | string } | null;
+  } | null;
 };
 
 export function eventThumbnail(event: ThumbnailEvent): string | null {
@@ -183,12 +189,12 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
     return readMediaUrlFromMetadata(event.metadata);
   }
   if (event.kind === "twitter_post") {
-    // Twitter has no enrichment object — its thumbnail lives on metadata.media.url
-    // (the same chain derive-card-data.ts serves on the feed card). The D-09
-    // refactor dropped this branch; restoring it keeps the chart marker in sync
-    // with the card. (telegram stays enrichment-only per D-09 — its metadata is
-    // intentionally NOT read here.)
-    return readMediaUrlFromMetadata(event.metadata);
+    // Twitter HOTLINKS the raw pbs.twimg.com cover (11-SPIKE.md Q6 / Plan 11-03 —
+    // pbs.twimg.com is historically permissive, NO proxy unlike TikTok's ORB-blocked
+    // CDN). Read the enrichment object (the SAME source the feed card reads), NOT
+    // event.metadata — Phase 11 D-09 parity: every social marker resolves through the
+    // enrichment seam so it stays in sync with the card.
+    return event.twitterEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "instagram_post") {
     return event.instagramEnrichment?.thumbnailUrl ?? null;

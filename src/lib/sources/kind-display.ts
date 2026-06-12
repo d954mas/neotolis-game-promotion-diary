@@ -122,10 +122,10 @@ export const EVENT_KIND_DISPLAY = {
   },
   twitter_post: {
     label: () => m.event_kind_label_twitter_post(),
-    pollable: false,
-    chartable: false,
-    manualCreatable: false,
-    feedFilterable: false,
+    pollable: true,
+    chartable: true,
+    manualCreatable: true,
+    feedFilterable: true,
   },
   telegram_post: {
     label: () => m.event_kind_label_telegram_post(),
@@ -192,7 +192,10 @@ export const EVENT_KIND_DISPLAY = {
 //   - telegram_channel: active listing "0 */6 * * *" (every 6h) + warm lane
 //                        "0 * * * *" (hourly, 12h staleness gate → view counts
 //                        refresh ~twice/day).
-//   - twitter / discord: no adapter, no auto-import cron yet → neutral string.
+//   - twitter_account : active poll "0 6 * * *" (daily) + warm per-post lane
+//                        "0 * * * *" (hourly, >26h staleness gate → ~1 paid
+//                        stats refresh/day per recent tweet) — mirrors IG/TikTok.
+//   - discord         : no adapter, no auto-import cron yet → neutral string.
 export const SOURCE_KIND_DISPLAY = {
   youtube_channel: {
     label: () => m.source_kind_label_youtube_channel(),
@@ -221,8 +224,8 @@ export const SOURCE_KIND_DISPLAY = {
   },
   twitter_account: {
     label: () => m.source_kind_label_twitter_account(),
-    platformGroup: { key: "twitter", label: "Twitter", order: 3 },
-    cadence: () => m.source_cadence_default(),
+    platformGroup: { key: "twitter", label: "Twitter / X", order: 7 },
+    cadence: () => m.source_cadence_twitter(),
   },
   telegram_channel: {
     label: () => m.source_kind_label_telegram_channel(),
@@ -282,6 +285,7 @@ export const FEED_KIND_FILTER_KINDS = [
   "instagram_post",
   "telegram_post",
   "tiktok_post",
+  "twitter_post",
   "press",
   "post",
   "conference",
@@ -302,15 +306,17 @@ export const FEED_KIND_FILTER_KINDS = [
  *  instagram_post sits right after reddit_post (Phase 08 — Instagram joins the
  *  paste-flow kinds); telegram_post sits right after instagram_post (Phase 09 —
  *  Telegram joins the paste-flow kinds); tiktok_post sits right after
- *  telegram_post (Phase 10 — TikTok joins the paste-flow kinds). twitter_post /
- *  discord_drop remain excluded (manualCreatable:false) — no adapter, no paste
- *  flow, filtered from /feed. */
+ *  telegram_post (Phase 10 — TikTok joins the paste-flow kinds); twitter_post
+ *  sits right after tiktok_post (Phase 11 — Twitter/X joins the paste-flow
+ *  kinds, paid twitterapi.io). discord_drop remains excluded
+ *  (manualCreatable:false) — no adapter, no paste flow, filtered from /feed. */
 export const MANUAL_EVENT_KINDS = [
   "youtube_video",
   "reddit_post",
   "instagram_post",
   "telegram_post",
   "tiktok_post",
+  "twitter_post",
   "press",
   "post",
   "conference",
