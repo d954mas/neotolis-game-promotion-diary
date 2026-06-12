@@ -142,14 +142,18 @@ describe("kind-display config — per-platform auto-import cadence labels", () =
 
   it("cadence strings state the REAL per-platform cadence, not a global 'every 6 hours'", () => {
     // The whole point of this change: the copy is per-platform, not a stale
-    // global constant. IG/TikTok poll DAILY + an hourly warm stats lane;
+    // global constant. IG/TikTok poll DAILY; their warm lane WAKES hourly but
+    // the 26h staleness gate (#70) means each recent post is paid-refreshed
+    // ~once a day — the label states the per-post rate, never "hourly".
     // YouTube/Telegram poll every 6h. Assert the load-bearing distinctions so a
     // regression to a single hardcoded string fails here.
     expect(sourceCadenceLabel("youtube_channel")).toContain("6 hours");
     expect(sourceCadenceLabel("instagram_account").toLowerCase()).toContain("daily");
-    expect(sourceCadenceLabel("instagram_account").toLowerCase()).toContain("hourly");
+    expect(sourceCadenceLabel("instagram_account").toLowerCase()).toContain("once a day");
+    expect(sourceCadenceLabel("instagram_account").toLowerCase()).not.toContain("hourly");
     expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("daily");
-    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("hourly");
+    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("once a day");
+    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).not.toContain("hourly");
     // The two paid daily-pollers must NOT inherit the YouTube 6h cadence.
     expect(sourceCadenceLabel("instagram_account")).not.toContain("6 hours");
     expect(sourceCadenceLabel("tiktok_account")).not.toContain("6 hours");
