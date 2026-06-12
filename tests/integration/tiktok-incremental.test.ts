@@ -55,7 +55,8 @@ const ACCOUNT = "acct-incr-tk";
 function post(id: string, daysAgo: number) {
   return {
     id,
-    kind: "video" as const,
+    // Every TikTok video → "short" (user re-decided 2026-06-12).
+    kind: "short" as const,
     publishedAt: new Date(Date.now() - daysAgo * 86_400_000),
     metrics: { views: 50, likes: 5, comments: 1, shares: 3 },
     caption: id,

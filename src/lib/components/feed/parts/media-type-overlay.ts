@@ -94,9 +94,11 @@ export interface MediaTypeOverlayEvent {
  *     null). The telegram_posts table speaks photo/video/album (D-06); the pill
  *     vocabulary speaks short/carousel/video, so the translation lives here in
  *     the single kind→pill home, not in the card.
- *   - tiktok_post    → the post's media_type (CONTEXT D-03 / RESEARCH Q2 use the
- *     {video, carousel} vocabulary, NOT "short"): video → "Video", carousel
- *     (photo-mode slideshow) → "Carousel"; anything else / missing → null.
+ *   - tiktok_post    → the post's media_type: short → "Short" (every TikTok
+ *     video is a short-form clip), carousel (photo-mode slideshow) →
+ *     "Carousel"; anything else / missing → null. (Supersedes the original
+ *     CONTEXT D-03 {video, carousel} vocabulary — user re-decided 2026-06-12
+ *     during UAT that TikTok videos are Shorts.)
  *   - any other kind → null (no pill).
  * Pure; the caller renders <MediaTypePill> only when this is non-null (and a
  * thumbnail image is actually shown).
@@ -114,11 +116,12 @@ export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPil
   }
   if (event.kind === "tiktok_post") {
     const mediaType = event.tiktokEnrichment?.mediaType ?? "";
-    // The tiktok_posts table speaks {video, carousel} (D-03); the pill vocabulary
+    // The tiktok_posts table now speaks {short, carousel} (every TikTok video is
+    // a short-form clip → "short"; photo-mode → "carousel"). The pill vocabulary
     // already carries both terms, so no translation is needed (carousel → the
-    // shared "Carousel" pill, video → "Video").
+    // shared "Carousel" pill, short → the shared "Short" pill).
     if (mediaType === "carousel") return mediaTypeOverlay("carousel");
-    if (mediaType === "video") return mediaTypeOverlay("video");
+    if (mediaType === "short") return mediaTypeOverlay("short");
     return null;
   }
   return null;

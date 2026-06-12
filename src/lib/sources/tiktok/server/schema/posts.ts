@@ -45,9 +45,11 @@ export const tiktokPosts = pgTable(
     // Nullable until the account resolves. Intrinsic identifier (the account
     // key), not a renameable display name — safe to carry.
     accountId: text("account_id"),
-    // The content form: "video" | "carousel" (photo-mode). One-kind-per-platform
-    // (D-06): events.kind stays the platform-level 'tiktok_post' for both forms,
-    // the form lives here.
+    // The content form: "short" | "carousel" (every TikTok video is a
+    // short-form clip → "short"; photo-mode → "carousel"). Supersedes the
+    // original D-03 {video, carousel} vocabulary (user re-decided 2026-06-12).
+    // One-kind-per-platform (D-06): events.kind stays the platform-level
+    // 'tiktok_post' for both forms; the per-post form lives here.
     mediaType: text("media_type"),
     caption: text("caption"),
     permalink: text("permalink"),

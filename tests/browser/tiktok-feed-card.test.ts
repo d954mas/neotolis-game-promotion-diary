@@ -7,7 +7,8 @@
  *     (metrics-by-presence D-05 — never a 0-or-dash).
  *   - Metrics-by-presence: a photo-mode (carousel) post with null viewCount
  *     renders NO views chip.
- *   - The media-type overlay: video → "Video", carousel → "Carousel".
+ *   - The media-type overlay: short → "Short", carousel → "Carousel" (every
+ *     TikTok video is a short-form clip → "short"; user re-decided 2026-06-12).
  *   - The 4:5 center-crop: the [data-kind="tiktok_post"] .card-thumb carries the
  *     4/5 aspect-ratio override (the native 9:16 cover is cover-cropped to 4:5).
  *   - onerror fallback (D-07): a failing hotlinked cover swaps to the
@@ -92,7 +93,7 @@ afterEach(() => {
 });
 
 describe("TikTokFeedCard (Phase 10 Plan 05 — PLAT-02)", () => {
-  it("a video post renders views + likes + comments + the SHARES chip (PLAT-02 delta)", () => {
+  it("a short post renders views + likes + comments + the SHARES chip (PLAT-02 delta)", () => {
     const { card, component } = mountCard(
       makeEvent({
         stats: {
@@ -103,7 +104,7 @@ describe("TikTokFeedCard (Phase 10 Plan 05 — PLAT-02)", () => {
           polledAt: new Date(),
         },
         thumbnailUrl: "https://p16.tiktokcdn-us.com/cover.awebp",
-        mediaType: "video",
+        mediaType: "short",
       }),
     );
     const nums = Array.from(card.querySelectorAll(".card-stats .num")).map((n) =>
@@ -118,7 +119,7 @@ describe("TikTokFeedCard (Phase 10 Plan 05 — PLAT-02)", () => {
     expect(nums).toContain("5.0K");
     // The shares chip is explicitly tagged so the assertion is unambiguous.
     const sharesChip = card.querySelector('.card-stats .stat[data-metric="shares"]');
-    expect(sharesChip, "the shares chip must be present on a video card").not.toBeNull();
+    expect(sharesChip, "the shares chip must be present on a short card").not.toBeNull();
     expect(sharesChip!.querySelector(".num")?.textContent?.trim()).toBe("5.0K");
     unmount(component);
   });
@@ -149,9 +150,9 @@ describe("TikTokFeedCard (Phase 10 Plan 05 — PLAT-02)", () => {
     unmount(component);
   });
 
-  it("media-type overlay: video → Video, carousel → Carousel", () => {
+  it("media-type overlay: short → Short, carousel → Carousel", () => {
     for (const { mediaType, label } of [
-      { mediaType: "video", label: "Video" },
+      { mediaType: "short", label: "Short" },
       { mediaType: "carousel", label: "Carousel" },
     ]) {
       const { card, component } = mountCard(
@@ -186,7 +187,7 @@ describe("TikTokFeedCard (Phase 10 Plan 05 — PLAT-02)", () => {
           polledAt: new Date(),
         },
         thumbnailUrl: "https://p16.tiktokcdn-us.com/cover.awebp",
-        mediaType: "video",
+        mediaType: "short",
       }),
     );
     // The card article carries data-kind so the scoped :global override applies.
@@ -212,7 +213,7 @@ describe("TikTokFeedCard (Phase 10 Plan 05 — PLAT-02)", () => {
         },
         // An expired/invalid signed CDN URL → fires <img> onerror.
         thumbnailUrl: "https://p16.tiktokcdn-us.com/EXPIRED-DOES-NOT-EXIST.awebp",
-        mediaType: "video",
+        mediaType: "short",
       }),
     );
     const img = card.querySelector(".card-thumb img") as HTMLImageElement | null;

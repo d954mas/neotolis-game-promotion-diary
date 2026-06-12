@@ -49,18 +49,20 @@ describe("tiktok live-provider normalizer validation (10-SPIKE.md photo-mode deb
       expect(page.posts.length).toBeGreaterThan(0);
 
       // Every mapped post has an id, a publishedAt, and a kind in the TikTok
-      // vocabulary {video, carousel}.
+      // vocabulary {short, carousel} (every TikTok video → "short", user
+      // re-decided 2026-06-12; photo-mode → "carousel").
       for (const p of page.posts) {
         expect(typeof p.id).toBe("string");
         expect(p.publishedAt instanceof Date).toBe(true);
-        expect(["video", "carousel"]).toContain(p.kind);
+        expect(["short", "carousel"]).toContain(p.kind);
       }
 
-      // At least one VIDEO carries a non-null share count (PLAT-02 — the metric IG
-      // never had — survives the round-trip from the real body).
-      const videos = page.posts.filter((p) => p.kind === "video");
-      expect(videos.length).toBeGreaterThan(0);
-      expect(videos.some((p) => p.metrics.shares !== null)).toBe(true);
+      // At least one SHORT (TikTok video) carries a non-null share count
+      // (PLAT-02 — the metric IG never had — survives the round-trip from the
+      // real body).
+      const shorts = page.posts.filter((p) => p.kind === "short");
+      expect(shorts.length).toBeGreaterThan(0);
+      expect(shorts.some((p) => p.metrics.shares !== null)).toBe(true);
 
       // IF a photo-mode (carousel) item surfaced, assert the docs-only branch: the
       // image_post_info presence discriminator → kind="carousel" with views

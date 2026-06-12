@@ -203,13 +203,14 @@ describe("tiktok account subject entity (CHECKLIST §1a)", () => {
 });
 
 describe("tiktok snapshot writer (PLAT-02 share_count)", () => {
-  it("[10-04] writeSnapshot UPSERTs tiktok_posts and INSERTs a snapshot WITH share_count for a video", async () => {
+  it("[10-04] writeSnapshot UPSERTs tiktok_posts and INSERTs a snapshot WITH share_count for a short", async () => {
     const awemeId = `aweme_${uniq()}`;
     const accountId = `acct_${uniq()}`;
     await writeSnapshot({
       awemeId,
       accountId,
-      mediaType: "video",
+      // Every TikTok video → "short" media_type (user re-decided 2026-06-12).
+      mediaType: "short",
       caption: "a tiktok video",
       permalink: `https://www.tiktok.com/@h/video/${awemeId}`,
       thumbnailUrl: "https://cdn.tiktokcdn-us.com/cover.awebp",
@@ -221,7 +222,7 @@ describe("tiktok snapshot writer (PLAT-02 share_count)", () => {
     const [post] = await db.select().from(tiktokPosts).where(eq(tiktokPosts.awemeId, awemeId));
     expect(post).toBeDefined();
     expect(post!.accountId).toBe(accountId);
-    expect(post!.mediaType).toBe("video");
+    expect(post!.mediaType).toBe("short");
     expect(post!.thumbnailUrl).toBe("https://cdn.tiktokcdn-us.com/cover.awebp");
     expect(post!.lastPollStatus).toBe("ok");
 
@@ -260,7 +261,7 @@ describe("tiktok snapshot writer (PLAT-02 share_count)", () => {
     const awemeId = `aweme_${uniq()}`;
     await writeSnapshot({
       awemeId,
-      mediaType: "video",
+      mediaType: "short",
       thumbnailUrl: "https://cdn/good-cover.awebp",
       metrics: { views: 1, likes: 1, comments: 1, shares: 1 },
       status: "ok",

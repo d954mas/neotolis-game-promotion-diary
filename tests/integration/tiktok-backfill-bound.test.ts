@@ -50,7 +50,8 @@ let originalMaxPosts: number;
 function post(id: string, daysAgo: number) {
   return {
     id,
-    kind: "video" as const,
+    // Every TikTok video → "short" (user re-decided 2026-06-12).
+    kind: "short" as const,
     publishedAt: new Date(Date.now() - daysAgo * 86_400_000),
     metrics: { views: 1, likes: 1, comments: 1, shares: 1 },
     caption: id,

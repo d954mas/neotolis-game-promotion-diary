@@ -81,7 +81,8 @@ async function readContinuationOutbox() {
 function post(id: string, daysAgo: number, shares: number | null = 100) {
   return {
     id,
-    kind: "video" as const,
+    // Every TikTok video → "short" (user re-decided 2026-06-12).
+    kind: "short" as const,
     publishedAt: new Date(Date.now() - daysAgo * 86_400_000),
     metrics: { views: 1000, likes: 10, comments: 2, shares },
     caption: `caption ${id}`,

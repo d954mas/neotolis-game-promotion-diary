@@ -66,8 +66,10 @@ export interface TikTokEnrichment {
    *  (keyed by the aweme id, mirroring IG's #69). NULL until the post is
    *  resolved. */
   thumbnailUrl: string | null;
-  /** Content form from tiktok_posts.media_type ("video" | "carousel", D-03).
-   *  Drives the per-form card affordance. NULL until resolved. */
+  /** Content form from tiktok_posts.media_type ("short" | "carousel"; every
+   *  TikTok video is a short-form clip → "short", photo-mode → "carousel").
+   *  Supersedes the original D-03 {video, carousel} vocabulary (user re-decided
+   *  2026-06-12). Drives the per-form card affordance. NULL until resolved. */
   mediaType: string | null;
 }
 

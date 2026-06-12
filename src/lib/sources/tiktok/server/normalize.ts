@@ -114,11 +114,16 @@ export function buildTikTokTitle(caption: string | null, kind: string, published
 
 /** Photo-mode discriminator → cross-platform content kind. A post is "carousel"
  *  when aweme_type === 150 OR image_post_info is present (10-SPIKE.md finding
- *  (b)); otherwise "video". Per CONTEXT D-03 the media vocabulary for TikTok is
- *  {video, carousel} — we do NOT introduce "short". */
+ *  (b)); otherwise "short". Every TikTok video IS a short-form vertical clip, so
+ *  it maps to the cross-platform "short" form (the unified IG-Reels /
+ *  YT-Shorts / TikTok term) — this drives the cross-source MEDIA-TYPE feed
+ *  filter (Short / Video / Other), which classifies "short" under the Short
+ *  category. (Supersedes the original CONTEXT D-03 {video, carousel} vocabulary;
+ *  the user re-decided 2026-06-12 during UAT that TikTok videos are Shorts, not
+ *  long-form Video.) */
 function awemeKind(aweme: Aweme): NormalizedPost["kind"] {
   const isPhotoMode = aweme.aweme_type === 150 || aweme.image_post_info != null;
-  return isPhotoMode ? "carousel" : "video";
+  return isPhotoMode ? "carousel" : "short";
 }
 
 /** Prefer dynamic_cover (.awebp) over cover (.heic) — 10-SPIKE.md finding (e). */

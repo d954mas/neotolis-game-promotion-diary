@@ -36,7 +36,9 @@ export interface WriteSnapshotArgs {
   awemeId: string;
   /** Stable TikTok user id (the channel key). Nullable until resolveAccount runs. */
   accountId?: string | null;
-  /** NormalizedPost.kind — "video" | "carousel" (D-03 TikTok media vocabulary). */
+  /** NormalizedPost.kind — "short" | "carousel" (every TikTok video is a
+   *  short-form clip → "short"; photo-mode → "carousel"). Supersedes the
+   *  original D-03 {video, carousel} vocabulary (user re-decided 2026-06-12). */
   mediaType?: string | null;
   caption?: string | null;
   permalink?: string | null;

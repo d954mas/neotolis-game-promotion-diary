@@ -91,7 +91,7 @@
 
   const stats = $derived(event.tiktokEnrichment?.stats ?? null);
 
-  // Media-type pill (video / carousel). The kind→pill decision lives in ONE
+  // Media-type pill (short / carousel). The kind→pill decision lives in ONE
   // shared place (deriveMediaTypeOverlay) used by the feed cards AND the event
   // detail. BaseFeedCard renders the icon+text pill over the thumbnail image
   // only — gated on a present <img> — so the empty placeholder stays clean.

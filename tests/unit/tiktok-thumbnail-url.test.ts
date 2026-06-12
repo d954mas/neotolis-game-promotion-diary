@@ -35,7 +35,7 @@ describe("deriveThumbnailUrl — tiktok proxy + cache-buster (Q3 RESOLVED)", () 
       tiktokEnrichment: {
         stats: { viewCount: 1200, likeCount: 3, commentCount: 0, shareCount: 9, polledAt },
         thumbnailUrl: "https://p16.tiktokcdn-us.com/cover.awebp",
-        mediaType: "video",
+        mediaType: "short",
       },
     });
     expect(url).toBe(`/api/tiktok/thumbnail/7649569886871522573?v=${polledAt.getTime()}`);
@@ -68,7 +68,7 @@ describe("deriveThumbnailUrl — tiktok proxy + cache-buster (Q3 RESOLVED)", () 
       tiktokEnrichment: {
         stats: null,
         thumbnailUrl: "https://p16.tiktokcdn-us.com/cover.awebp",
-        mediaType: "video",
+        mediaType: "short",
       },
     });
     expect(url).toBeNull();

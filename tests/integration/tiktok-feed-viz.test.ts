@@ -75,18 +75,19 @@ const { tiktokEnrichFeedDtos } =
 
 const ACCOUNT = "tk-vizacct";
 
-function post(id: string, daysAgo: number, kind: "video" | "carousel" = "video"): NormalizedPost {
+function post(id: string, daysAgo: number, kind: "short" | "carousel" = "short"): NormalizedPost {
   return {
     id,
     kind,
     publishedAt: new Date(Date.now() - daysAgo * 86_400_000),
     metrics: {
-      // A video carries all four metrics including SHARES (the PLAT-02 delta); a
+      // A short (every TikTok video → "short", user re-decided 2026-06-12)
+      // carries all four metrics including SHARES (the PLAT-02 delta); a
       // photo-mode (carousel) post nulls views per metrics-by-presence.
-      views: kind === "video" ? 1_200_000 : null,
+      views: kind === "short" ? 1_200_000 : null,
       likes: 48_000,
       comments: 312,
-      shares: kind === "video" ? 4974 : null,
+      shares: kind === "short" ? 4974 : null,
     },
     caption: `viz caption ${id}`,
     thumbnailUrl: `https://p16.tiktokcdn-us.com/${id}.awebp`,
@@ -173,7 +174,7 @@ describe("tiktok feed inbox + metric series (VIZ-05 + PLAT-02)", () => {
     await seedSource(user.id, true);
 
     provider.pages = [
-      { posts: [post("viz2", 2, "video")], nextCursor: null, endOfFeed: true, creditsUsed: 1 },
+      { posts: [post("viz2", 2, "short")], nextCursor: null, endOfFeed: true, creditsUsed: 1 },
     ];
     await runBackfill(user.id);
 

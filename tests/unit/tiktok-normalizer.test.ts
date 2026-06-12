@@ -73,7 +73,9 @@ describe("tiktok normalizer (PLAT-02)", () => {
     const post = normalizeAweme(VIDEO_AWEME);
     expect(post).toEqual({
       id: "7649569886871522573",
-      kind: "video",
+      // Every TikTok video maps to the cross-platform "short" form (user
+      // re-decided 2026-06-12; supersedes the original D-03 {video} mapping).
+      kind: "short",
       publishedAt: new Date(1781054302 * 1000),
       metrics: { views: 1_200_000, likes: 80_000, comments: 3_400, shares: 4974 },
       caption: "#teabythesea They said my name episode",
@@ -87,7 +89,8 @@ describe("tiktok normalizer (PLAT-02)", () => {
     const single = normalizeSingleVideo(VIDEO_AWEME);
     expect(single.id).toBe("7649569886871522573");
     expect(single.shortcode).toBe("7649569886871522573");
-    expect(single.kind).toBe("video");
+    // Every TikTok video → "short" (user re-decided 2026-06-12).
+    expect(single.kind).toBe("short");
     expect(single.metrics.shares).toBe(4974);
     expect(single.ownerId).toBe("6659752019493208069");
     expect(single.ownerUsername).toBe("stoolpresidente");
@@ -114,8 +117,9 @@ describe("tiktok normalizer (PLAT-02)", () => {
     expect(post.metrics).toEqual({ views: null, likes: null, comments: null, shares: null });
   });
 
-  it("[10-03] a post with no image_post_info AND aweme_type 0 is a video (carousel discriminator)", () => {
-    expect(normalizeAweme(VIDEO_AWEME).kind).toBe("video");
+  it("[10-03] a post with no image_post_info AND aweme_type 0 is a short (carousel discriminator)", () => {
+    // Non-photo-mode → "short" (every TikTok video is a short-form clip).
+    expect(normalizeAweme(VIDEO_AWEME).kind).toBe("short");
     // Presence of image_post_info alone (even without aweme_type 150) → carousel.
     expect(normalizeAweme({ ...VIDEO_AWEME, aweme_type: 0, image_post_info: {} }).kind).toBe(
       "carousel",

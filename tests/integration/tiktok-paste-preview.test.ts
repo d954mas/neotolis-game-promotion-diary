@@ -101,7 +101,8 @@ function singlePost(overrides: Partial<NormalizedSinglePost> = {}): NormalizedSi
   return {
     id: "7649569886871522573",
     shortcode: "7649569886871522573",
-    kind: "video",
+    // Every TikTok video → "short" (user re-decided 2026-06-12).
+    kind: "short",
     publishedAt: new Date("2026-06-01T12:00:00Z"),
     metrics: { views: 100000, likes: 5000, comments: 200, shares: 4974 },
     caption: "First line caption\nSecond line ignored",
@@ -149,7 +150,8 @@ describe("tiktok paste preview (single-video fetch, adapter seam)", () => {
       .where(eq(tiktokPosts.awemeId, "7649569886871522573"));
     expect(cached).toBeDefined();
     expect(cached!.accountId).toBe("6659752019493208069");
-    expect(cached!.mediaType).toBe("video");
+    // Every TikTok video → "short" media_type (user re-decided 2026-06-12).
+    expect(cached!.mediaType).toBe("short");
     expect(cached!.lastPollStatus).toBe("ok");
 
     const [snap] = await db
