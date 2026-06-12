@@ -96,20 +96,36 @@ export async function tiktokEnrichFeedDtos(
       externalIds.map((id) => sql`${id}`),
       sql`, `,
     );
-    const latestRows = await db.execute<{
-      aweme_id: string;
-      polled_at: Date;
-      view_count: number | null;
-      like_count: number | null;
-      comment_count: number | null;
-      share_count: number | null;
-    }>(sql`
-      SELECT DISTINCT ON (aweme_id)
-        aweme_id, polled_at, view_count, like_count, comment_count, share_count
-      FROM tiktok_post_snapshots
-      WHERE aweme_id IN (${idsSql})
-      ORDER BY aweme_id, polled_at DESC
-    `);
+    // Queries 1 + 2 are independent (both key on externalIds) — run them
+    // concurrently. Query 3 (operator-paused) depends on accountIds derived from
+    // query 2's rows, so it stays sequential after this pair.
+    const [latestRows, postRows] = await Promise.all([
+      db.execute<{
+        aweme_id: string;
+        polled_at: Date;
+        view_count: number | null;
+        like_count: number | null;
+        comment_count: number | null;
+        share_count: number | null;
+      }>(sql`
+        SELECT DISTINCT ON (aweme_id)
+          aweme_id, polled_at, view_count, like_count, comment_count, share_count
+        FROM tiktok_post_snapshots
+        WHERE aweme_id IN (${idsSql})
+        ORDER BY aweme_id, polled_at DESC
+      `),
+      // 2. Thumbnail + media_type + account_id from tiktok_posts (post-keyed
+      //    public-data). NO account display name read here (no-denorm rule).
+      db
+        .select({
+          awemeId: tiktokPosts.awemeId,
+          thumbnailUrl: tiktokPosts.thumbnailUrl,
+          mediaType: tiktokPosts.mediaType,
+          accountId: tiktokPosts.accountId,
+        })
+        .from(tiktokPosts)
+        .where(inArray(tiktokPosts.awemeId, externalIds)),
+    ]);
     const latest = new Map<string, TikTokEnrichment["stats"]>();
     for (const s of latestRows.rows) {
       // db.execute returns raw pg driver shapes — bigint columns come back as
@@ -127,17 +143,6 @@ export async function tiktokEnrichFeedDtos(
       });
     }
 
-    // 2. Thumbnail + media_type + account_id from tiktok_posts (post-keyed
-    //    public-data). NO account display name read here (no-denorm rule).
-    const postRows = await db
-      .select({
-        awemeId: tiktokPosts.awemeId,
-        thumbnailUrl: tiktokPosts.thumbnailUrl,
-        mediaType: tiktokPosts.mediaType,
-        accountId: tiktokPosts.accountId,
-      })
-      .from(tiktokPosts)
-      .where(inArray(tiktokPosts.awemeId, externalIds));
     const postMeta = new Map<
       string,
       { thumbnailUrl: string | null; mediaType: string | null; accountId: string | null }
