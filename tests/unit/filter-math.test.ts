@@ -123,11 +123,31 @@ describe("passes — kind axis", () => {
 
 describe("eventMediaCategory — cross-source media classification", () => {
   it("classifies kind-level kinds by their EVENT_KIND_MEDIA_CATEGORY default", () => {
-    expect(eventMediaCategory(ev({ kind: "youtube_video" }))).toBe("video");
     expect(eventMediaCategory(ev({ kind: "reddit_post" }))).toBe("other");
     expect(eventMediaCategory(ev({ kind: "telegram_post" }))).toBe("other");
     expect(eventMediaCategory(ev({ kind: "conference" }))).toBe("other");
     expect(eventMediaCategory(ev({ kind: "press" }))).toBe("other");
+  });
+
+  it("classifies youtube_video per-post: 'short' → short, else (video / NULL / missing) → video", () => {
+    // youtube has a DIFFERENT per-post default than IG/TikTok: a missing / NULL
+    // media_type → "video" (never "other"), because a YouTube video is a video
+    // at worst — Shorts detection heals NULLs lazily via the redirect probe.
+    expect(
+      eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: { mediaType: "short" } })),
+    ).toBe("short");
+    expect(
+      eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: { mediaType: "video" } })),
+    ).toBe("video");
+    // NULL media_type (not yet probed) → video, NOT other.
+    expect(
+      eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: { mediaType: null } })),
+    ).toBe("video");
+    // Missing enrichment entirely → video.
+    expect(eventMediaCategory(ev({ kind: "youtube_video" }))).toBe("video");
+    expect(eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: null }))).toBe(
+      "video",
+    );
   });
 
   it("classifies tiktok_post by its enrichment media kind (short / carousel→other)", () => {
@@ -192,13 +212,14 @@ describe("passes — media-type axis (Short / Video / Other)", () => {
     };
     const none = baseState();
     const sample: FilterableEvent[] = [
-      ev({ id: "a", kind: "youtube_video" }),
+      ev({ id: "a", kind: "youtube_video" }), // NULL media_type → video
       ev({ id: "b", kind: "reddit_post" }),
       ev({ id: "c", kind: "tiktok_post", tiktokEnrichment: { mediaType: "short" } }),
       ev({ id: "d", kind: "instagram_post", instagramEnrichment: { mediaType: "video" } }),
       ev({ id: "e", kind: "instagram_post", instagramEnrichment: { mediaType: "carousel" } }),
       ev({ id: "f", kind: "tiktok_post" }), // missing cache → other
       ev({ id: "g", kind: "telegram_post" }),
+      ev({ id: "h", kind: "youtube_video", youtubeEnrichment: { mediaType: "short" } }), // → short
     ];
     for (const e of sample) {
       expect(passes(e, all, TODAY), `${e.id} must pass when all 3 categories selected`).toBe(

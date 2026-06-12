@@ -11,7 +11,7 @@ import type { SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
 import { eventGames } from "../db/schema/event-games.js";
-import { instagramPosts, tiktokPosts } from "../db/schema/index.js";
+import { instagramPosts, tiktokPosts, youtubeVideos } from "../db/schema/index.js";
 import { env } from "../config/env.js";
 import { NotFoundError } from "./errors.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
@@ -99,18 +99,28 @@ function pushAxis<T>(
  *       press/other/post → other; none currently default to short). Per-post
  *       kinds (instagram_post / tiktok_post) are NEVER in this set — they need
  *       the cache-row subquery instead.
- *   (b) PER-POST — an EXISTS subquery against the platform cache table whose
- *       media_type maps to this category:
+ *   (b) PER-POST (instagram_post / tiktok_post) — an EXISTS subquery against the
+ *       platform cache table whose media_type maps to this category:
  *         short → media_type = 'short'
  *         video → media_type = 'video'
- *         other → media_type IN ('image','carousel','text')
+ *         other → media_type IN ('image','carousel','text') OR missing/NULL
  *       The join key is events.external_id → instagram_posts.post_id /
  *       tiktok_posts.aweme_id (the cache PKs — verified against
  *       feed-enrichment.ts).
- *   (c) OTHER also matches per-post events whose cache row is MISSING or whose
- *       media_type is NULL/unrecognized (a NOT EXISTS / NULL arm), so NO event
- *       silently vanishes from all three categories. This is what makes the
- *       three categories PARTITION the feed: selecting all three == no filter.
+ *   (b') PER-POST (youtube_video) — DIFFERENT default rule. youtube_videos
+ *       .media_type ('short' | 'video' | NULL) joins on
+ *       events.external_id → youtube_videos.video_id (the PK). A youtube_video
+ *       is ALWAYS a video at worst (never "other"):
+ *         short → EXISTS a cache row with media_type='short'
+ *         video → NOT EXISTS a 'short' cache row (i.e. media_type='video', NULL,
+ *                 or no row at all — Shorts detection lazily heals NULLs; an
+ *                 unclassified video must default to Video, never vanish)
+ *         other → youtube_video NEVER matches (it is never "other")
+ *   (c) OTHER also matches IG/TikTok per-post events whose cache row is MISSING
+ *       or whose media_type is NULL/unrecognized (a NOT EXISTS / NULL arm), so
+ *       NO event silently vanishes from all three categories. This is what makes
+ *       the three categories PARTITION the feed: selecting all three == no
+ *       filter (youtube_video partitions via its short/video arms above).
  *
  * Tenant scope: the EXISTS subqueries hit the PUBLIC-DATA cache tables
  * (instagram_posts / tiktok_posts — ESLint-allowlisted, no userId column),
@@ -153,13 +163,33 @@ function buildMediaTypeClause(categories: readonly MediaTypeCategory[] | undefin
       orParts.push(
         sql`(${events.kind} = 'tiktok_post' AND NOT EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} IN ('short', 'video')))` as SQL,
       );
-    } else {
-      // short | video — exact media_type match on the cache row.
+      // youtube_video is NEVER "other" — no arm. It always lands in short or
+      // video (the video arm catches NULL/unclassified rows), so the three
+      // categories still partition the feed.
+    } else if (category === "short") {
+      // short — exact media_type='short' on the cache row.
       orParts.push(
-        sql`(${events.kind} = 'instagram_post' AND EXISTS (SELECT 1 FROM ${instagramPosts} WHERE ${instagramPosts.postId} = ${events.externalId} AND ${instagramPosts.mediaType} = ${category}))` as SQL,
+        sql`(${events.kind} = 'instagram_post' AND EXISTS (SELECT 1 FROM ${instagramPosts} WHERE ${instagramPosts.postId} = ${events.externalId} AND ${instagramPosts.mediaType} = 'short'))` as SQL,
       );
       orParts.push(
-        sql`(${events.kind} = 'tiktok_post' AND EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} = ${category}))` as SQL,
+        sql`(${events.kind} = 'tiktok_post' AND EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} = 'short'))` as SQL,
+      );
+      orParts.push(
+        sql`(${events.kind} = 'youtube_video' AND EXISTS (SELECT 1 FROM ${youtubeVideos} WHERE ${youtubeVideos.videoId} = ${events.externalId} AND ${youtubeVideos.mediaType} = 'short'))` as SQL,
+      );
+    } else {
+      // video — exact media_type='video' for IG/TikTok; for youtube_video the
+      // default is video, so it's NOT EXISTS a 'short' cache row (covers
+      // media_type='video', NULL, AND no row — an unclassified video defaults to
+      // Video, never vanishing from all three categories).
+      orParts.push(
+        sql`(${events.kind} = 'instagram_post' AND EXISTS (SELECT 1 FROM ${instagramPosts} WHERE ${instagramPosts.postId} = ${events.externalId} AND ${instagramPosts.mediaType} = 'video'))` as SQL,
+      );
+      orParts.push(
+        sql`(${events.kind} = 'tiktok_post' AND EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} = 'video'))` as SQL,
+      );
+      orParts.push(
+        sql`(${events.kind} = 'youtube_video' AND NOT EXISTS (SELECT 1 FROM ${youtubeVideos} WHERE ${youtubeVideos.videoId} = ${events.externalId} AND ${youtubeVideos.mediaType} = 'short'))` as SQL,
       );
     }
 

@@ -80,13 +80,16 @@ export interface MediaTypeOverlayEvent {
   instagramEnrichment?: { mediaType?: string | null } | null;
   telegramEnrichment?: { mediaKind?: string | null } | null;
   tiktokEnrichment?: { mediaType?: string | null } | null;
+  youtubeEnrichment?: { mediaType?: string | null } | null;
 }
 
 /**
  * THE single kind→pill derivation, shared by the feed cards and the event
  * detail so the per-kind decision lives in one place (DRY):
- *   - youtube_video  → always the "Video" pill (a feed thumbnail can't tell a
- *     Short from a full video yet; Shorts detection is deferred).
+ *   - youtube_video  → the post's media_type (youtube_videos.media_type, carried
+ *     by youtubeEnrichment): 'short' → "Short" pill; 'video' / NULL / missing →
+ *     "Video" pill (a YouTube video is a video at worst — Shorts detection heals
+ *     NULLs lazily via the redirect probe, never demoting an unclassified video).
  *   - instagram_post → the post's media_type (short / video / carousel → pill;
  *     image / missing → null).
  *   - telegram_post  → the post's media_kind, translated to the shared pill
@@ -104,7 +107,12 @@ export interface MediaTypeOverlayEvent {
  * thumbnail image is actually shown).
  */
 export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPill | null {
-  if (event.kind === "youtube_video") return mediaTypeOverlay("video");
+  if (event.kind === "youtube_video") {
+    // 'short' → Short pill; 'video' / NULL / unclassified → Video pill.
+    return event.youtubeEnrichment?.mediaType === "short"
+      ? mediaTypeOverlay("short")
+      : mediaTypeOverlay("video");
+  }
   if (event.kind === "instagram_post") {
     return mediaTypeOverlay(event.instagramEnrichment?.mediaType ?? "");
   }

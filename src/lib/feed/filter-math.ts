@@ -53,6 +53,10 @@ export interface FilterableEvent {
   // the server's honest pagination).
   instagramEnrichment?: { mediaType?: string | null } | null;
   tiktokEnrichment?: { mediaType?: string | null } | null;
+  // YouTube per-post media kind from youtube_videos.media_type. Differs from
+  // IG/TikTok: a missing / NULL value → "video" (a YouTube video is a video at
+  // worst — Shorts detection heals NULLs lazily; never demoted to "other").
+  youtubeEnrichment?: { mediaType?: string | null } | null;
 }
 
 /**
@@ -68,7 +72,15 @@ export function eventMediaCategory(e: FilterableEvent): MediaTypeCategory {
   // Unknown kind (widened string) → other, matching the server default.
   if (classification === undefined) return "other";
   if (classification !== "per-post") return classification;
-  // Per-post kind — read the cache media kind off the matching enrichment.
+  // youtube_video has a DIFFERENT per-post default: 'short' → short, but a
+  // missing / NULL / unrecognized media_type → "video" (never "other"). Mirrors
+  // the server SQL youtube arm (short = EXISTS media_type='short'; video = the
+  // NOT-EXISTS-short complement). Lazily-classified NULLs default to Video.
+  if (e.kind === "youtube_video") {
+    return e.youtubeEnrichment?.mediaType === "short" ? "short" : "video";
+  }
+  // IG / TikTok per-post kind — read the cache media kind off the matching
+  // enrichment; missing / unrecognized → "other".
   const raw =
     e.kind === "instagram_post"
       ? e.instagramEnrichment?.mediaType

@@ -87,10 +87,16 @@ export function postMediaKindToCategory(kind: PostMediaKind): MediaTypeCategory 
  */
 export const EVENT_KIND_MEDIA_CATEGORY = {
   // Per-post kinds — media type lives on the platform cache row.
+  //   instagram_post / tiktok_post: cache row MISSING / NULL → "other".
+  //   youtube_video: cache row (youtube_videos.media_type) 'short' → short;
+  //     'video' OR NULL OR no row → "video" (NOT other — a YouTube video is a
+  //     video at worst; Shorts detection lazily heals NULLs, never demotes to
+  //     other). The server SQL + client filter-math special-case this NULL→video
+  //     default; the IG/TikTok NULL→other rule does NOT apply to youtube_video.
   instagram_post: "per-post",
   tiktok_post: "per-post",
+  youtube_video: "per-post",
   // Kind-level defaults.
-  youtube_video: "video", // YouTube Shorts detection is deferred (backlog).
   reddit_post: "other",
   telegram_post: "other",
   twitter_post: "other",

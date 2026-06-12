@@ -143,6 +143,15 @@ export interface CardEventLite {
     thumbnailUrl: string | null;
     mediaType: string | null;
   };
+  /** YouTube public-data decoration attached by
+   *  sources/youtube/server/feed-enrichment.ts. Carries the Shorts
+   *  classification (youtube_videos.media_type): 'short' drives the "Short"
+   *  media-type pill; 'video' / NULL / missing → "Video" (a YouTube video is a
+   *  video at worst — Shorts detection heals NULLs lazily). Stats + channelTitle
+   *  remain on the top-level dto fields (legacy youtube enrichment shape). */
+  youtubeEnrichment?: {
+    mediaType: string | null;
+  };
 }
 
 export interface CardSourceLite {

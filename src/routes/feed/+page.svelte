@@ -624,6 +624,10 @@
         .instagramEnrichment,
       tiktokEnrichment: (e as { tiktokEnrichment?: { mediaType?: string | null } | null })
         .tiktokEnrichment,
+      // youtube_video classifies per-post too (media_type 'short' → short, else
+      // video). NULL/missing → video (the filter-math youtube arm's default).
+      youtubeEnrichment: (e as { youtubeEnrichment?: { mediaType?: string | null } | null })
+        .youtubeEnrichment,
     })),
   );
 

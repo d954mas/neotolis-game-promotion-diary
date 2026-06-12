@@ -86,16 +86,12 @@
 
   const thumbnailUrl = $derived.by(() => deriveThumbnailUrl(event));
 
-  // Media-type pill. Every YouTube video shows the "Video" pill for now — the
-  // feed thumbnail alone doesn't tell a Short from a full video. The kind→pill
-  // decision lives in ONE shared place (deriveMediaTypeOverlay), used by the
-  // feed cards AND the event detail.
-  //
-  // TODO: Shorts detection (aspect/duration heuristic) → "short". When the
-  // poller starts capturing aspect ratio / duration on youtube_video
-  // snapshots, branch in deriveMediaTypeOverlay to map verticals to a "short"
-  // pill; the glyph catalog in media-type-overlay.ts already carries the
-  // short-form ("short") marker to reuse. No other file needs to change.
+  // Media-type pill. Shorts detection now classifies youtube_video into
+  // 'short' / 'video' (youtube_videos.media_type, carried by
+  // event.youtubeEnrichment): a Short shows the "Short" pill, a regular video
+  // (or a not-yet-classified NULL) shows "Video". The kind→pill decision lives
+  // in ONE shared place (deriveMediaTypeOverlay), used by the feed cards AND
+  // the event detail.
   const overlay = $derived.by(() => deriveMediaTypeOverlay(event));
 </script>
 

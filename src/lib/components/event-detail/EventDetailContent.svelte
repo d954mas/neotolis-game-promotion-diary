@@ -293,15 +293,20 @@
 
   // Media-type pill (short / carousel / video) over the detail thumbnail —
   // SAME shared pill the feed card uses (deriveMediaTypeOverlay + MediaTypePill),
-  // so the detail reads as a zoomed-in version of the clicked card. The IG
-  // media_type rides on instagramEnrichment, attached to the DTO by the loader's
-  // enrichFeedDtos (read via cast, exactly like redditEnrichment above); for
-  // youtube_video the derivation yields the "Video" pill. image / non-media
-  // kinds → null → no pill. Rendered only over a present thumbnail <img> so it
-  // sits on the picture, never on the empty KindIcon placeholder.
+  // so the detail reads as a zoomed-in version of the clicked card. The per-post
+  // media_type rides on the matching *Enrichment object, attached to the DTO by
+  // the loader's enrichFeedDtos (read via cast, exactly like redditEnrichment
+  // above); for youtube_video the youtubeEnrichment.media_type yields the
+  // "Short" pill ('short') or "Video" pill (else). image / non-media kinds →
+  // null → no pill. Rendered only over a present thumbnail <img> so it sits on
+  // the picture, never on the empty KindIcon placeholder.
   const detailMediaOverlay = $derived.by(() =>
     deriveMediaTypeOverlay(
-      event as { kind: string; instagramEnrichment?: { mediaType?: string | null } | null },
+      event as {
+        kind: string;
+        instagramEnrichment?: { mediaType?: string | null } | null;
+        youtubeEnrichment?: { mediaType?: string | null } | null;
+      },
     ),
   );
   // YouTube click-to-play facade — flips to embedded iframe on user

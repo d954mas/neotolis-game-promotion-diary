@@ -6,8 +6,9 @@
 //   1. PARTITION: every per-post media kind AND every EventKind classifies into
 //      EXACTLY ONE category. No kind is uncovered (would vanish from all three
 //      filters); no kind is double-counted.
-//   2. The kind-level defaults match the user-locked mapping (youtube_video →
-//      video; per-post kinds → "per-post"; everything else → other).
+//   2. The kind-level defaults match the user-locked mapping (per-post kinds
+//      instagram_post / tiktok_post / youtube_video → "per-post"; everything
+//      else → other).
 //   3. The derived helpers (PER_POST_MEDIA_KINDS, kindLevelKindsForCategory)
 //      never drift from the map.
 
@@ -78,11 +79,12 @@ describe("media-type-filter vocabulary (Short / Video / Other)", () => {
   });
 
   it("the kind-level defaults match the user-locked spec", () => {
-    // Per-post kinds.
+    // Per-post kinds. youtube_video joined the per-post set when Shorts
+    // detection shipped (media_type 'short' → short, else video — its server
+    // SQL + filter-math arms special-case the NULL→video default).
     expect(EVENT_KIND_MEDIA_CATEGORY.instagram_post).toBe("per-post");
     expect(EVENT_KIND_MEDIA_CATEGORY.tiktok_post).toBe("per-post");
-    // youtube_video → video (Shorts detection deferred).
-    expect(EVENT_KIND_MEDIA_CATEGORY.youtube_video).toBe("video");
+    expect(EVENT_KIND_MEDIA_CATEGORY.youtube_video).toBe("per-post");
     // Everything else → other.
     for (const k of [
       "reddit_post",
@@ -102,8 +104,13 @@ describe("media-type-filter vocabulary (Short / Video / Other)", () => {
   it("PER_POST_MEDIA_KINDS is exactly the per-post entries of the map (no drift)", () => {
     const derived = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_MEDIA_CATEGORY[k] === "per-post");
     expect([...PER_POST_MEDIA_KINDS].sort()).toEqual(derived.sort());
-    // The current per-post kinds are exactly instagram_post + tiktok_post.
-    expect([...PER_POST_MEDIA_KINDS].sort()).toEqual(["instagram_post", "tiktok_post"]);
+    // The current per-post kinds are exactly instagram_post + tiktok_post +
+    // youtube_video (youtube joined when Shorts detection shipped).
+    expect([...PER_POST_MEDIA_KINDS].sort()).toEqual([
+      "instagram_post",
+      "tiktok_post",
+      "youtube_video",
+    ]);
   });
 
   it("kindLevelKindsForCategory partitions the NON-per-post kinds exactly once", () => {
