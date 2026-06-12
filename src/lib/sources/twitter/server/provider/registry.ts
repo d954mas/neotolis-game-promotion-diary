@@ -10,7 +10,10 @@
 // targets keep working unchanged.
 
 import { env } from "$lib/server/config/env.js";
-import { twitterapiioTwitterProvider } from "./twitterapiio-twitter.js";
+import {
+  twitterapiioTwitterProvider,
+  fetchTwitterFeedPageWithRaw,
+} from "./twitterapiio-twitter.js";
 import type { SocialProvider } from "$lib/sources/social-provider.js";
 
 /** Whether the operator has a usable Twitter/X provider configured: the provider is
@@ -24,6 +27,13 @@ export function isTwitterConfigured(): boolean {
 
 /** The Twitter/X provider impl (the SOC-02 issuer). */
 export const twitterProvider: SocialProvider = twitterapiioTwitterProvider;
+
+/** Tree-local feed fetch the WALKER uses — returns the ProviderPage PLUS the
+ *  index-aligned raw tweets (for the D-04 keepForAccount filter + the D-05 raw
+ *  retweet/quote/bookmark snapshot components, neither of which is on the port
+ *  NormalizedPost). Re-exported HERE so the walker reads it from inside the tree and
+ *  the per-tree integration vi.mock can override it alongside getSocialProvider. */
+export { fetchTwitterFeedPageWithRaw };
 
 // Re-export the CANONICAL cross-platform switch from the neutral registry (the single
 // switch, all platforms — do NOT fork it). The Twitter tree's handlers / adapter import

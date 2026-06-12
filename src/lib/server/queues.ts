@@ -112,6 +112,25 @@ export const QUEUES = {
    *  monotonic hard ceiling shared with IG (D-16 / D-01 / Pitfall 3). */
   TIKTOK_QUOTA_RESET: "tiktok.quota_reset",
 
+  // Per-kind: twitter (Phase 11, paid twitterapi.io scraper — the SECOND vendor,
+  // NOT ScrapeCreators / D-01). Mirrors the TikTok cron topology exactly — Twitter
+  // is the same PAID-scraper substrate (one resumable account walker, age-tiered
+  // ongoing poll, midnight-PT daily-cap reset), SINGLE-FEED (one next_cursor /
+  // has_next_page, no posts/reels split).
+  /** Account-scoped resumable walker — one page per tick, fans out INSERT events
+   *  to all active subscribers, persists the provider cursor (the next_cursor
+   *  string) to data_source_channel_state.metadata.twitter. Singleton key by
+   *  Twitter account id dedupes parallel triggers. */
+  TWITTER_BACKFILL_ACCOUNT: "twitter.backfill.account",
+  /** Active + cold ongoing poll + warm per-post producer collapsed via pg-boss
+   *  key-based schedules ({ tier } payload — active 6h / cold daily / warm
+   *  hourly). The poll-cron handler dispatches on job.data.tier. */
+  TWITTER_POLL_CRON: "twitter.poll.cron",
+  /** Midnight-Pacific daily-cap counter reset. Clears ONLY the daily-cap spend
+   *  counter / audit-transition Set — NEVER the prepaid balance (the twitterapi.io
+   *  per-provider balance row is the monotonic hard ceiling, D-02 / Pitfall 3). */
+  TWITTER_QUOTA_RESET: "twitter.quota_reset",
+
   // Per-kind: telegram (Phase 9, free t.me/s scrape — no secret).
   /** Telegram 6h listing poll + warm producer collapsed via pg-boss
    *  key-based schedules ({ tier } payload — active/cold 6h listing /

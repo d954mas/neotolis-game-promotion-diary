@@ -284,6 +284,47 @@ export function normalizeFeedResponse(json: unknown): ProviderPage {
   };
 }
 
+/**
+ * Tree-local feed page that carries the RAW tweets alongside the cross-source
+ * ProviderPage. The port `ProviderPage` stays vendor-agnostic (no Twitter fields),
+ * but the Twitter WALKER needs the raw `Tweet` objects to (a) apply the D-04
+ * keepForAccount filter — its flags (retweeted_tweet / isReply / inReplyToUserId)
+ * are NOT on NormalizedPost — and (b) thread the D-05 raw retweet/quote/bookmark
+ * components into the snapshot. `rawTweets[i]` aligns with `page.posts[i]` by index
+ * (both map the SAME `data.tweets[]` array in order), so the walker zips them.
+ */
+export interface TwitterFeedPage {
+  page: ProviderPage;
+  rawTweets: Tweet[];
+}
+
+/**
+ * Validate + map a feed response → a TwitterFeedPage (the cross-source ProviderPage
+ * PLUS the index-aligned raw tweets). This is the Twitter-tree-local fetch result:
+ * the neutral `normalizeFeedResponse` (above) returns only the port shape for any
+ * generic consumer; the walker calls THIS so it has the raw flags for D-04/D-05.
+ * The D-04 filter is NOT applied here (the page-level normalizer has no account-id
+ * scope — the walker applies keepForAccount after resolving the feed owner's id).
+ */
+export function normalizeFeedResponseWithRaw(json: unknown): TwitterFeedPage {
+  const parsed = FEED_RESPONSE.parse(json);
+  const tweets = parsed.data?.tweets ?? [];
+  const nextCursor =
+    parsed.next_cursor !== null && parsed.next_cursor !== undefined && parsed.next_cursor !== ""
+      ? parsed.next_cursor
+      : null;
+  return {
+    page: {
+      posts: tweets.map((t) => normalizeTweet(t)),
+      nextCursor,
+      endOfFeed: parsed.has_next_page !== true || nextCursor === null,
+      creditsUsed: 1,
+      owner: pickFeedOwner(tweets[0]?.author),
+    },
+    rawTweets: tweets,
+  };
+}
+
 // ---- SINGLE-TWEET response (/twitter/tweets?tweet_ids= — 11-SPIKE.md Call B) ----
 // ASYMMETRY: tweets are at the TOP LEVEL `tweets[]` here (NOT `data.tweets` like the
 // feed). A single-id query → a 1-element array; empty/absent → null.

@@ -1,16 +1,163 @@
-// Twitter/X backfill bounds (Wave-0 scaffold).
+// Twitter/X backfill bound — the single-feed walker stops at SOCIAL_BACKFILL_MAX_POSTS
+// OR the date window, whichever first, so cost is independent of archive size
+// (BACK-01/02). REAL handleBackfillAccount against real Postgres; provider seam mocked.
 //
-// Named it.skip placeholders — Plan 11-03 flips these live. The walker stops at
-// SOCIAL_BACKFILL_MAX_POSTS OR the date window, whichever comes first, so cost is
-// bounded regardless of archive size (mirrors the TikTok/IG backfill bound).
-//
-// Requirements: BACK-01 / BACK-02.
-import { describe, it } from "vitest";
+// Requirements: PLAT-03 / BACK-01 / BACK-02.
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { eq } from "drizzle-orm";
+import { seedUserDirectly } from "./helpers.js";
+import type { TwitterFeedPage, Tweet } from "../../src/lib/sources/twitter/server/normalize.js";
 
-describe("twitter backfill bound", () => {
-  it.skip("[11-03] stops at SOCIAL_BACKFILL_MAX_POSTS (BACK-01)", () => {});
+const provider = { pages: [] as TwitterFeedPage[] };
 
-  it.skip("[11-03] stops at the backfill date window (BACK-02)", () => {});
+function emptyPage(): TwitterFeedPage {
+  return {
+    page: { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null },
+    rawTweets: [],
+  };
+}
 
-  it.skip("[11-03] marks backfill_complete when the feed is exhausted before the cap", () => {});
+vi.mock("../../src/lib/sources/twitter/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    isTwitterConfigured: () => true,
+    getSocialProvider: (platform: string) =>
+      platform === "twitter" ? ({ name: "twitterapi.io" } as never) : null,
+    fetchTwitterFeedPageWithRaw: async (): Promise<TwitterFeedPage> =>
+      provider.pages.shift() ?? emptyPage(),
+  };
+});
+
+const { db } = await import("../../src/lib/server/db/client.js");
+const { env } = await import("../../src/lib/server/config/env.js");
+const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
+const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { normalizeTweet } = await import("../../src/lib/sources/twitter/server/normalize.js");
+const { handleBackfillAccount } =
+  await import("../../src/lib/sources/twitter/server/handlers/backfill-account.js");
+const { getTwitterBackfillState } =
+  await import("../../src/lib/sources/twitter/server/backfill-state.js");
+
+const ACCOUNT = "acct-bound-tw";
+const envMut = env as { SOCIAL_BACKFILL_MAX_POSTS: number };
+let originalMaxPosts: number;
+
+function tweet(id: string, daysAgo: number): Tweet {
+  return {
+    id,
+    url: `https://x.com/b/status/${id}`,
+    text: id,
+    createdAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
+    likeCount: 1,
+    retweetCount: 1,
+    replyCount: 1,
+    quoteCount: 0,
+    viewCount: 1,
+    bookmarkCount: 0,
+    isReply: false,
+    inReplyToId: null,
+    inReplyToUserId: null,
+    inReplyToUsername: null,
+    retweeted_tweet: null,
+    quoted_tweet: null,
+    extendedEntities: {},
+    author: { id: ACCOUNT, userName: "boundacct", name: "Bound", profilePicture: null, followers: 1 },
+  };
+}
+
+/** A "still more available" page of 12 fresh tweets (all within 1d). */
+function fullPage(seed: number): TwitterFeedPage {
+  const tweets = Array.from({ length: 12 }, (_, i) => tweet(`c${seed}_${i}`, 1));
+  return {
+    page: { posts: tweets.map(normalizeTweet), nextCursor: `CURSOR_${seed}`, endOfFeed: false, creditsUsed: 1, owner: null },
+    rawTweets: tweets,
+  };
+}
+
+async function seedSource(): Promise<string> {
+  const user = await seedUserDirectly({ email: `bound-tw-${Math.random().toString(36).slice(2)}@t.io` });
+  const [row] = await db
+    .insert(dataSources)
+    .values({
+      userId: user.id,
+      kind: "twitter_account",
+      handleUrl: "https://x.com/boundacct",
+      channelId: ACCOUNT,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: { handle: "boundacct", accountId: ACCOUNT },
+    })
+    .returning({ id: dataSources.id });
+  return row!.id;
+}
+
+beforeEach(() => {
+  provider.pages = [];
+  originalMaxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
+});
+afterEach(() => {
+  envMut.SOCIAL_BACKFILL_MAX_POSTS = originalMaxPosts;
+});
+
+describe("twitter backfill bounding", () => {
+  it("[11-03] stops at SOCIAL_BACKFILL_MAX_POSTS (BACK-01)", async () => {
+    envMut.SOCIAL_BACKFILL_MAX_POSTS = 24;
+    await seedSource();
+
+    // The provider ALWAYS returns a full 12-tweet page with a non-null cursor
+    // (has_next_page forever). With cap=24 the deep walk must halt after 24 tweets.
+    provider.pages = [fullPage(1), fullPage(2), fullPage(3), fullPage(4)];
+
+    for (let tick = 0; tick < 4; tick++) {
+      const st = await getTwitterBackfillState(ACCOUNT);
+      if (st.complete) break;
+      await handleBackfillAccount({
+        data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      });
+    }
+
+    const st = await getTwitterBackfillState(ACCOUNT);
+    expect(st.complete).toBe(true);
+    expect(st.collected).toBe(24); // exactly the cap — not more
+
+    const imported = await db.select().from(events).where(eq(events.kind, "twitter_post"));
+    expect(imported.length).toBe(24);
+  });
+
+  it("[11-03] stops at the backfill date window (BACK-02)", async () => {
+    await seedSource();
+
+    // Newest-first: two tweets inside 7d, then one beyond — stop at the boundary.
+    const tweets = [tweet("w1", 1), tweet("w2", 5), tweet("w3", 30)];
+    provider.pages = [
+      { page: { posts: tweets.map(normalizeTweet), nextCursor: "MORE", endOfFeed: false, creditsUsed: 1, owner: null }, rawTweets: tweets },
+    ];
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    await handleBackfillAccount({
+      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: sevenDaysAgo, flow: "initial" },
+    });
+
+    const imported = await db.select().from(events).where(eq(events.kind, "twitter_post"));
+    expect(imported.map((e) => e.externalId).sort()).toEqual(["w1", "w2"]);
+    const st = await getTwitterBackfillState(ACCOUNT);
+    expect(st.complete).toBe(true);
+  });
+
+  it("[11-03] marks backfill_complete when the feed is exhausted before the cap", async () => {
+    await seedSource();
+    const tweets = [tweet("e1", 1), tweet("e2", 2)];
+    provider.pages = [
+      { page: { posts: tweets.map(normalizeTweet), nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null }, rawTweets: tweets },
+    ];
+
+    await handleBackfillAccount({
+      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+    });
+
+    const st = await getTwitterBackfillState(ACCOUNT);
+    expect(st.complete).toBe(true);
+    expect(st.collected).toBe(2);
+  });
 });

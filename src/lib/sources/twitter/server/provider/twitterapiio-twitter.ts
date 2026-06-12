@@ -27,8 +27,10 @@
 import { twitterFetch } from "../http.js";
 import {
   normalizeFeedResponse,
+  normalizeFeedResponseWithRaw,
   normalizeProfile,
   normalizeSingleTweetResponse,
+  type TwitterFeedPage,
 } from "../normalize.js";
 import { twitterParseUrl } from "../url.js";
 import type {
@@ -58,30 +60,10 @@ export const twitterapiioTwitterProvider: SocialProvider = {
     cursor: string | null,
     opts: { kindFilter?: "posts" | "reels"; origin?: ProviderOrigin },
   ): Promise<ProviderPage> {
-    // Twitter is single-feed — IGNORE kindFilter (no posts/reels split).
-    const url = new URL(`${TWITTERAPIIO_BASE_URL}${FEED_PATH}`);
-    url.searchParams.set("userName", handle);
-    // D-04 / Pitfall 5: surface self-reply threads so the walker's keepForAccount
-    // filter can import whole promo threads (it drops replies-to-others client-side).
-    url.searchParams.set("includeReplies", "true");
-    // twitterapi.io's first-page cursor is the empty string; only thread a non-empty
-    // cursor for page 2+ (11-SPIKE.md Q2).
-    if (cursor !== null && cursor !== "") {
-      url.searchParams.set("cursor", cursor);
-    }
-
-    const resp = await twitterFetch(url, {
-      platform,
-      provider: this.name,
-      logTag: "twitter.last_tweets",
-      // Reserve one prepaid credit against the chosen pool BEFORE the request
-      // (BUDGET-02). Omitted origin leaves the request unmetered.
-      origin: opts.origin,
-    });
-    const json: unknown = await resp.json();
     // The page-level normalizer maps data.tweets[] → ProviderPage WITHOUT the D-04
     // filter (it has no account-id scope); the walker applies keepForAccount(t,
-    // accountId) using the feed owner's id (Plan 03).
+    // accountId) using the feed owner's id (Plan 03) via fetchTwitterFeedPageWithRaw.
+    const json = await fetchFeedJson(platform, this.name, handle, cursor, opts.origin);
     return normalizeFeedResponse(json);
   },
 
@@ -135,3 +117,58 @@ export const twitterapiioTwitterProvider: SocialProvider = {
     return normalizeProfile(json);
   },
 };
+
+/** Issue one /twitter/user/last_tweets request via the seam and return the raw JSON.
+ *  Shared by the port `fetchPosts` (which normalizes to ProviderPage) and the
+ *  tree-local `fetchTwitterFeedPageWithRaw` (which also surfaces the raw tweets for
+ *  the walker's D-04 filter + D-05 raw components). */
+async function fetchFeedJson(
+  platform: SocialPlatform,
+  providerName: string,
+  handle: string,
+  cursor: string | null,
+  origin: ProviderOrigin | undefined,
+): Promise<unknown> {
+  // Twitter is single-feed — no posts/reels split.
+  const url = new URL(`${TWITTERAPIIO_BASE_URL}${FEED_PATH}`);
+  url.searchParams.set("userName", handle);
+  // D-04 / Pitfall 5: surface self-reply threads so the walker's keepForAccount
+  // filter can import whole promo threads (it drops replies-to-others client-side).
+  url.searchParams.set("includeReplies", "true");
+  // twitterapi.io's first-page cursor is the empty string; only thread a non-empty
+  // cursor for page 2+ (11-SPIKE.md Q2).
+  if (cursor !== null && cursor !== "") {
+    url.searchParams.set("cursor", cursor);
+  }
+  const resp = await twitterFetch(url, {
+    platform,
+    provider: providerName,
+    logTag: "twitter.last_tweets",
+    // Reserve one prepaid credit against the chosen pool BEFORE the request
+    // (BUDGET-02). Omitted origin leaves the request unmetered.
+    origin,
+  });
+  return resp.json();
+}
+
+/**
+ * Tree-local feed fetch used by the WALKER (handlers/backfill-account.ts) — returns
+ * the cross-source ProviderPage PLUS the index-aligned RAW tweets. The walker needs
+ * the raw tweets because the D-04 keepForAccount filter reads flags
+ * (retweeted_tweet / isReply / inReplyToUserId) that are NOT on the port
+ * NormalizedPost, and the D-05 snapshot stores the raw retweet/quote/bookmark
+ * components. The NEUTRAL port method `fetchPosts` (above) keeps returning only the
+ * vendor-agnostic ProviderPage — this richer result is Twitter-tree-local, so the
+ * port stays clean.
+ *
+ * Same single twitterapi.io request as `fetchPosts` (1 credit reserved in the seam);
+ * the only difference is the response is normalized to ALSO carry the raw tweets.
+ */
+export async function fetchTwitterFeedPageWithRaw(
+  handle: string,
+  cursor: string | null,
+  origin: ProviderOrigin | undefined,
+): Promise<TwitterFeedPage> {
+  const json = await fetchFeedJson("twitter", twitterapiioTwitterProvider.name, handle, cursor, origin);
+  return normalizeFeedResponseWithRaw(json);
+}
