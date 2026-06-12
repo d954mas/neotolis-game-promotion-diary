@@ -55,6 +55,7 @@ export const sourceKindEnum = pgEnum("source_kind", [
   "telegram_channel",
   "discord_server",
   "instagram_account",
+  "tiktok_account",
 ]);
 
 export const dataSources = pgTable(

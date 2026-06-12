@@ -33,6 +33,7 @@ export type CardEventKind =
   | "telegram_post"
   | "discord_drop"
   | "instagram_post"
+  | "tiktok_post"
   | "conference"
   | "talk"
   | "press"
@@ -124,6 +125,33 @@ export interface CardEventLite {
       | { emoji: string | null; kind: "standard" | "custom" | "paid"; count: number }[]
       | null;
   };
+  /** TikTok public-data decoration attached by
+   *  sources/tiktok/server/feed-enrichment.ts (mirrors instagramEnrichment with
+   *  the PLAT-02 shareCount delta). Each stat is INDEPENDENTLY nullable —
+   *  metrics-by-presence (D-05): a photo-mode post has no views (null), NEVER
+   *  coerced to 0; shareCount is TikTok's first-class share metric. thumbnailUrl
+   *  is the raw TikTok CDN hotlink (D-07, signed + expiring — onerror fallback in
+   *  the card); mediaType ("short" | "carousel") drives the media-type overlay. */
+  tiktokEnrichment?: {
+    stats: {
+      viewCount: number | null;
+      likeCount: number | null;
+      commentCount: number | null;
+      shareCount: number | null;
+      polledAt: Date | string;
+    } | null;
+    thumbnailUrl: string | null;
+    mediaType: string | null;
+  };
+  /** YouTube public-data decoration attached by
+   *  sources/youtube/server/feed-enrichment.ts. Carries the Shorts
+   *  classification (youtube_videos.media_type): 'short' drives the "Short"
+   *  media-type pill; 'video' / NULL / missing → "Video" (a YouTube video is a
+   *  video at worst — Shorts detection heals NULLs lazily). Stats + channelTitle
+   *  remain on the top-level dto fields (legacy youtube enrichment shape). */
+  youtubeEnrichment?: {
+    mediaType: string | null;
+  };
 }
 
 export interface CardSourceLite {
@@ -168,6 +196,15 @@ export function redditAuthorByline(metadata: unknown): string | null {
  *  is owned by data_sources and can be renamed). Falls back to displayName
  *  (user's own label) then the raw handleUrl. Mirrors youtubeChannelLabel. */
 export function instagramHandleLabel(source: CardSourceLite | null): string {
+  return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
+}
+
+/** Read the TikTok account handle/display name from FK-joined data_sources,
+ *  NEVER from event metadata (no-denorm rule — the TikTok @handle is owned by
+ *  data_sources / tiktok_accounts and the account owner can rename it). Falls
+ *  back to displayName (user's own label) then the raw handleUrl. Mirrors
+ *  instagramHandleLabel / youtubeChannelLabel. */
+export function tiktokHandleLabel(source: CardSourceLite | null): string {
   return source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
 }
 
@@ -263,6 +300,22 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     const polledAt = event.instagramEnrichment.stats?.polledAt;
     return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
   }
+  if (event.kind === "tiktok_post") {
+    // 10-SPIKE.md Q3 RESOLVED (Plan 05 UAT): the TikTok cover on tiktokcdn-us.com
+    // is hotlink-BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB), exactly like
+    // IG's CORP block — a raw <img> hotlink fails even though the server fetches it
+    // 200. Route through the same-origin proxy keyed by the aweme id (mirrors IG's
+    // #69), only when a thumbnail actually exists in the cache (the enrichment URL
+    // is present) and we have the post id to key on.
+    if (event.tiktokEnrichment?.thumbnailUrl == null || !event.externalId) return null;
+    const base = `/api/tiktok/thumbnail/${encodeURIComponent(event.externalId)}`;
+    // Cache-buster: version the stable proxy URL by the latest poll timestamp. A
+    // re-poll (Refresh-Now or a scheduled tick) writes a new snapshot → new
+    // polledAt → new URL → the browser refetches the fresh cover; between polls it
+    // serves from the 1h cache. The proxy ignores the query param.
+    const polledAt = event.tiktokEnrichment.stats?.polledAt;
+    return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
+  }
   return null;
 }
 
@@ -271,7 +324,7 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
  *  Instagram 4:5 (the IG card overrides the aspect-ratio token). Other
  *  kinds only render the thumb when an image is actually derivable. */
 export function isMediaShape(kind: CardEventKind): boolean {
-  return kind === "youtube_video" || kind === "instagram_post";
+  return kind === "youtube_video" || kind === "instagram_post" || kind === "tiktok_post";
 }
 
 /** Month-Day formatter — "May 21" style. Locale-aware (Intl). */

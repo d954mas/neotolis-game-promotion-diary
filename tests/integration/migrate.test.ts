@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import pg from "pg";
 import { runMigrations, migrationsApplied } from "../../src/lib/server/db/migrate.js";
+import { eventKindEnum } from "../../src/lib/server/db/schema/events.js";
 
 // Validates two invariants:
 //   1. migrations idempotent on second boot
@@ -323,7 +324,10 @@ describe("forward-only migrations — 0001_add_post_kind", () => {
       expect(values).toContain("youtube_video");
       expect(values).toContain("other");
       expect(values).toContain("instagram_post");
-      expect(values).toHaveLength(11);
+      expect(values).toContain("tiktok_post");
+      // Derived from the schema enum (not a hardcoded count) so adding a kind
+      // can't silently strand this assertion — DB enum must mirror the schema.
+      expect([...values].sort()).toEqual([...eventKindEnum.enumValues].sort());
     } finally {
       await pool.end();
     }

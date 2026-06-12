@@ -24,19 +24,32 @@
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "./EmptyState.svelte";
   import { quotaPct, quotaZone } from "$lib/quota-zone.js";
-  import type { AdminInstagramBlock } from "$lib/server/services/admin-quota-read.js";
+  import type {
+    AdminInstagramBlock,
+    AdminTiktokBlock,
+  } from "$lib/server/services/admin-quota-read.js";
 
-  let { block }: { block: AdminInstagramBlock } = $props();
+  // The IG + TikTok provider blocks are structurally identical (same spend/cap +
+  // balance + throttle shape, same collapse-when-unconfigured contract), so this
+  // one panel renders either. `heading` + `disabledHint` let each section title
+  // its not-configured placeholder for the right platform; both default to the
+  // generic "Provider spend" copy.
+  let {
+    block,
+    heading = m.admin_quota_section_providers_title(),
+    disabledHint = m.sources_new_instagram_disabled_hint(),
+  }: {
+    block: AdminInstagramBlock | AdminTiktokBlock;
+    heading?: string;
+    disabledHint?: string;
+  } = $props();
 
   const spendPct = $derived(block.isConfigured ? quotaPct(block.creditsUsed, block.dailyCap) : 0);
   const spendZone = $derived(quotaZone(spendPct));
 </script>
 
 {#if !block.isConfigured}
-  <EmptyState
-    heading={m.admin_quota_section_providers_title()}
-    body={m.sources_new_instagram_disabled_hint()}
-  />
+  <EmptyState {heading} body={disabledHint} />
 {:else}
   <div class="provider-spend">
     <div class="provider-spend__row">

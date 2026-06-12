@@ -41,6 +41,7 @@
     telegram_post: "var(--k-telegram)",
     discord_drop: "var(--k-discord)",
     instagram_post: "var(--k-instagram)",
+    tiktok_post: "var(--k-tiktok)",
     conference: "var(--k-conference)",
     talk: "var(--k-talk)",
     press: "var(--k-press)",
@@ -50,8 +51,8 @@
 
   export type AxisChip = {
     // Discriminates the chip's color treatment (kind / game / author /
-    // show / source — each may get an accent in a later sub-task).
-    axis: "show" | "game" | "kind" | "source" | "author";
+    // show / source / type — each may get an accent in a later sub-task).
+    axis: "show" | "game" | "kind" | "source" | "author" | "type";
     label: string;
     onRemove: () => void;
     // Optional kind for KIND chips — drives the leading icon + accent.

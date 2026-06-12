@@ -24,6 +24,7 @@
 
 import { getSocialProvider } from "./provider/registry.js";
 import { instagramObservability } from "./observability.js";
+import { buildInstagramTitle } from "./normalize.js";
 import { instagramParseUrl, instagramParseSourceUrl } from "./url.js";
 import { instagramEnrichFeedDtos } from "./feed-enrichment.js";
 import { instagramFetchEventMetricSeries } from "./metric-series.js";
@@ -69,30 +70,18 @@ export interface InstagramPollResult {
   owner: FeedOwner | null;
 }
 
-/** D-09: the event title is the caption's FIRST line. Falls back to the IG
- *  fallback ("Instagram <mediaType> · <date>") when the post is caption-less.
- *  Built server-side (the worker never does i18n — the canonical title is
- *  stored at insert time; the UI renders it verbatim, mirroring YouTube/Reddit
- *  titles). The fallback string mirrors messages/en.json
- *  event_title_instagram_fallback. */
-function buildTitle(post: NormalizedPost): string {
-  const caption = post.caption?.trim();
-  if (caption !== undefined && caption !== "") {
-    const firstLine = caption.split("\n", 1)[0]!.trim();
-    if (firstLine !== "") return firstLine;
-  }
-  const date = post.publishedAt.toISOString().slice(0, 10);
-  return `Instagram ${post.kind} · ${date}`;
-}
-
 /** Map a NormalizedPost → cross-source RawEvent. The ScrapeCreators field shape
  *  is already gone (the provider seam returns NormalizedPost); this is the
- *  NormalizedPost → events mapping (SOC-04). */
+ *  NormalizedPost → events mapping (SOC-04). The D-09 title (caption first line,
+ *  "Instagram <kind> · <date>" fallback) is the shared buildInstagramTitle (one
+ *  spelling with the paste-preview path). Built server-side — the worker never
+ *  does i18n; the canonical title is stored at insert time and the UI renders it
+ *  verbatim (mirroring YouTube/Reddit). */
 function postToRawEvent(post: NormalizedPost): RawEvent {
   return {
     externalId: post.id,
     url: post.permalink ?? `https://www.instagram.com/p/${post.id}/`,
-    title: buildTitle(post),
+    title: buildInstagramTitle(post.caption, post.kind, post.publishedAt),
     occurredAt: post.publishedAt,
     kind: "instagram_post",
     metadata: {

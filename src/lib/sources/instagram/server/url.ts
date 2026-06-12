@@ -127,9 +127,25 @@ export function instagramParseUrl(input: string): ParsedUrl | null {
 export function instagramParseSourceUrl(input: string): ParsedSourceUrl | null {
   const trimmed = input.trim();
 
-  // Raw prefix forms FIRST — `@handle` / bare `handle` have no scheme so
-  // `new URL()` would reject them. Must NOT contain a slash (that is a path,
-  // handled by the URL branch below).
+  // An @-prefixed raw handle FIRST — the leading `@` is unambiguous (an Instagram
+  // profile URL is `instagram.com/<handle>`, never a bare `@handle` URL), so a
+  // DOTTED @handle (e.g. `@some.handle` — RAW_HANDLE_RE allows dots) is safely a
+  // handle, not a hostname. No scheme/slash/colon → not a URL or path.
+  if (trimmed.startsWith("@") && !trimmed.includes("/") && !trimmed.includes(":")) {
+    const raw = RAW_HANDLE_RE.exec(trimmed);
+    if (raw !== null) {
+      const handle = raw[1]!;
+      return {
+        kind: "instagram_account",
+        handle,
+        externalUrl: `https://www.instagram.com/${handle}/`,
+      };
+    }
+  }
+
+  // Bare `handle` (no @, no scheme) — DOT-GATED: a bare dotted string (`some.handle`)
+  // is hostname-ambiguous (could be a domain), so it falls through to the URL branch
+  // below. Only a dotless bare handle (`natgeo`) resolves here.
   if (!trimmed.includes("/") && !trimmed.includes(".") && !trimmed.includes(":")) {
     const raw = RAW_HANDLE_RE.exec(trimmed);
     if (raw !== null) {

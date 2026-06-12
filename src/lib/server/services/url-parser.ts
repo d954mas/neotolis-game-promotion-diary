@@ -55,12 +55,26 @@ export type ParsedUrl =
   // paste flow recognizes the kind + URL but the user types the title —
   // see enrichFromUrl's instagram_post branch (no network call).
   | { kind: "instagram_post"; externalId: string; canonicalUrl: string }
+  // TikTok video permalink (`/@<handle>/video/<id>`). The aweme id is the
+  // URL-intrinsic externalId (10-SPIKE: the id IS the URL slug); canonicalUrl is
+  // the `/@handle/video/<id>` permalink the TikTok adapter's parseUrl already
+  // canonicalized (query tail stripped). A vm./vt. SHORT link is ALSO recognized
+  // here (host branch below) and routed with the RAW short URL as canonicalUrl —
+  // the adapter's fetchEventPreviewMetadata resolves the short link to the real
+  // video before fetching (the parser is pure / does no I/O, so the one network
+  // hop lives in the adapter, mirroring canonicalizeOnCreate's Add-Source path).
+  | { kind: "tiktok_post"; externalId: string | null; canonicalUrl: string }
   | { kind: "twitter_post"; canonicalUrl: string }
   | { kind: "telegram_post"; canonicalUrl: string }
   | { kind: "unsupported" };
 
 const X_HOSTS = new Set(["twitter.com", "x.com", "mobile.twitter.com"]);
 const TG_HOSTS = new Set(["t.me"]);
+// vm./vt. short-link hosts. The pure TikTok parser deliberately rejects these
+// (they carry no aweme id in the path); the orchestrator recognizes them here and
+// routes to the adapter, which does the ONE redirect hop (resolveTikTokShortLink)
+// inside fetchEventPreviewMetadata — the same seam canonicalizeOnCreate uses.
+const TIKTOK_SHORT_HOSTS = new Set(["vm.tiktok.com", "vt.tiktok.com"]);
 
 // YouTube videoId shape — 11 chars, [A-Za-z0-9_-]. The shared
 // `youtubeParseUrl` (src/lib/sources/youtube/server/url.ts) is more
@@ -139,6 +153,25 @@ export function parseIngestUrl(input: string): ParsedUrl {
       canonicalUrl,
     };
   }
+  if (routed.kind === "tiktok_post") {
+    // The TikTok adapter's parseUrl already canonicalized the permalink into
+    // metadata.permalink (`https://www.tiktok.com/@<handle>/video/<id>` — query
+    // tail stripped). externalId is the aweme id (the id IS the URL slug). The
+    // live single-video preview exists (enrichFromUrl's tiktok_post branch), but
+    // the create boundary re-derives the id from OUR cache by canonical permalink
+    // (resolveCachedExternalId — untrusted body, #70), so the parsed id here is
+    // the URL-intrinsic fallback only.
+    const meta = (routed.metadata ?? {}) as { permalink?: unknown };
+    const canonicalUrl =
+      typeof meta.permalink === "string"
+        ? meta.permalink
+        : `https://www.tiktok.com/@_/video/${routed.externalId}`;
+    return {
+      kind: "tiktok_post",
+      externalId: routed.externalId,
+      canonicalUrl,
+    };
+  }
 
   // 2) Host-classification fallback for kinds without an adapter yet
   //    (Twitter / Telegram).
@@ -161,6 +194,16 @@ export function parseIngestUrl(input: string): ParsedUrl {
   }
   if (TG_HOSTS.has(host)) {
     return { kind: "telegram_post", canonicalUrl: url.toString() };
+  }
+  if (TIKTOK_SHORT_HOSTS.has(host)) {
+    // A vm./vt. short link — the aweme id is NOT in the path (it carries a share
+    // code), so externalId is null at parse time. Route the RAW short URL as the
+    // canonicalUrl; enrichFromUrl's tiktok_post branch hands it to the adapter,
+    // whose fetchEventPreviewMetadata does the ONE redirect hop
+    // (resolveTikTokShortLink) to the real /@handle/video/<id> URL before fetching.
+    // Mirrors canonicalizeOnCreate's Add-Source short-link seam (the parser stays
+    // pure; the network hop lives in the adapter).
+    return { kind: "tiktok_post", externalId: null, canonicalUrl: url.toString() };
   }
 
   // 3) detectFutureKind seam for any remaining deferred-adapter hosts.

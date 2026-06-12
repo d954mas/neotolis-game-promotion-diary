@@ -70,6 +70,16 @@ export interface WriteSnapshotArgs {
   poolKind: "cron" | "user";
   /** Outcome label written to youtube_videos.last_poll_status. */
   status: SnapshotStatus;
+  /**
+   * Shorts classification verdict to persist on youtube_videos.media_type
+   * ("short" | "video"). OMITTED (undefined) on the vast majority of writes:
+   * the column is only touched when the poll worker has a NEW decisive verdict
+   * (a fresh probe result, or the over-ceiling duration prefilter). A NULL /
+   * ambiguous verdict is left as `undefined` here so an already-classified row
+   * is never CLOBBERED back to NULL by a later tick whose probe budget was
+   * spent — only forward transitions (NULL → short/video) are written.
+   */
+  mediaType?: "short" | "video";
 }
 
 export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
@@ -104,6 +114,12 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         lastPolledAt: new Date(),
         lastPollStatus: args.status,
         pollFailureCount: args.status === "ok" ? 0 : sql`${youtubeVideos.pollFailureCount} + 1`,
+        // media_type is ONLY written when the caller has a fresh decisive verdict
+        // (probe result / over-ceiling prefilter). Omitting it (undefined) leaves
+        // the existing value untouched — Drizzle drops undefined keys from the SET
+        // — so an already-classified row is never clobbered back to NULL by a
+        // later budget-exhausted tick.
+        ...(args.mediaType !== undefined ? { mediaType: args.mediaType } : {}),
       })
       .where(eq(youtubeVideos.videoId, args.videoId));
 

@@ -38,7 +38,8 @@
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
   import { auditActionLabel, AUDIT_ACTION_LIST } from "$lib/audit-labels.js";
-  import { eventKindLabel } from "$lib/sources/kind-display.js";
+  import { eventKindLabel, FEED_KIND_FILTER_KINDS } from "$lib/sources/kind-display.js";
+  import { MEDIA_FILTER_CATEGORIES, type MediaTypeCategory } from "$lib/feed/media-type-filter.js";
   // Source list shows a kind glyph + short kind label adjacent to
   // displayName. Reuses SourceKindIcon and the shared sourceKindLabel
   // helper.
@@ -56,11 +57,14 @@
 
   // Explicit axis enumeration. Each consumer page passes the subset it
   // wants rendered; FiltersSheet renders ONLY axes in `schema`.
-  type FilterAxis = "kind" | "source" | "show" | "authorIsMe" | "date" | "action";
+  type FilterAxis = "kind" | "type" | "source" | "show" | "authorIsMe" | "date" | "action";
 
   type ActiveFilters = {
     source: string[];
     kind: string[];
+    // MEDIA-TYPE axis (Short / Video / Other). Consumer-owned via schema; /audit
+    // leaves it undefined so the Set stays empty.
+    mediaType?: string[];
     show: ShowFilter;
     authorIsMe?: boolean;
     from?: string;
@@ -105,6 +109,7 @@
     onApply: (next: {
       source?: string[];
       kind?: string[];
+      mediaType?: string[];
       show?: ShowFilter;
       authorIsMe?: boolean;
       // Date axis applied via this payload when 'date' is in the
@@ -126,6 +131,7 @@
   // checkbox `checked` bindings recompute.
   let sourceSelected = $state<Set<string>>(new Set(filters.source ?? []));
   let kindSelected = $state<Set<string>>(new Set(filters.kind ?? []));
+  let mediaTypeSelected = $state<Set<string>>(new Set(filters.mediaType ?? []));
   let showSelection = $state<"any" | "inbox" | "standalone" | "specific">(filters.show.kind);
   let gameSelected = $state<Set<string>>(
     filters.show.kind === "specific" ? new Set(filters.show.gameIds) : new Set(),
@@ -148,22 +154,27 @@
   let fromVal = $state<string>(filters.from ?? "");
   let toVal = $state<string>(filters.to ?? "");
 
-  // Functional-only allowlist + alphabetical-by-label sort. Mirrors the
-  // /events/new picker — same allowlist, same sort. Hidden kinds
-  // (reddit_post / twitter_post / telegram_post / discord_drop)
-  // re-appear when their adapter ships. Legacy rows of hidden kinds
-  // still render via FilterChips' kindLabel switch.
-  const FUNCTIONAL_KIND_OPTIONS: ReadonlyArray<string> = [
-    "youtube_video",
-    "post",
-    "conference",
-    "talk",
-    "press",
-    "other",
-  ];
-  // Kind label resolves through the central kind-display config
-  // (eventKindLabel) — same source of truth FilterChips / FeedCard use.
-  const KIND_OPTIONS = $derived(sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => eventKindLabel(k)));
+  // KIND options are the SAME ordered binding the live /feed KIND axis uses
+  // (FEED_KIND_FILTER_KINDS from kind-display.ts) — NO hand-maintained
+  // allowlist. Phase 10 D-08: the previous local FUNCTIONAL_KIND_OPTIONS array
+  // was never updated when instagram_post / telegram_post shipped, so the
+  // social adapter kinds silently dropped out of the /feed filter (the
+  // user-reported regression). Sharing the one ordered list with feed/+page.svelte
+  // means a new adapter kind auto-appears here the moment it's marked
+  // feedFilterable:true and placed in FEED_KIND_FILTER_KINDS, with no sheet edit.
+  // Label resolves through the same central kind-display config (eventKindLabel)
+  // FilterChips / FeedCard use; the order is the shared chip order.
+  const KIND_OPTIONS = FEED_KIND_FILTER_KINDS;
+
+  // TYPE (MEDIA-TYPE) axis options derived from MEDIA_FILTER_CATEGORIES — the
+  // single source of truth shared with the live /feed AxisRow + the URL
+  // validator + the server filter. No hand-list.
+  const TYPE_OPTIONS = MEDIA_FILTER_CATEGORIES;
+  const TYPE_LABEL: Record<MediaTypeCategory, () => string> = {
+    short: m.feed_axis_type_short,
+    video: m.feed_axis_type_video,
+    other: m.feed_axis_type_other,
+  };
 
   // auditActionLabel + AUDIT_ACTIONS imported directly. The shared
   // $lib/audit-labels.ts is the single source of truth
@@ -246,6 +257,7 @@
     const payload: {
       source?: string[];
       kind?: string[];
+      mediaType?: string[];
       show?: ShowFilter;
       authorIsMe?: boolean;
       from?: string;
@@ -254,6 +266,7 @@
     } = {};
     if (schema.includes("source")) payload.source = Array.from(sourceSelected);
     if (schema.includes("kind")) payload.kind = Array.from(kindSelected);
+    if (schema.includes("type")) payload.mediaType = Array.from(mediaTypeSelected);
     if (schema.includes("show")) payload.show = showResult;
     if (schema.includes("authorIsMe")) {
       payload.authorIsMe = authorIsMe === "any" ? undefined : authorIsMe === "true";
@@ -273,6 +286,7 @@
     const payload: {
       source?: string[];
       kind?: string[];
+      mediaType?: string[];
       show?: ShowFilter;
       authorIsMe?: boolean;
       from?: string;
@@ -281,6 +295,7 @@
     } = {};
     if (schema.includes("source")) payload.source = [];
     if (schema.includes("kind")) payload.kind = [];
+    if (schema.includes("type")) payload.mediaType = [];
     if (schema.includes("show")) payload.show = { kind: "any" };
     if (schema.includes("authorIsMe")) payload.authorIsMe = undefined;
     if (schema.includes("date")) {
@@ -350,6 +365,24 @@
                 onchange={() => (kindSelected = toggle(kindSelected, k))}
               />
               {eventKindLabel(k)}
+            </label>
+          {/each}
+        </div>
+      </fieldset>
+    {/if}
+
+    {#if schema.includes("type")}
+      <fieldset class="field" data-axis="type">
+        <legend class="label">{m.axis_row_type_label()}</legend>
+        <div class="checklist">
+          {#each TYPE_OPTIONS as c (c)}
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={mediaTypeSelected.has(c)}
+                onchange={() => (mediaTypeSelected = toggle(mediaTypeSelected, c))}
+              />
+              {TYPE_LABEL[c]()}
             </label>
           {/each}
         </div>

@@ -42,6 +42,7 @@ import { db as serverDb } from "$lib/server/db/client.js";
 import { eq as serverEq, inArray as serverInArray } from "drizzle-orm";
 import { youtubeObservability } from "./observability.js";
 import { youtubeParseUrl } from "./url.js";
+import { parseIso8601Duration } from "./duration.js";
 import { z } from "zod";
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
@@ -173,15 +174,6 @@ const ERROR_RESPONSE = z
 
 // ---- Helpers ----
 
-/** Parse ISO 8601 duration "PT4M13S" / "PT15S" / "PT1H2M3S" -> seconds.
- *  Returns 0 on parse failure. */
-function durationToSeconds(iso: string): number {
-  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
-  if (!match) return 0;
-  const [, h, m, s] = match;
-  return Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0);
-}
-
 // fetchWithTimeout + chargedFetch live in $lib/sources/youtube/server/http.ts.
 // This adapter exposes TWO YouTube methods, each with a different accounting
 // boundary:
@@ -266,9 +258,15 @@ async function pollStatsBatch(
       // Not in response - private, deleted, embedded-disabled, or never existed.
       return { polledAt: now, status: "not_found" as const };
     }
+    // contentDetails.duration is the Shorts duration PREFILTER input — NOT the
+    // decider. duration_seconds flows to the poll worker, which (a) skips the
+    // probe for videos longer than the Shorts ceiling and (b) probes everything
+    // else. We deliberately do NOT emit a duration-only is_short guess here: a
+    // ≤3min runtime does not prove a Short (user-locked 2026-06-12); the
+    // redirect probe is the only thing that may set media_type='short'.
     const dur = item.contentDetails?.duration
-      ? durationToSeconds(item.contentDetails.duration)
-      : undefined;
+      ? parseIso8601Duration(item.contentDetails.duration)
+      : null;
     const snapshot: StatsSnapshot = {
       polledAt: now,
       status: "ok",
@@ -278,8 +276,8 @@ async function pollStatsBatch(
         comment_count: Number(item.statistics?.commentCount ?? 0),
       },
     };
-    if (dur !== undefined) {
-      snapshot.metadata = { duration_seconds: dur, is_short: dur <= 60 };
+    if (dur !== null) {
+      snapshot.metadata = { duration_seconds: dur };
     }
     return snapshot;
   });

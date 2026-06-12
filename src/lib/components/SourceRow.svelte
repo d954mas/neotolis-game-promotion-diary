@@ -111,6 +111,7 @@
     telegram_channel: "--k-telegram",
     discord_server: "--k-discord",
     instagram_account: "--k-instagram",
+    tiktok_account: "--k-tiktok",
   };
 
   // Relative-time formatter for "synced X ago".

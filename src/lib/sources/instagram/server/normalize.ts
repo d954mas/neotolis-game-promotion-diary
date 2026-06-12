@@ -22,6 +22,25 @@ import type {
   ProviderPage,
 } from "$lib/sources/social-provider.js";
 
+/** D-09 event/preview title = the caption's FIRST line, falling back to the
+ *  "Instagram <kind> · <date>" shape so a caption-less post still produces a
+ *  meaningful, non-empty title (the Add Event form requires one). One spelling for
+ *  both the walker (adapter.ts) and the paste preview (index.ts). Lives here — the
+ *  pure-mapping home — alongside the other provider→event mappers. The fallback
+ *  string mirrors messages/en.json event_title_instagram_fallback. */
+export function buildInstagramTitle(
+  caption: string | null,
+  kind: string,
+  publishedAt: Date,
+): string {
+  const trimmed = caption?.trim();
+  if (trimmed !== undefined && trimmed !== "") {
+    const firstLine = trimmed.split("\n", 1)[0]!.trim();
+    if (firstLine !== "") return firstLine;
+  }
+  return `Instagram ${kind} · ${publishedAt.toISOString().slice(0, 10)}`;
+}
+
 // ---- LIVE-CONFIRMED media_type integers (08-SPIKE.md) ----
 // 1 = image, 2 = video/short, 8 = carousel. The integer alone CANNOT tell a
 // short-form clip from a plain feed video — both are 2. The discriminator is
@@ -350,6 +369,9 @@ export function mapSinglePostToNormalized(
       views: media.video_play_count ?? media.video_view_count ?? null,
       likes: media.edge_media_preview_like?.count ?? null,
       comments: media.edge_media_to_parent_comment?.count ?? null,
+      // Instagram exposes no share metric in either endpoint (D-04). TikTok is
+      // the first platform to populate NormalizedSinglePost.metrics.shares.
+      shares: null,
     },
     caption,
     thumbnailUrl: media.thumbnail_src ?? null,

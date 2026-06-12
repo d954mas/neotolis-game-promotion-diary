@@ -34,7 +34,8 @@ export type AddSourceUiKind =
   | "twitter_account"
   | "telegram_channel"
   | "discord_server"
-  | "instagram_account";
+  | "instagram_account"
+  | "tiktok_account";
 
 export type KindLabelKey =
   | "source_kind_label_youtube_channel"
@@ -42,6 +43,7 @@ export type KindLabelKey =
   | "source_kind_label_telegram_channel"
   | "source_kind_label_discord_server"
   | "source_kind_label_instagram_account"
+  | "source_kind_label_tiktok_account"
   | "common_kind_reddit";
 
 export type KindStatusKey =
@@ -49,7 +51,8 @@ export type KindStatusKey =
   | "source_kind_status_twitter_account"
   | "source_kind_status_telegram_channel"
   | "source_kind_status_discord_server"
-  | "source_kind_status_instagram_account";
+  | "source_kind_status_instagram_account"
+  | "source_kind_status_tiktok_account";
 
 // disabledReason distinguishes "adapter built, operator env unset" (Reddit /
 // Instagram unconfigured → "not-configured") from "not built yet" (Twitter /
@@ -97,6 +100,12 @@ const UI_KINDS: ReadonlyArray<{
     labelKey: "source_kind_label_instagram_account",
     statusKey: "source_kind_status_instagram_account",
     probeKind: "instagram_account",
+  },
+  {
+    value: "tiktok_account",
+    labelKey: "source_kind_label_tiktok_account",
+    statusKey: "source_kind_status_tiktok_account",
+    probeKind: "tiktok_account",
   },
   {
     value: "twitter_account",

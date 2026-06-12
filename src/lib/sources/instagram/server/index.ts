@@ -38,18 +38,25 @@ import { getBoss } from "$lib/server/queue-client.js";
 import { db } from "$lib/server/db/client.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { getChannelState } from "$lib/server/services/channel-state.js";
-import { getUserQuotaUsedToday, nextPacificMidnight } from "$lib/server/services/quota.js";
+import { backfillWindowToDate } from "$lib/server/services/data-sources.js";
+import {
+  enforceAdapterUserQuota,
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+} from "$lib/server/services/quota.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { instagramAccountAdapterCore } from "./adapter.js";
 import { instagramParseUrl, instagramParseSourceUrl } from "./url.js";
+import { buildInstagramTitle } from "./normalize.js";
 import { resetInstagramBackfillState } from "./backfill-state.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import { writeSnapshot } from "./snapshots.js";
 import { instagramThumbnailRoutes } from "./thumbnail-proxy.js";
-import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
+import { adapterRefreshQueue, instagramPosts } from "$lib/server/db/schema/index.js";
+import { eq, desc } from "drizzle-orm";
 import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
 import { handleBackfillAccount } from "./handlers/backfill-account.js";
 import { handleInstagramPollCron } from "./handlers/poll-cron.js";
@@ -65,13 +72,11 @@ const EPOCH_ISO = "1970-01-01T00:00:00Z";
 /** Resolve the depth-bound ISO for a backfill from a source's resolved
  *  target. backfillTargetSince is derived by createSource from backfillWindow
  *  (default 30d, D-10); when null (no historical pull) the walker still needs a
- *  floor — use the window default. */
+ *  floor — use the window default. The window→date mapping is the shared
+ *  backfillWindowToDate (one spelling with createSource's backfill_target_since
+ *  derivation; 'everything' maps to the 1970 epoch = EPOCH_ISO). */
 function depthBoundIsoForWindow(window: BackfillWindow, targetSince: Date | null): string {
-  if (targetSince !== null) return targetSince.toISOString();
-  if (window === "everything") return EPOCH_ISO;
-  const days =
-    window === "1d" ? 1 : window === "7d" ? 7 : window === "30d" ? 30 : window === "90d" ? 90 : 365;
-  return new Date(Date.now() - days * 86_400_000).toISOString();
+  return targetSince?.toISOString() ?? backfillWindowToDate(window).toISOString();
 }
 
 async function registerQueues(boss: MinimalBoss): Promise<void> {
@@ -450,7 +455,6 @@ async function fetchEventPreviewMetadata(
   // Per-user fair-share cap (50/day) — runs BEFORE the fetch so a cap-exhausted
   // user never burns a credit they aren't allowed to consume. Throws AppError
   // 429 (requests_quota_exhausted) which enrichFromUrl soft-handles.
-  const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
   await enforceAdapterUserQuota(db, instagramAdapter, ctx.userId, ctx.ipAddress, "post-refresh", {
     platform: "instagram_account",
   });
@@ -490,8 +494,6 @@ async function fetchEventPreviewMetadata(
   // genuinely-new `/p/` reel with no cache row stays "video" (a hard limit of
   // the single-post endpoint — no product_type to disambiguate, no `/reel/` slug
   // in the URL); the next account-level poll corrects it.
-  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
-  const { eq } = await import("drizzle-orm");
   const [cached] = await db
     .select({ mediaType: instagramPosts.mediaType })
     .from(instagramPosts)
@@ -542,7 +544,7 @@ async function fetchEventPreviewMetadata(
 
   return {
     kind: "ok",
-    title: buildPreviewTitle(post.caption, mediaType, post.publishedAt),
+    title: buildInstagramTitle(post.caption, mediaType, post.publishedAt),
     authorName: post.ownerUsername ?? "",
     authorUrl: ownerUrl,
     occurredAt: post.publishedAt,
@@ -554,19 +556,6 @@ async function fetchEventPreviewMetadata(
     // is NOT the media id, so the event must be saved with post.id to enrich.
     externalId: post.id,
   };
-}
-
-/** Title = caption's FIRST line (D-09), falling back to the
- *  "Instagram <mediaType> · <date>" shape the walker's buildTitle uses so a
- *  caption-less paste still produces a meaningful, non-empty title (which the
- *  Add Event form requires). */
-function buildPreviewTitle(caption: string | null, mediaType: string, publishedAt: Date): string {
-  const trimmed = caption?.trim();
-  if (trimmed !== undefined && trimmed !== "") {
-    const firstLine = trimmed.split("\n", 1)[0]!.trim();
-    if (firstLine !== "") return firstLine;
-  }
-  return `Instagram ${mediaType} · ${publishedAt.toISOString().slice(0, 10)}`;
 }
 
 /**
@@ -585,8 +574,6 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
   const parsed = instagramParseUrl(url);
   const permalink = parsed?.metadata?.permalink;
   if (typeof permalink !== "string") return null;
-  const { instagramPosts } = await import("$lib/server/db/schema/index.js");
-  const { eq, desc } = await import("drizzle-orm");
   // permalink is not unique-constrained (PK is post_id). A single physical post
   // can transiently land TWO rows with the same permalink — the bare `<pk>` form
   // (single-post fetch, owner unknown) vs the canonical `<pk>_<owner>` form (feed)

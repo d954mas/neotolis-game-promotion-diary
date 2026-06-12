@@ -18,6 +18,8 @@
   // the picker stays composable.
 
   import { m } from "$lib/paraglide/messages.js";
+  import { addSourceUiCadenceLabel } from "$lib/sources/kind-display.js";
+  import type { AddSourceUiKind } from "$lib/sources/kind-matrix.js";
 
   type Preset = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
@@ -69,6 +71,20 @@
       !customDate &&
       (value === "90d" || value === "1y" || value === "everything"),
   );
+
+  // Section blurb: the "after the initial pull, auto-import keeps it current"
+  // nudge with the REAL per-platform cadence (single source of truth —
+  // addSourceUiCadenceLabel) appended, NOT the stale global "every 6 hours".
+  // YouTube keeps the "videos" noun; every other kind uses the neutral "posts"
+  // variant. The parent only mounts this with a concrete pickerKind, so a
+  // missing kind falls back to youtube_channel (matches the parent default).
+  const blurb = $derived.by(() => {
+    const uiKind = (kind ?? "youtube_channel") as AddSourceUiKind;
+    const cadence = addSourceUiCadenceLabel(uiKind);
+    return uiKind === "youtube_channel"
+      ? m.backfill_picker_section_blurb_youtube({ cadence })
+      : m.backfill_picker_section_blurb({ cadence });
+  });
 
   const presets: { id: Preset; label: () => string }[] = [
     { id: "1d", label: m.backfill_picker_preset_1d_label },
@@ -133,7 +149,7 @@
            action read as redundant UX. -->
     </div>
   </details>
-  <p class="blurb">{m.backfill_picker_section_blurb()}</p>
+  <p class="blurb">{blurb}</p>
   <small class="helper">
     {#if customDate}
       Pulling events submitted on or after <b>{customDate}</b>.

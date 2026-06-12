@@ -98,6 +98,8 @@
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import { getCardComponent } from "$lib/sources/registry-ui-client.js";
+  import { FEED_KIND_FILTER_KINDS } from "$lib/sources/kind-display.js";
+  import { MEDIA_FILTER_CATEGORIES, type MediaTypeCategory } from "$lib/feed/media-type-filter.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
 
   import type { EventKind } from "$lib/sources/adapter.js";
@@ -195,6 +197,9 @@
   function setKind(next: EventKind[]): void {
     pushUrl({ ...urlState, kind: next, cursor: undefined });
   }
+  function setMediaType(next: MediaTypeCategory[]): void {
+    pushUrl({ ...urlState, mediaType: next, cursor: undefined });
+  }
   function setSource(next: string[]): void {
     pushUrl({ ...urlState, source: next, cursor: undefined });
   }
@@ -219,6 +224,7 @@
       show: { kind: "any" },
       gameTags: [],
       kind: [],
+      mediaType: [],
       source: [],
       authorIsMe: undefined,
       dateRange: { preset: "all" },
@@ -466,19 +472,17 @@
     gamesPicker.close();
   }
 
-  // KIND axis order + labels. Hard-coded to mirror prototype
-  // docs/design/v2/ui-kit/app.jsx lines 1645-1657 — YouTube first (the
-  // marquee promotion channel), Press second (highest-leverage low-volume
-  // surface), then Reddit/Twitter/Telegram/Discord (social), then Post (the
-  // catch-all manual entry), then Conference/Talk (offline), then Other
-  // (escape hatch). Hoisted above activeAxes so the strip's kind-label
-  // lookup sees it. Empty kinds still render so the user can predict
-  // counts; data-empty="1" dims their count badge.
-  // Only kinds with a real adapter or manual-entry path are surfaced in
-  // the KIND axis. Twitter / Telegram / Discord are declared in the
-  // schema enum but have no adapter or paste flow — PROJECT.md flags
-  // them as out-of-scope for v1. They stay in the DB enum (forward
-  // compatibility) but never appear in the filter UI.
+  // KIND axis order + labels. Order comes from FEED_KIND_FILTER_KINDS
+  // (kind-display.ts) — the single ORDERED source of truth, validated for
+  // exact-set equality against FEED_FILTERABLE_EVENT_KINDS by
+  // tests/unit/feed-filter-derivation.test.ts. Phase 10 D-08: this REPLACES
+  // the hand-maintained KIND_AXIS_ORDER array that lived here and was never
+  // updated when instagram_post / telegram_post / tiktok_post shipped, so the
+  // social adapter kinds silently dropped out of the LIVE /feed KIND axis (the
+  // user-reported regression). A new adapter kind now auto-appears the moment
+  // it's marked feedFilterable:true and placed in FEED_KIND_FILTER_KINDS.
+  // Empty kinds still render so the user can predict counts; data-empty="1"
+  // dims their count badge.
   // Deterministic per-game color from id hash → HSL. GameDto has no
   // color field, so derive client-side. Same id always produces the same
   // hue so the color flows consistently across FeedCard footer chips,
@@ -490,15 +494,19 @@
     return `hsl(${hue} 62% 52%)`;
   }
 
-  const KIND_AXIS_ORDER: readonly EventKind[] = [
-    "youtube_video",
-    "reddit_post",
-    "press",
-    "post",
-    "conference",
-    "talk",
-    "other",
-  ] as const;
+  // TYPE axis (Short / Video / Other) order + labels. Order comes from
+  // MEDIA_FILTER_CATEGORIES (media-type-filter.ts) — the single source of
+  // ORDER + MEMBERSHIP; the URL validator derives its allowed values from the
+  // SAME const, so a chip that renders always round-trips the URL (no hand-list
+  // drift, the lesson this branch already learned four times).
+  const TYPE_AXIS_ORDER: readonly MediaTypeCategory[] = MEDIA_FILTER_CATEGORIES;
+  const TYPE_AXIS_LABEL: Record<MediaTypeCategory, () => string> = {
+    short: m.feed_axis_type_short,
+    video: m.feed_axis_type_video,
+    other: m.feed_axis_type_other,
+  };
+
+  const KIND_AXIS_ORDER: readonly EventKind[] = FEED_KIND_FILTER_KINDS;
   const KIND_AXIS_LABEL: Record<EventKind, () => string> = {
     youtube_video: m.feed_axis_kind_youtube_video,
     press: m.feed_axis_kind_press,
@@ -507,6 +515,7 @@
     telegram_post: m.feed_axis_kind_telegram_post,
     discord_drop: m.feed_axis_kind_discord_drop,
     instagram_post: m.feed_axis_kind_instagram_post,
+    tiktok_post: m.feed_axis_kind_tiktok_post,
     post: m.feed_axis_kind_post,
     conference: m.feed_axis_kind_conference,
     talk: m.feed_axis_kind_talk,
@@ -562,6 +571,13 @@
         onRemove: () => setKind(urlState.kind.filter((x) => x !== k)),
       });
     }
+    for (const c of urlState.mediaType) {
+      chips.push({
+        axis: "type",
+        label: TYPE_AXIS_LABEL[c]?.() ?? c,
+        onRemove: () => setMediaType(urlState.mediaType.filter((x) => x !== c)),
+      });
+    }
     for (const sid of urlState.source) {
       const src = data.sources.find((s) => s.id === sid);
       chips.push({
@@ -601,6 +617,17 @@
       author_is_me: e.authorIsMe,
       gameIds: e.gameIds,
       metadata: e.metadata as { triage?: { offTopic?: boolean } } | null,
+      // Per-post media kind from the feed enrichment — drives the client-side
+      // MEDIA-TYPE axis classification (predicted counts + the header's
+      // filtered-count display). Mirrors the server's per-post cache-row arm.
+      instagramEnrichment: (e as { instagramEnrichment?: { mediaType?: string | null } | null })
+        .instagramEnrichment,
+      tiktokEnrichment: (e as { tiktokEnrichment?: { mediaType?: string | null } | null })
+        .tiktokEnrichment,
+      // youtube_video classifies per-post too (media_type 'short' → short, else
+      // video). NULL/missing → video (the filter-math youtube arm's default).
+      youtubeEnrichment: (e as { youtubeEnrichment?: { mediaType?: string | null } | null })
+        .youtubeEnrichment,
     })),
   );
 
@@ -878,6 +905,44 @@
           setKind(next);
         }}
         onClearAxis={() => setKind([])}
+      />
+
+      <!-- TYPE axis (Short / Video / Other) — sentinel "All" + per-category
+        multi-select chips. Options derived from MEDIA_FILTER_CATEGORIES (the
+        single source of truth shared with the URL validator + the server
+        filter). Cross-source: classifies every feed event by content SHAPE
+        (TikTok/IG Reels → Short, YouTube/IG feed video → Video, everything else
+        → Other). -->
+      <AxisRow
+        label={m.axis_row_type_label()}
+        axisKey="type"
+        options={[
+          {
+            value: "all",
+            label: m.feed_axis_type_all(),
+            // "All types" sentinel — total events matching every other axis with
+            // the TYPE axis cleared. Stable across same-axis (TYPE) toggles.
+            predictedCount: data.facets.mediaType.all,
+          },
+          ...TYPE_AXIS_ORDER.map((c) => ({
+            value: c,
+            label: TYPE_AXIS_LABEL[c](),
+            predictedCount: data.facets.mediaType[c],
+          })),
+        ]}
+        selectedValues={urlState.mediaType.length === 0 ? ["all"] : urlState.mediaType}
+        onToggle={(v) => {
+          if (v === "all") {
+            setMediaType([]);
+            return;
+          }
+          const cat = v as MediaTypeCategory;
+          const next = urlState.mediaType.includes(cat)
+            ? urlState.mediaType.filter((x) => x !== cat)
+            : [...urlState.mediaType, cat];
+          setMediaType(next);
+        }}
+        onClearAxis={() => setMediaType([])}
       />
     </div>
   {/if}

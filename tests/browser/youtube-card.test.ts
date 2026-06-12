@@ -86,12 +86,15 @@ describe("YoutubeFeedCard media-type pill", () => {
     unmount(component);
   });
 
-  it("pill sits over the IMAGE, not the empty placeholder (no externalId → no thumbnail → no pill)", () => {
+  it("pill renders over the placeholder too (no externalId → no thumbnail, marker stays)", () => {
     // No externalId → deriveThumbnailUrl returns null → BaseFeedCard shows the
-    // .card-thumb.empty KindIcon placeholder and gates the pill off (it marks a
-    // picture, not a placeholder).
+    // .card-thumb.empty KindIcon placeholder. The Video pill still renders
+    // (UAT 2026-06-12) — a manual youtube_video event without a preview keeps
+    // its type marker, matching the event-detail behavior.
     const { card, component } = mountCard(makeEvent({ externalId: null }));
-    expect(card.querySelector(".media-type-pill")).toBeNull();
+    const pill = card.querySelector(".media-type-pill");
+    expect(pill).not.toBeNull();
+    expect(pill!.getAttribute("aria-label")).toBe("Video");
     unmount(component);
   });
 });

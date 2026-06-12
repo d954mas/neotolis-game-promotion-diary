@@ -5,8 +5,9 @@
 // enqueue and recorded in audit_log; service_video rows run under the cron
 // pool.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { events } from "$lib/server/db/schema/events.js";
+import { youtubeVideos } from "../schema/index.js";
 import { db, type DbOrTx } from "$lib/server/db/client.js";
 import {
   createAdapterBatchLaneWorker,
@@ -19,6 +20,8 @@ import {
 import { logger } from "$lib/server/logger.js";
 import { youtubeChannelAdapterCore, YOUTUBE_VIDEOS_BATCH_SIZE } from "../adapter.js";
 import { writeSnapshot } from "../snapshots.js";
+import { durationPrefilter } from "../duration.js";
+import { probeIsShort, PROBE_BUDGET_PER_TICK } from "../shorts-probe.js";
 import {
   hasYoutubeApiKeys,
   msUntilMidnightPacific,
@@ -139,9 +142,55 @@ async function refreshVideoGroup(
   if (videoIds.length === 0) return;
   const snapshots = await youtubeChannelAdapterCore.pollStatsByVideoId(videoIds, quotaUser, permit);
   const snapshotByVideoId = new Map(videoIds.map((videoId, i) => [videoId, snapshots[i]!]));
+
+  // Shorts classification — only for videos this tick already touches whose
+  // media_type is still NULL (lazy heal: existing prod rows start NULL, classify
+  // as the poll worker walks them). Already-classified rows are skipped (one
+  // probe per video, ever). The per-tick probe budget bounds network round-trips
+  // so a large legacy NULL backlog heals across many ticks, not all at once.
+  const unclassified = await loadUnclassifiedVideoIds(videoIds);
+
+  // Decide the media_type verdicts up front (undefined = leave the column
+  // untouched):
+  //   - already classified (not in `unclassified`)  → undefined.
+  //   - a failed poll (status !== ok)                → undefined (no signal).
+  //   - duration > Shorts ceiling                    → "video" (no probe).
+  //   - duration ≤ ceiling / unknown AND budget left → probe (decider).
+  //   - budget exhausted                             → undefined (next tick).
+  // Probes run with bounded CONCURRENCY (not one-by-one): the worst case of a
+  // full budget of hung probes is one timeout window per chunk, not
+  // budget × timeout sequentially blocking the worker slot (review P2).
+  const verdictByVideoId = new Map<string, "short" | "video">();
+  const probeCandidates: string[] = [];
+  for (const videoId of videoIds) {
+    const snap = snapshotByVideoId.get(videoId)!;
+    if (snap.status !== "ok" || !unclassified.has(videoId)) continue;
+    const prefilter = durationPrefilter(snap.metadata?.duration_seconds ?? null);
+    if (prefilter === "skip-video") {
+      verdictByVideoId.set(videoId, "video");
+    } else if (probeCandidates.length < PROBE_BUDGET_PER_TICK) {
+      probeCandidates.push(videoId);
+    }
+  }
+  const PROBE_CONCURRENCY = 5;
+  for (let i = 0; i < probeCandidates.length; i += PROBE_CONCURRENCY) {
+    const chunk = probeCandidates.slice(i, i + PROBE_CONCURRENCY);
+    const results = await Promise.allSettled(chunk.map((videoId) => probeIsShort(videoId)));
+    for (let j = 0; j < chunk.length; j++) {
+      const r = results[j]!;
+      // null/rejected (ambiguous / probe failure) → leave NULL: classifies as
+      // video downstream, never guessed. Heals on a future tick's probe.
+      if (r.status === "fulfilled" && r.value !== null) {
+        verdictByVideoId.set(chunk[j]!, r.value);
+      }
+    }
+  }
+
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshotByVideoId.get(videoId)!;
+    const mediaType: "short" | "video" | undefined = verdictByVideoId.get(videoId);
+
     await writeSnapshot({
       videoId,
       metrics:
@@ -156,8 +205,22 @@ async function refreshVideoGroup(
       unitsUsed: 0,
       poolKind,
       status: snap.status,
+      mediaType,
     });
   }
+}
+
+/** The subset of `videoIds` whose youtube_videos.media_type is still NULL —
+ *  the classification candidates. Public-data table (no userId scope); a video
+ *  row may not exist yet (paste-only pre-backfill) and is simply absent from the
+ *  result (no classification attempted until the row exists). */
+async function loadUnclassifiedVideoIds(videoIds: string[]): Promise<Set<string>> {
+  if (videoIds.length === 0) return new Set();
+  const rows = await db
+    .select({ videoId: youtubeVideos.videoId })
+    .from(youtubeVideos)
+    .where(and(inArray(youtubeVideos.videoId, videoIds), isNull(youtubeVideos.mediaType)));
+  return new Set(rows.map((r) => r.videoId));
 }
 
 async function loadVideoWork(

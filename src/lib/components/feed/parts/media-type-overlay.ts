@@ -79,13 +79,17 @@ export interface MediaTypeOverlayEvent {
   kind: string;
   instagramEnrichment?: { mediaType?: string | null } | null;
   telegramEnrichment?: { mediaKind?: string | null } | null;
+  tiktokEnrichment?: { mediaType?: string | null } | null;
+  youtubeEnrichment?: { mediaType?: string | null } | null;
 }
 
 /**
  * THE single kind→pill derivation, shared by the feed cards and the event
  * detail so the per-kind decision lives in one place (DRY):
- *   - youtube_video  → always the "Video" pill (a feed thumbnail can't tell a
- *     Short from a full video yet; Shorts detection is deferred).
+ *   - youtube_video  → the post's media_type (youtube_videos.media_type, carried
+ *     by youtubeEnrichment): 'short' → "Short" pill; 'video' / NULL / missing →
+ *     "Video" pill (a YouTube video is a video at worst — Shorts detection heals
+ *     NULLs lazily via the redirect probe, never demoting an unclassified video).
  *   - instagram_post → the post's media_type (short / video / carousel → pill;
  *     image / missing → null).
  *   - telegram_post  → the post's media_kind, translated to the shared pill
@@ -93,12 +97,22 @@ export interface MediaTypeOverlayEvent {
  *     null). The telegram_posts table speaks photo/video/album (D-06); the pill
  *     vocabulary speaks short/carousel/video, so the translation lives here in
  *     the single kind→pill home, not in the card.
+ *   - tiktok_post    → the post's media_type: short → "Short" (every TikTok
+ *     video is a short-form clip), carousel (photo-mode slideshow) →
+ *     "Carousel"; anything else / missing → null. (Supersedes the original
+ *     CONTEXT D-03 {video, carousel} vocabulary — user re-decided 2026-06-12
+ *     during UAT that TikTok videos are Shorts.)
  *   - any other kind → null (no pill).
  * Pure; the caller renders <MediaTypePill> only when this is non-null (and a
  * thumbnail image is actually shown).
  */
 export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPill | null {
-  if (event.kind === "youtube_video") return mediaTypeOverlay("video");
+  if (event.kind === "youtube_video") {
+    // 'short' → Short pill; 'video' / NULL / unclassified → Video pill.
+    return event.youtubeEnrichment?.mediaType === "short"
+      ? mediaTypeOverlay("short")
+      : mediaTypeOverlay("video");
+  }
   if (event.kind === "instagram_post") {
     return mediaTypeOverlay(event.instagramEnrichment?.mediaType ?? "");
   }
@@ -107,6 +121,16 @@ export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPil
     if (mediaKind === "album") return mediaTypeOverlay("carousel");
     if (mediaKind === "video") return mediaTypeOverlay("video");
     return null; // photo / text-only → no pill (a photo needs no marker)
+  }
+  if (event.kind === "tiktok_post") {
+    const mediaType = event.tiktokEnrichment?.mediaType ?? "";
+    // The tiktok_posts table now speaks {short, carousel} (every TikTok video is
+    // a short-form clip → "short"; photo-mode → "carousel"). The pill vocabulary
+    // already carries both terms, so no translation is needed (carousel → the
+    // shared "Carousel" pill, short → the shared "Short" pill).
+    if (mediaType === "carousel") return mediaTypeOverlay("carousel");
+    if (mediaType === "short") return mediaTypeOverlay("short");
+    return null;
   }
   return null;
 }

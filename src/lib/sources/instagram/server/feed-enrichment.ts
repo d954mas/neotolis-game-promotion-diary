@@ -100,19 +100,41 @@ export async function instagramEnrichFeedDtos(
       externalIds.map((id) => sql`${id}`),
       sql`, `,
     );
-    const latestRows = await db.execute<{
-      post_id: string;
-      polled_at: Date;
-      view_count: number | null;
-      like_count: number | null;
-      comment_count: number | null;
-    }>(sql`
-      SELECT DISTINCT ON (post_id)
-        post_id, polled_at, view_count, like_count, comment_count
-      FROM instagram_post_snapshots
-      WHERE post_id IN (${idsSql})
-      ORDER BY post_id, polled_at DESC
-    `);
+    // Queries 1 + 2 are independent (both key on externalIds) — run them
+    // concurrently. Query 3 (operator-paused) depends on accountIds derived from
+    // query 2's rows, so it stays sequential after this pair.
+    const [latestRows, postRows] = await Promise.all([
+      db.execute<{
+        post_id: string;
+        polled_at: Date;
+        view_count: number | null;
+        like_count: number | null;
+        comment_count: number | null;
+      }>(sql`
+        SELECT DISTINCT ON (post_id)
+          post_id, polled_at, view_count, like_count, comment_count
+        FROM instagram_post_snapshots
+        WHERE post_id IN (${idsSql})
+        ORDER BY post_id, polled_at DESC
+      `),
+      // 2. Thumbnail + media_type + account_id from instagram_posts (post-keyed
+      //    public-data). NO account display name read here — the handle lives on
+      //    data_sources and the card reads it from the `source` prop (no-denorm
+      //    rule). account_id IS carried — it is the intrinsic IG account key
+      //    (= data_source_channel_state.channelKey), URL-identity-safe, not a
+      //    renameable display value — and lets us resolve the account's
+      //    operator-budget-paused hint below (BUDGET-01) without touching
+      //    data_sources.
+      db
+        .select({
+          postId: instagramPosts.postId,
+          thumbnailUrl: instagramPosts.thumbnailUrl,
+          mediaType: instagramPosts.mediaType,
+          accountId: instagramPosts.accountId,
+        })
+        .from(instagramPosts)
+        .where(inArray(instagramPosts.postId, externalIds)),
+    ]);
     const latest = new Map<string, InstagramEnrichment["stats"]>();
     for (const s of latestRows.rows) {
       // db.execute returns raw pg driver shapes — bigint columns come back
@@ -127,23 +149,6 @@ export async function instagramEnrichFeedDtos(
       });
     }
 
-    // 2. Thumbnail + media_type + account_id from instagram_posts (post-keyed
-    //    public-data). NO account display name read here — the handle lives on
-    //    data_sources and the card reads it from the `source` prop (no-denorm
-    //    rule). account_id IS carried — it is the intrinsic IG account key
-    //    (= data_source_channel_state.channelKey), URL-identity-safe, not a
-    //    renameable display value — and lets us resolve the account's
-    //    operator-budget-paused hint below (BUDGET-01) without touching
-    //    data_sources.
-    const postRows = await db
-      .select({
-        postId: instagramPosts.postId,
-        thumbnailUrl: instagramPosts.thumbnailUrl,
-        mediaType: instagramPosts.mediaType,
-        accountId: instagramPosts.accountId,
-      })
-      .from(instagramPosts)
-      .where(inArray(instagramPosts.postId, externalIds));
     const postMeta = new Map<
       string,
       { thumbnailUrl: string | null; mediaType: string | null; accountId: string | null }

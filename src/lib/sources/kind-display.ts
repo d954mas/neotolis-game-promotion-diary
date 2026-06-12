@@ -24,6 +24,7 @@
 
 import { m } from "$lib/paraglide/messages.js";
 import type { EventKind, SourceKind } from "./adapter.js";
+import type { AddSourceUiKind } from "./kind-matrix.js";
 
 export interface EventKindDisplay {
   /** Paraglide resolver for the human label (e.g. "Instagram"). */
@@ -50,6 +51,24 @@ export interface EventKindDisplay {
    *  from the picker: the new key must declare manualCreatable, forcing an
    *  explicit yes/no decision. Order is carried by MANUAL_EVENT_KINDS. */
   manualCreatable: boolean;
+  /** Appears as an option in the /feed KIND filter axis (FiltersSheet's
+   *  checkbox list, derived from FEED_FILTERABLE_EVENT_KINDS). true for the
+   *  kinds a user can see in their feed and meaningfully filter — the pollable
+   *  paste-flow kinds (youtube_video / reddit_post / instagram_post /
+   *  telegram_post) PLUS the free-form kinds (press / post / conference / talk
+   *  / other); false for twitter_post / discord_drop, which have no adapter —
+   *  filtering to a kind you can't create is a footgun (same rationale as
+   *  manualCreatable).
+   *
+   *  Phase 10 D-08: this flag REPLACES the hand-maintained allowlist that used
+   *  to live in FiltersSheet.svelte (FUNCTIONAL_KIND_OPTIONS). That hand-list
+   *  was never updated when instagram_post / telegram_post shipped, so the
+   *  social kinds silently dropped out of the /feed filter — the user-reported
+   *  regression. Deriving from this flag means a new adapter kind auto-appears
+   *  in the filter the moment it's marked feedFilterable:true, with no sheet
+   *  edit, and the `satisfies Record<EventKind, …>` below forces the explicit
+   *  yes/no decision for every future kind. */
+  feedFilterable: boolean;
 }
 
 export interface SourceKindDisplay {
@@ -58,6 +77,16 @@ export interface SourceKindDisplay {
   /** Drives the `/sources` list grouping. reddit_account + reddit_subreddit
    *  share one "Reddit" group (same `key`); `order` is the group sort key. */
   platformGroup: { key: string; label: string; order: number };
+  /** Paraglide resolver for the per-platform auto-import poll cadence, surfaced
+   *  in the Add-Source auto-import toggle, the source-settings card, and the
+   *  BackfillPicker blurb. The string states what THIS kind's crons actually do
+   *  (scheduleCronTicks in `<kind>/server/index.ts`) — NOT a global "every 6
+   *  hours" (the stale copy this field replaced). The two free-form not-built
+   *  kinds (twitter / discord) carry a neutral string since they have no
+   *  auto-import cron yet; `satisfies Record<SourceKind, …>` still forces an
+   *  explicit entry for every future kind, so a new adapter can't ship with a
+   *  wrong-but-inherited cadence label. */
+  cadence: () => string;
 }
 
 // One entry per EventKind. `satisfies Record<EventKind, …>` is the compile-time
@@ -68,98 +97,142 @@ export const EVENT_KIND_DISPLAY = {
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   reddit_post: {
     label: () => m.event_kind_label_reddit_post(),
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   instagram_post: {
     label: () => m.event_kind_label_instagram_post(),
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
+  },
+  tiktok_post: {
+    label: () => m.event_kind_label_tiktok_post(),
+    pollable: true,
+    chartable: true,
+    manualCreatable: true,
+    feedFilterable: true,
   },
   twitter_post: {
     label: () => m.event_kind_label_twitter_post(),
     pollable: false,
     chartable: false,
     manualCreatable: false,
+    feedFilterable: false,
   },
   telegram_post: {
     label: () => m.event_kind_label_telegram_post(),
     pollable: true,
     chartable: true,
     manualCreatable: true,
+    feedFilterable: true,
   },
   discord_drop: {
     label: () => m.event_kind_label_discord_drop(),
     pollable: false,
     chartable: false,
     manualCreatable: false,
+    feedFilterable: false,
   },
   conference: {
     label: () => m.event_kind_label_conference(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   talk: {
     label: () => m.event_kind_label_talk(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   press: {
     label: () => m.event_kind_label_press(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   post: {
     label: () => m.event_kind_label_post(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
   other: {
     label: () => m.event_kind_label_other(),
     pollable: false,
     chartable: false,
     manualCreatable: true,
+    feedFilterable: true,
   },
 } satisfies Record<EventKind, EventKindDisplay>;
 
 // One entry per SourceKind. Same compile-time guard via `satisfies`.
+//
+// `cadence` mirrors each kind's scheduleCronTicks in <kind>/server/index.ts:
+//   - youtube_channel : active poll "0 */6 * * *" (every 6h).
+//   - reddit_*        : enqueue-service-sources "0 0,6,12,18" + posts
+//                        "0 3,9,15,21" → a fresh walk every 6h, no warm lane.
+//   - instagram_account: active poll "0 6 * * *" (daily) + warm per-post lane
+//                        "0 * * * *" (hourly, >26h staleness gate → ~1 paid
+//                        stats refresh/day per recent post).
+//   - tiktok_account  : active poll "0 6 * * *" (daily) + warm lane "0 * * * *"
+//                        (hourly, >26h gate → ~1 paid refresh/day).
+//   - telegram_channel: active listing "0 */6 * * *" (every 6h) + warm lane
+//                        "0 * * * *" (hourly, 12h staleness gate → view counts
+//                        refresh ~twice/day).
+//   - twitter / discord: no adapter, no auto-import cron yet → neutral string.
 export const SOURCE_KIND_DISPLAY = {
   youtube_channel: {
     label: () => m.source_kind_label_youtube_channel(),
     platformGroup: { key: "youtube", label: "YouTube", order: 0 },
+    cadence: () => m.source_cadence_youtube_channel(),
   },
   reddit_account: {
     label: () => m.source_kind_label_reddit_account(),
     platformGroup: { key: "reddit", label: "Reddit", order: 1 },
+    cadence: () => m.source_cadence_reddit_account(),
   },
   reddit_subreddit: {
     label: () => m.source_kind_label_reddit_account(),
     platformGroup: { key: "reddit", label: "Reddit", order: 1 },
+    cadence: () => m.source_cadence_reddit_account(),
   },
   instagram_account: {
     label: () => m.source_kind_label_instagram_account(),
     platformGroup: { key: "instagram", label: "Instagram", order: 2 },
+    cadence: () => m.source_cadence_instagram_account(),
+  },
+  tiktok_account: {
+    label: () => m.source_kind_label_tiktok_account(),
+    platformGroup: { key: "tiktok", label: "TikTok", order: 6 },
+    cadence: () => m.source_cadence_tiktok_account(),
   },
   twitter_account: {
     label: () => m.source_kind_label_twitter_account(),
     platformGroup: { key: "twitter", label: "Twitter", order: 3 },
+    cadence: () => m.source_cadence_default(),
   },
   telegram_channel: {
     label: () => m.source_kind_label_telegram_channel(),
     platformGroup: { key: "telegram", label: "Telegram", order: 4 },
+    cadence: () => m.source_cadence_telegram_channel(),
   },
   discord_server: {
     label: () => m.source_kind_label_discord_server(),
     platformGroup: { key: "discord", label: "Discord", order: 5 },
+    cadence: () => m.source_cadence_default(),
   },
 } satisfies Record<SourceKind, SourceKindDisplay>;
 
@@ -174,6 +247,48 @@ export const CHARTABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
   (Object.keys(EVENT_KIND_DISPLAY) as EventKind[]).filter((k) => EVENT_KIND_DISPLAY[k].chartable),
 );
 
+/** The /feed KIND filter axis membership — every kind a user can see in their
+ *  feed and meaningfully filter to. FiltersSheet derives its KIND checkbox
+ *  list from this set (sorted by label), so a new adapter kind auto-appears in
+ *  the filter the moment it's marked feedFilterable:true — no hand-maintained
+ *  allowlist to forget (Phase 10 D-08, the IG/Telegram regression fix). */
+export const FEED_FILTERABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
+  (Object.keys(EVENT_KIND_DISPLAY) as EventKind[]).filter(
+    (k) => EVENT_KIND_DISPLAY[k].feedFilterable,
+  ),
+);
+
+/** The /feed KIND filter axis chips, in render ORDER. The live /feed page
+ *  (feed/+page.svelte) renders the KIND axis as an explicit ordered chip strip
+ *  — paste-flow platforms first (YouTube / Reddit / Instagram / Telegram /
+ *  TikTok), then Press, then the free-form catch-alls (Post / Conference / Talk
+ *  / Other) — so an ORDER list is required (the boolean feedFilterable flag
+ *  alone can't express chip order). FEED_FILTERABLE_EVENT_KINDS stays the source
+ *  of MEMBERSHIP; this list is the source of ORDER, and
+ *  tests/unit/feed-filter-derivation.test.ts asserts the two never drift (the
+ *  set of kinds here MUST equal exactly FEED_FILTERABLE_EVENT_KINDS — same
+ *  exact-set-equality guard MANUAL_EVENT_KINDS carries).
+ *
+ *  Phase 10 D-08: this REPLACES the hand-maintained KIND_AXIS_ORDER array that
+ *  lived in feed/+page.svelte. That hand-list was never updated when
+ *  instagram_post / telegram_post / tiktok_post shipped, so the social kinds
+ *  silently dropped out of the LIVE /feed KIND axis (the FiltersSheet was the
+ *  /audit-only mount, not /feed) — the user-reported regression. Deriving from
+ *  this list means a new adapter kind auto-appears in the axis the moment it's
+ *  marked feedFilterable:true and placed here, with the drift test as the guard. */
+export const FEED_KIND_FILTER_KINDS = [
+  "youtube_video",
+  "reddit_post",
+  "instagram_post",
+  "telegram_post",
+  "tiktok_post",
+  "press",
+  "post",
+  "conference",
+  "talk",
+  "other",
+] as const satisfies readonly EventKind[];
+
 /** The Add Event manual kind picker (AddEventForm) chip list, in render
  *  order. EXPLICIT order list because chip order is a deliberate UX choice
  *  (platform-with-paste-flow kinds first, then free-form) that the boolean
@@ -186,14 +301,16 @@ export const CHARTABLE_EVENT_KINDS: ReadonlySet<EventKind> = new Set(
  *
  *  instagram_post sits right after reddit_post (Phase 08 — Instagram joins the
  *  paste-flow kinds); telegram_post sits right after instagram_post (Phase 09 —
- *  Telegram joins the paste-flow kinds). twitter_post / discord_drop remain
- *  excluded (manualCreatable:false) — no adapter, no paste flow, filtered from
- *  /feed. */
+ *  Telegram joins the paste-flow kinds); tiktok_post sits right after
+ *  telegram_post (Phase 10 — TikTok joins the paste-flow kinds). twitter_post /
+ *  discord_drop remain excluded (manualCreatable:false) — no adapter, no paste
+ *  flow, filtered from /feed. */
 export const MANUAL_EVENT_KINDS = [
   "youtube_video",
   "reddit_post",
   "instagram_post",
   "telegram_post",
+  "tiktok_post",
   "press",
   "post",
   "conference",
@@ -212,6 +329,43 @@ export function eventKindLabel(kind: string): string {
 /** Human label for any SourceKind. */
 export function sourceKindDisplayLabel(kind: SourceKind): string {
   return SOURCE_KIND_DISPLAY[kind].label();
+}
+
+/** The per-platform auto-import poll cadence string for a SourceKind (e.g.
+ *  "New videos every 6 hours" / "New posts daily; stats of recent posts refresh
+ *  hourly"). The SINGLE source of truth the Add-Source toggle, source-settings
+ *  card, and BackfillPicker blurb all read — no surface re-states "every 6
+ *  hours". The synthetic Add-Source UI kind "reddit" is resolved via
+ *  addSourceUiCadenceLabel below before reaching here. */
+export function sourceCadenceLabel(kind: SourceKind): string {
+  return SOURCE_KIND_DISPLAY[kind].cadence();
+}
+
+/** Maps the synthetic Add-Source UI kind "reddit" (a single chip the server
+ *  resolves to reddit_account vs reddit_subreddit by URL shape) onto the
+ *  representative DB SourceKind whose cadence we surface. Every other
+ *  AddSourceUiKind IS already a SourceKind. The `satisfies Record<…>` makes a
+ *  new Add-Source UI kind a COMPILE error here, so the Add-Source surfaces can
+ *  never paste a kind the cadence map doesn't cover. */
+const ADD_SOURCE_UI_KIND_TO_SOURCE_KIND = {
+  youtube_channel: "youtube_channel",
+  reddit: "reddit_account",
+  twitter_account: "twitter_account",
+  telegram_channel: "telegram_channel",
+  discord_server: "discord_server",
+  instagram_account: "instagram_account",
+  tiktok_account: "tiktok_account",
+} as const satisfies Record<AddSourceUiKind, SourceKind>;
+
+/** The cadence string for an Add-Source UI kind (the chip-picker union that
+ *  carries the synthetic "reddit"). Both Add-Source surfaces (/sources/new +
+ *  AddSourceModal) call THIS so the auto-import toggle + BackfillPicker blurb
+ *  speak the real per-platform cadence with ONE shared map — never a per-surface
+ *  copy. An unknown string (the picker's widened `kind?: string` prop) falls
+ *  back to the neutral default rather than crashing. */
+export function addSourceUiCadenceLabel(kind: AddSourceUiKind): string {
+  const sourceKind = ADD_SOURCE_UI_KIND_TO_SOURCE_KIND[kind];
+  return sourceKind ? sourceCadenceLabel(sourceKind) : m.source_cadence_default();
 }
 
 /** The `/sources` platform groups in render order, de-duplicated by group key

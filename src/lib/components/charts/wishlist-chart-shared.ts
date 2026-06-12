@@ -127,16 +127,35 @@ export function buildDayGroups(
 /**
  * The SINGLE source of the event→thumbnail URL logic for the charts. Mirrors
  * `deriveThumbnailUrl` (derive-card-data.ts) so a marker shows the SAME preview
- * image the FeedCard does — but takes a structurally-typed input because the
- * chart consumes EventDto-shaped rows that the games loader has run through
- * `adapter.enrichFeedDtos` (so `redditEnrichment.linkUrl` is present at runtime
- * even though the static EventDto type doesn't declare it).
+ * image the FeedCard does — by reading each kind's ENRICHMENT OBJECT (the
+ * `<kind>Enrichment` decoration the games loader hangs on the dto via
+ * `adapter.enrichFeedDtos`), not per-kind `event.metadata` branches. The input
+ * is structurally typed because the chart consumes EventDto-shaped rows that
+ * the loader already enriched (so `redditEnrichment.linkUrl` /
+ * `telegramEnrichment.thumbnailUrl` are present at runtime even though the
+ * static EventDto type doesn't declare them).
  *
  *   - YouTube (`kind==="youtube_video"` + externalId) → the intrinsic
  *     `img.youtube.com/vi/{externalId}/mqdefault.jpg` (no enrichment needed —
  *     externalId IS the video id, part of the canonical URL).
  *   - Reddit → the enrichment `linkUrl` when it's image-like, else the
  *     `metadata.media.url` snapshot (same chain the RedditFeedCard renders).
+ *   - Twitter → `metadata.media.url` (no enrichment object; the same chain
+ *     derive-card-data.ts serves on the card). The D-09 refactor dropped this
+ *     branch — restoring it keeps the chart marker in sync with the card.
+ *   - Instagram → `instagramEnrichment.thumbnailUrl` (set by
+ *     sources/instagram/server/feed-enrichment.ts).
+ *   - Telegram → `telegramEnrichment.thumbnailUrl` (set by
+ *     sources/telegram/server/feed-enrichment.ts). Phase 10 D-09: this was the
+ *     bug — the old branch read empty `event.metadata` and the type didn't even
+ *     carry telegramEnrichment, so every Telegram marker rendered blank.
+ *   - TikTok → the same-origin proxy `/api/tiktok/thumbnail/{externalId}` (NOT
+ *     the raw `tiktokEnrichment.thumbnailUrl`). 10-SPIKE.md Q3 RESOLVED at Plan 05
+ *     UAT: the TikTok CDN cover is hotlink-BLOCKED in a real browser
+ *     (net::ERR_BLOCKED_BY_ORB), so the chart marker — like the card — must route
+ *     through the proxy or every TikTok marker renders blank. Versioned by the
+ *     latest poll timestamp (?v=) when present, exactly like the card's
+ *     deriveThumbnailUrl, so a re-poll busts the marker's cached cover too.
  *   - everything else → null (the marker falls back to a kind-colored
  *     placeholder symbol).
  */
@@ -146,6 +165,11 @@ type ThumbnailEvent = {
   metadata: unknown;
   redditEnrichment?: { linkUrl?: string | null } | null;
   instagramEnrichment?: { thumbnailUrl?: string | null } | null;
+  telegramEnrichment?: { thumbnailUrl?: string | null } | null;
+  tiktokEnrichment?: {
+    thumbnailUrl?: string | null;
+    stats?: { polledAt?: Date | string } | null;
+  } | null;
 };
 
 export function eventThumbnail(event: ThumbnailEvent): string | null {
@@ -158,14 +182,29 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
     if (link && isImageLikeUrl(link)) return link;
     return readMediaUrlFromMetadata(event.metadata);
   }
+  if (event.kind === "twitter_post") {
+    // Twitter has no enrichment object — its thumbnail lives on metadata.media.url
+    // (the same chain derive-card-data.ts serves on the feed card). The D-09
+    // refactor dropped this branch; restoring it keeps the chart marker in sync
+    // with the card. (telegram stays enrichment-only per D-09 — its metadata is
+    // intentionally NOT read here.)
+    return readMediaUrlFromMetadata(event.metadata);
+  }
   if (event.kind === "instagram_post") {
-    // The fresh CDN hotlink lives on instagramEnrichment (set by
-    // sources/instagram/server/feed-enrichment.ts) — same source the
-    // FeedCard + deriveThumbnailUrl read. NOT in event.metadata.
     return event.instagramEnrichment?.thumbnailUrl ?? null;
   }
-  if (event.kind === "twitter_post" || event.kind === "telegram_post") {
-    return readMediaUrlFromMetadata(event.metadata);
+  if (event.kind === "telegram_post") {
+    return event.telegramEnrichment?.thumbnailUrl ?? null;
+  }
+  if (event.kind === "tiktok_post") {
+    // 10-SPIKE.md Q3 RESOLVED (Plan 05 UAT): the TikTok CDN cover is hotlink-
+    // BLOCKED in a real browser (net::ERR_BLOCKED_BY_ORB), so route the marker
+    // through the same-origin proxy keyed by the aweme id — the SAME path the
+    // FeedCard's deriveThumbnailUrl uses — or every TikTok marker renders blank.
+    if (event.tiktokEnrichment?.thumbnailUrl == null || !event.externalId) return null;
+    const base = `/api/tiktok/thumbnail/${encodeURIComponent(event.externalId)}`;
+    const polledAt = event.tiktokEnrichment.stats?.polledAt;
+    return polledAt ? `${base}?v=${new Date(polledAt).getTime()}` : base;
   }
   return null;
 }

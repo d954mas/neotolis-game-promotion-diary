@@ -96,8 +96,9 @@
      *  inner } shape; BaseFeedCard renders the icon+TEXT pill markup + CSS once
      *  (ONE treatment for every source — no per-card fork). Used by Instagram
      *  to mark short / carousel / video and by YouTube to mark video; a bare
-     *  photo passes null → no pill. Rendered only when a thumbnail image is
-     *  shown so it sits on the picture, not on the empty placeholder. */
+     *  photo passes null → no pill. Rendered whenever the media slot renders —
+     *  over the picture OR the KindIcon placeholder (thumb-less manual events,
+     *  expired/blocked covers), matching the event-detail behavior. */
     thumbnailOverlay?: OverlayPill | null;
     /** Optional thumbnail-load-error handler. Used by hotlinked-thumbnail
      *  cards (Instagram, D-08) whose CDN URL expires — on <img> error the
@@ -390,7 +391,11 @@
         {:else}
           <KindIcon kind={event.kind} size={36} />
         {/if}
-        {#if thumbnailUrl && thumbnailOverlay}
+        <!-- The pill renders whenever the media slot does — including the
+             KindIcon placeholder (thumb-less manual events, ORB-blocked
+             covers), so the content type stays readable (UAT 2026-06-12).
+             Mirrors the event-detail behavior. -->
+        {#if thumbnailOverlay}
           <MediaTypePill pill={thumbnailOverlay} />
         {/if}
       </div>

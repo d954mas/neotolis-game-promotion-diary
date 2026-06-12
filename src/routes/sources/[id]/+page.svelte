@@ -10,10 +10,16 @@
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import { telegramHandleFromUrl } from "$lib/util/telegram-handle.js";
+  import { sourceCadenceLabel } from "$lib/sources/kind-display.js";
+  import type { SourceKind } from "$lib/sources/adapter.js";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
   const source = $derived(data.source);
+  // Per-platform auto-import cadence (single source of truth — kind-display.ts).
+  // The settings card surfaces what THIS source's crons actually do instead of
+  // a global "every 6 hours".
+  const cadence = $derived(sourceCadenceLabel(source.kind as SourceKind));
 
   // Same live-refresh loop as /sources list. While cooldown is active
   // (worker processing pull), invalidateAll every 3s so UI shows
@@ -414,6 +420,7 @@
       <p class="card__value">
         {m.source_detail_settings_auto_import()}:
         <strong>{source.autoImport ? "On" : "Off"}</strong>
+        {#if source.autoImport}<small class="cadence-note">· {cadence}</small>{/if}
       </p>
       <p class="card__value">
         {m.source_detail_settings_owned_by_me()}:
@@ -422,7 +429,7 @@
     {:else}
       <label class="toggle">
         <input type="checkbox" bind:checked={flagAutoImport} disabled={flagSaving} />
-        <span>{m.source_detail_settings_auto_import()}</span>
+        <span>{m.source_auto_import_toggle_label({ cadence })}</span>
       </label>
       <label class="toggle">
         <input type="checkbox" bind:checked={flagIsOwnedByMe} disabled={flagSaving} />
@@ -577,6 +584,10 @@
   }
   .card__value--text {
     white-space: pre-wrap;
+  }
+  .cadence-note {
+    color: var(--text-3);
+    font-size: var(--t-13);
   }
   .card__hint {
     margin: 0;

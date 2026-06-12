@@ -1,0 +1,1 @@
+ALTER TABLE "youtube_videos" ADD COLUMN "media_type" text;

@@ -47,6 +47,9 @@
     chart_metric_num_comments:
       '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
     chart_metric_score: '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+    // TikTok shares — a forward/share arrow (the PLAT-02 metric TikTok carries).
+    chart_metric_shares:
+      '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>',
     // Telegram reactions — a heart-in-speech-bubble nod to the reaction strip.
     chart_metric_reactions:
       '<path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.5 8.5 0 1 1 16.1-3.8z"/><path d="M12 13.2l-.8-.7c-1-.9-1.7-1.5-1.7-2.4a1.3 1.3 0 0 1 2.5-.5 1.3 1.3 0 0 1 2.5.5c0 .9-.7 1.5-1.7 2.4z"/>',

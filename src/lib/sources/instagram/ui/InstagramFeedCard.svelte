@@ -32,8 +32,8 @@
   // Registered via ./index.ts as `cardComponent` so /feed/+page.svelte's
   // `getCardComponent("instagram_post")` returns this component.
 
-  import { metricColor } from "$lib/util/metric-colors.js";
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
+  import StatChips from "$lib/components/feed/parts/StatChips.svelte";
   import { deriveMediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
   import {
     deriveThumbnailUrl,
@@ -119,70 +119,18 @@
 
 {#snippet statsSnippet()}
   {#if stats && (stats.viewCount !== null || stats.likeCount !== null || stats.commentCount !== null)}
+    <!-- shares never rendered for IG (D-04) — only views/likes/comments. -->
     <div class="card-stats stats-line">
-      {#if stats.viewCount !== null}
-        <span class="stat">
-          <svg
-            class="stat-icon"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.75"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-            style={`color:${metricColor("views")}`}
-          >
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          <span class="num">{formatStat(stats.viewCount)}</span>
-        </span>
-      {/if}
-      {#if stats.likeCount !== null}
-        <span class="stat">
-          <svg
-            class="stat-icon"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.75"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-            style={`color:${metricColor("likes")}`}
-          >
-            <path
-              d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
-            />
-          </svg>
-          <span class="num">{formatStat(stats.likeCount)}</span>
-        </span>
-      {/if}
-      {#if stats.commentCount !== null}
-        <span class="stat">
-          <svg
-            class="stat-icon"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.75"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-            style={`color:${metricColor("comments")}`}
-          >
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          <span class="num">{formatStat(stats.commentCount)}</span>
-        </span>
-      {/if}
+      <StatChips
+        chips={[
+          { metric: "views", value: stats.viewCount === null ? null : formatStat(stats.viewCount) },
+          { metric: "likes", value: stats.likeCount === null ? null : formatStat(stats.likeCount) },
+          {
+            metric: "comments",
+            value: stats.commentCount === null ? null : formatStat(stats.commentCount),
+          },
+        ]}
+      />
     </div>
   {/if}
 {/snippet}

@@ -19,6 +19,7 @@ const METRIC_HEX: Record<string, string> = {
   upvotes: "#e8932f", // orange (Reddit)
   num_comments: "#5fb98e", // green
   reactions: "#c77dff", // purple (Telegram reactions — distinct from views blue)
+  shares: "#2cc2c2", // teal (TikTok shares — distinct from views blue / comments green)
 };
 
 export function metricColor(metric: string): string {

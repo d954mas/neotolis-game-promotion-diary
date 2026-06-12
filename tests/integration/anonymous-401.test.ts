@@ -105,6 +105,12 @@ describe("anonymous-401 sweep", () => {
     // instead. adapter.registerRoutes mounts it; tenantScope gates it so an
     // anonymous probe → 401 before any CDN fetch.
     "/api/instagram/thumbnail/:postId",
+    // TikTok same-origin thumbnail proxy (10-SPIKE.md Q3 RESOLVED at Plan 05 UAT).
+    // The TikTok CDN cover hotlinks BLOCKED in a real browser
+    // (net::ERR_BLOCKED_BY_ORB); the feed card + chart markers load
+    // /api/tiktok/thumbnail/<awemeId> instead. adapter.registerRoutes mounts it;
+    // tenantScope gates it so an anonymous probe → 401 before any CDN fetch.
+    "/api/tiktok/thumbnail/:postId",
     // Phase 3.4 design-v2-ux — bulk endpoints (PATCH + DELETE on the
     // same /api/events/bulk path). Wave 2 Plan 06 mounted the Hono
     // route; the path participates in the load-bearing toContain guard

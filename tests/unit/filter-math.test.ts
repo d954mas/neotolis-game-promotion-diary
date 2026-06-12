@@ -5,6 +5,8 @@ import {
   countWithKind,
   countWithShow,
   countWithAuthor,
+  countWithMediaType,
+  eventMediaCategory,
   diffGameStates,
   type FilterableEvent,
 } from "../../src/lib/feed/filter-math.js";
@@ -27,6 +29,7 @@ function baseState(): FilterState {
     source: [],
     kind: [],
     gameTags: [],
+    mediaType: [],
     authorIsMe: undefined,
     dateRange: { preset: "all" },
     sortDir: "desc",
@@ -115,6 +118,135 @@ describe("passes — kind axis", () => {
 
   it("treats empty kind array as 'no filter'", () => {
     expect(passes(ev({ kind: "youtube_video" }), { ...baseState(), kind: [] }, TODAY)).toBe(true);
+  });
+});
+
+describe("eventMediaCategory — cross-source media classification", () => {
+  it("classifies kind-level kinds by their EVENT_KIND_MEDIA_CATEGORY default", () => {
+    expect(eventMediaCategory(ev({ kind: "reddit_post" }))).toBe("other");
+    expect(eventMediaCategory(ev({ kind: "telegram_post" }))).toBe("other");
+    expect(eventMediaCategory(ev({ kind: "conference" }))).toBe("other");
+    expect(eventMediaCategory(ev({ kind: "press" }))).toBe("other");
+  });
+
+  it("classifies youtube_video per-post: 'short' → short, else (video / NULL / missing) → video", () => {
+    // youtube has a DIFFERENT per-post default than IG/TikTok: a missing / NULL
+    // media_type → "video" (never "other"), because a YouTube video is a video
+    // at worst — Shorts detection heals NULLs lazily via the redirect probe.
+    expect(
+      eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: { mediaType: "short" } })),
+    ).toBe("short");
+    expect(
+      eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: { mediaType: "video" } })),
+    ).toBe("video");
+    // NULL media_type (not yet probed) → video, NOT other.
+    expect(
+      eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: { mediaType: null } })),
+    ).toBe("video");
+    // Missing enrichment entirely → video.
+    expect(eventMediaCategory(ev({ kind: "youtube_video" }))).toBe("video");
+    expect(eventMediaCategory(ev({ kind: "youtube_video", youtubeEnrichment: null }))).toBe(
+      "video",
+    );
+  });
+
+  it("classifies tiktok_post by its enrichment media kind (short / carousel→other)", () => {
+    expect(
+      eventMediaCategory(ev({ kind: "tiktok_post", tiktokEnrichment: { mediaType: "short" } })),
+    ).toBe("short");
+    expect(
+      eventMediaCategory(ev({ kind: "tiktok_post", tiktokEnrichment: { mediaType: "carousel" } })),
+    ).toBe("other");
+  });
+
+  it("classifies instagram_post by its enrichment media kind (short / video / carousel→other)", () => {
+    expect(
+      eventMediaCategory(
+        ev({ kind: "instagram_post", instagramEnrichment: { mediaType: "short" } }),
+      ),
+    ).toBe("short");
+    expect(
+      eventMediaCategory(
+        ev({ kind: "instagram_post", instagramEnrichment: { mediaType: "video" } }),
+      ),
+    ).toBe("video");
+    expect(
+      eventMediaCategory(
+        ev({ kind: "instagram_post", instagramEnrichment: { mediaType: "image" } }),
+      ),
+    ).toBe("other");
+  });
+
+  it("a per-post event with a MISSING / null cache row → other (no event vanishes)", () => {
+    // Mirrors the server's NOT EXISTS arm: a social event whose cache row is
+    // absent still classifies, into "other".
+    expect(eventMediaCategory(ev({ kind: "tiktok_post" }))).toBe("other");
+    expect(eventMediaCategory(ev({ kind: "instagram_post", instagramEnrichment: null }))).toBe(
+      "other",
+    );
+    expect(
+      eventMediaCategory(ev({ kind: "instagram_post", instagramEnrichment: { mediaType: null } })),
+    ).toBe("other");
+  });
+});
+
+describe("passes — media-type axis (Short / Video / Other)", () => {
+  it("returns false when mediaType non-empty AND event's category not in mediaType", () => {
+    const state = { ...baseState(), mediaType: ["short" as const] };
+    expect(passes(ev({ kind: "youtube_video" }), state, TODAY)).toBe(false); // youtube → video
+    expect(
+      passes(ev({ kind: "tiktok_post", tiktokEnrichment: { mediaType: "short" } }), state, TODAY),
+    ).toBe(true);
+  });
+
+  it("treats empty mediaType array as 'no filter'", () => {
+    expect(passes(ev({ kind: "reddit_post" }), { ...baseState(), mediaType: [] }, TODAY)).toBe(
+      true,
+    );
+  });
+
+  it("PARTITION: selecting all three categories == no filter (every event passes)", () => {
+    const all = {
+      ...baseState(),
+      mediaType: ["short" as const, "video" as const, "other" as const],
+    };
+    const none = baseState();
+    const sample: FilterableEvent[] = [
+      ev({ id: "a", kind: "youtube_video" }), // NULL media_type → video
+      ev({ id: "b", kind: "reddit_post" }),
+      ev({ id: "c", kind: "tiktok_post", tiktokEnrichment: { mediaType: "short" } }),
+      ev({ id: "d", kind: "instagram_post", instagramEnrichment: { mediaType: "video" } }),
+      ev({ id: "e", kind: "instagram_post", instagramEnrichment: { mediaType: "carousel" } }),
+      ev({ id: "f", kind: "tiktok_post" }), // missing cache → other
+      ev({ id: "g", kind: "telegram_post" }),
+      ev({ id: "h", kind: "youtube_video", youtubeEnrichment: { mediaType: "short" } }), // → short
+    ];
+    for (const e of sample) {
+      expect(passes(e, all, TODAY), `${e.id} must pass when all 3 categories selected`).toBe(
+        passes(e, none, TODAY),
+      );
+    }
+    // And every event lands in EXACTLY one single-category filter.
+    for (const e of sample) {
+      const hits = (["short", "video", "other"] as const).filter((c) =>
+        passes(e, { ...baseState(), mediaType: [c] }, TODAY),
+      );
+      expect(hits, `${e.id} must match exactly one category`).toHaveLength(1);
+    }
+  });
+});
+
+describe("countWithMediaType — predicted facet counter", () => {
+  it("counts events whose category is the single selected one (other axes preserved)", () => {
+    const events: FilterableEvent[] = [
+      ev({ id: "1", kind: "youtube_video" }), // video
+      ev({ id: "2", kind: "tiktok_post", tiktokEnrichment: { mediaType: "short" } }), // short
+      ev({ id: "3", kind: "instagram_post", instagramEnrichment: { mediaType: "short" } }), // short
+      ev({ id: "4", kind: "reddit_post" }), // other
+    ];
+    expect(countWithMediaType(events, "short", baseState(), TODAY)).toBe(2);
+    expect(countWithMediaType(events, "video", baseState(), TODAY)).toBe(1);
+    expect(countWithMediaType(events, "other", baseState(), TODAY)).toBe(1);
   });
 });
 

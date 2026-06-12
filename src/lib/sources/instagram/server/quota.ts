@@ -148,18 +148,21 @@ export async function reserveSocialCredits(args: {
     await tx
       .insert(socialProviderBalance)
       .values({
-        platform,
         provider,
         prepaidBalanceCredits: env.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS,
       })
       .onConflictDoNothing();
 
-    // Lock the prepaid balance row + the two counter rows for this
-    // (platform, provider) to serialize concurrent reservations.
+    // Lock the prepaid balance row (keyed by PROVIDER only — shared across
+    // platforms, D-01). This single provider row is also the cross-platform
+    // SERIALIZATION point: every reservation for this provider — regardless of
+    // platform — acquires THIS lock before reading the joint spend total below,
+    // so a concurrent IG + TikTok reserve can't both read a stale joint total and
+    // overshoot the shared cap.
     const balanceLocked = await tx.execute<{ prepaid_balance_credits: number }>(sql`
       SELECT prepaid_balance_credits
       FROM ${socialProviderBalance}
-      WHERE platform = ${platform} AND provider = ${provider}
+      WHERE provider = ${provider}
       FOR UPDATE
     `);
     const balanceRows =
@@ -170,10 +173,17 @@ export async function reserveSocialCredits(args: {
       ).rows ?? [];
     const prepaidBalance = Number(balanceRows[0]?.prepaid_balance_credits ?? 0);
 
+    // JOINT daily cap (D-01): the cap + pool envelope + 80/95 bands are computed
+    // ACROSS ALL platforms for this provider, because the prepaid balance funding
+    // them is provider-wide (one real ScrapeCreators account). So the spend-lock
+    // SELECT drops the platform predicate — it locks + sums every platform's
+    // counter rows for (date_pacific, provider). The per-platform INCREMENT below
+    // stays platform-keyed so /admin/quota + Prometheus keep per-platform spend
+    // attribution; only the GATE math is joint.
     const spendLocked = await tx.execute<{ pool_kind: SocialQuotaPool; credits_used: number }>(sql`
       SELECT pool_kind, credits_used
       FROM ${socialProviderSpend}
-      WHERE date_pacific = ${datePacific} AND platform = ${platform} AND provider = ${provider}
+      WHERE date_pacific = ${datePacific} AND provider = ${provider}
       FOR UPDATE
     `);
     const spendRows =
@@ -182,11 +192,13 @@ export async function reserveSocialCredits(args: {
           rows?: Array<{ pool_kind: SocialQuotaPool; credits_used: number | string | null }>;
         }
       ).rows ?? [];
+    // Accumulate (+=, NOT assign) — multiple platform rows share each pool_kind,
+    // and the joint cap sums all of them.
     let cronUsed = 0;
     let userUsed = 0;
     for (const row of spendRows) {
-      if (row.pool_kind === "cron") cronUsed = Number(row.credits_used ?? 0);
-      else if (row.pool_kind === "user") userUsed = Number(row.credits_used ?? 0);
+      if (row.pool_kind === "cron") cronUsed += Number(row.credits_used ?? 0);
+      else if (row.pool_kind === "user") userUsed += Number(row.credits_used ?? 0);
     }
     const poolUsed = origin === "cron" ? cronUsed : userUsed;
     const totalUsed = cronUsed + userUsed;
@@ -219,12 +231,7 @@ export async function reserveSocialCredits(args: {
         prepaidBalanceCredits: sql`${socialProviderBalance.prepaidBalanceCredits} - ${args.units}`,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(socialProviderBalance.platform, platform),
-          eq(socialProviderBalance.provider, provider),
-        ),
-      );
+      .where(eq(socialProviderBalance.provider, provider));
 
     // Compute the daily-cap throttle band crossing + prepaid-balance exhaustion
     // for THIS reservation (before vs after). Emitted after commit below.
@@ -274,17 +281,23 @@ export async function reserveSocialCredits(args: {
 }
 
 /**
- * At-enqueue scheduler check. Worst-of across both pools for today's
- * (platform, provider): >= 95% pauses everything but user refresh-now; >= 80%
+ * At-enqueue scheduler check. Worst-of across both pools AND all platforms for
+ * today's `provider`: >= 95% pauses everything but user refresh-now; >= 80%
  * pauses non-essential lanes. A prepaid balance at or below 0 is treated as a
- * full stop ('ninetyfive') regardless of the daily counter — the funded
- * ceiling is exhausted, so no spend of any origin can proceed.
+ * full stop ('ninetyfive') regardless of the daily counter — the funded ceiling
+ * is exhausted, so no spend of any origin can proceed.
+ *
+ * D-01: the daily-cap throttle bands are JOINT across platforms — the SUM drops
+ * the platform predicate so IG + TikTok share one cap. The `platform` arg is
+ * retained for call-site symmetry (and to pin which platform asked) but does NOT
+ * narrow the band math; every platform on a provider sees the SAME joint state.
  */
 export async function getSocialThrottleState(
   platform: string,
   provider: string,
   now: Date = new Date(),
 ): Promise<SocialThrottleState> {
+  void platform; // joint cap (D-01) — band math is provider-wide, not per-platform.
   const datePacific = todayPacific(now);
   const spendRows = await db
     .select({
@@ -294,7 +307,6 @@ export async function getSocialThrottleState(
     .where(
       and(
         eq(socialProviderSpend.datePacific, datePacific),
-        eq(socialProviderSpend.platform, platform),
         eq(socialProviderSpend.provider, provider),
       ),
     );
@@ -303,12 +315,7 @@ export async function getSocialThrottleState(
   const balanceRows = await db
     .select({ balance: socialProviderBalance.prepaidBalanceCredits })
     .from(socialProviderBalance)
-    .where(
-      and(
-        eq(socialProviderBalance.platform, platform),
-        eq(socialProviderBalance.provider, provider),
-      ),
-    );
+    .where(eq(socialProviderBalance.provider, provider));
   // A seeded-but-spent balance at <= 0 is a hard stop. An ABSENT balance row
   // means no spend has happened yet → 'ok' (the funded ceiling kicks in on
   // first reservation, which seeds the row from env).
@@ -342,12 +349,7 @@ export async function getSocialSpendToday(
   const balanceRows = await db
     .select({ balance: socialProviderBalance.prepaidBalanceCredits })
     .from(socialProviderBalance)
-    .where(
-      and(
-        eq(socialProviderBalance.platform, platform),
-        eq(socialProviderBalance.provider, provider),
-      ),
-    );
+    .where(eq(socialProviderBalance.provider, provider));
   return {
     creditsUsed: Number(spendRows[0]?.credits ?? 0),
     dailyCap: dailyCap(),
@@ -376,20 +378,24 @@ export async function resetSocialDailyCap(now: Date = new Date()): Promise<void>
   budgetExhaustedEmitted.clear();
   cachedOperatorId = undefined;
   const datePacific = todayPacific(now);
-  // Seed today's counter rows at zero for any (platform, provider) that has a
-  // balance row (i.e. has ever spent). New-day rows simply start fresh; old
-  // days are left for audit. Deliberately NO write to social_provider_balance.
-  const balanceRows = await db
-    .select({
-      platform: socialProviderBalance.platform,
-      provider: socialProviderBalance.provider,
+  // Seed today's counter rows at zero for every (platform, provider) that has
+  // EVER had a spend row. The prepaid balance is now keyed by provider ONLY
+  // (D-01 shared ceiling), so it no longer carries the platform dimension —
+  // the (platform, provider) pairs to seed are discovered from
+  // social_provider_spend (the per-platform daily counter) instead. New-day
+  // rows simply start fresh; old days are left for audit. Deliberately NO
+  // write to social_provider_balance (the prepaid ceiling never resets).
+  const pairRows = await db
+    .selectDistinct({
+      platform: socialProviderSpend.platform,
+      provider: socialProviderSpend.provider,
     })
-    .from(socialProviderBalance);
-  if (balanceRows.length === 0) return;
+    .from(socialProviderSpend);
+  if (pairRows.length === 0) return;
   await db
     .insert(socialProviderSpend)
     .values(
-      balanceRows.flatMap((r) => [
+      pairRows.flatMap((r) => [
         {
           datePacific,
           platform: r.platform,

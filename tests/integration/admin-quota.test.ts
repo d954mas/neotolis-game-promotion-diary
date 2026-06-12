@@ -62,6 +62,24 @@ async function withInstagramConfigured<T>(adminEmail: string, fn: () => Promise<
   }
 }
 
+/** Run `fn` with the operator's TikTok provider configured AND the email
+ *  allowlisted. Mirrors withInstagramConfigured for the TikTok /admin/quota
+ *  block (TIKTOK_PROVIDER gates isTikTokConfigured at module load). */
+async function withTiktokConfigured<T>(adminEmail: string, fn: () => Promise<T>): Promise<T> {
+  const savedProvider = process.env.TIKTOK_PROVIDER;
+  const savedKey = process.env.SCRAPECREATORS_API_KEY;
+  process.env.TIKTOK_PROVIDER = "scrapecreators";
+  process.env.SCRAPECREATORS_API_KEY = "test-key-admin-quota-tt";
+  try {
+    return await withAllowlist(adminEmail, fn);
+  } finally {
+    if (savedProvider === undefined) delete process.env.TIKTOK_PROVIDER;
+    else process.env.TIKTOK_PROVIDER = savedProvider;
+    if (savedKey === undefined) delete process.env.SCRAPECREATORS_API_KEY;
+    else process.env.SCRAPECREATORS_API_KEY = savedKey;
+  }
+}
+
 describe("admin /quota route", () => {
   it("anonymous → 401 (auth gate fires before allowlist gate)", async () => {
     await withAllowlist("admin@example.com", async () => {
@@ -281,6 +299,76 @@ describe("admin /quota route", () => {
       const markers = body.audit.map((a) => a.metadata?.marker).filter(Boolean);
       expect(markers).toContain("IG-throttle");
       expect(markers).toContain("IG-exhausted");
+    });
+  });
+
+  // FIX 3 — the TikTok provider block (the twin of the Instagram block). The
+  // adapter shipped but was invisible on /admin/quota: getTikTokProviderBlock
+  // existed but was never wired into the loader.
+  it("tiktok block collapses to { isConfigured: false } when the provider is unconfigured (env default)", async () => {
+    // The integration process boots with TIKTOK_PROVIDER="" (env.ts default), so
+    // the loader surfaces the not-configured collapse, not an empty spend table
+    // (mirrors the instagram + reddit collapses).
+    const adminEmail = `p10-tt-notcfg-${uniq()}@test.local`;
+    await withAllowlist(adminEmail, async () => {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const u = await seedUserDirectly({ email: adminEmail });
+      const res = await app.request("/api/admin/quota", {
+        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { tiktok: { isConfigured: boolean } };
+      expect(body.tiktok).toEqual({ isConfigured: false });
+    });
+  });
+
+  it("tiktok block surfaces requestsToday + spend/cap + shared remaining balance when configured (FIX 3)", async () => {
+    const adminEmail = `p10-tt-cfg-${uniq()}@test.local`;
+    const today = todayPacific();
+    // Seed today's TikTok-platform spend (user pool). dailyCap defaults to 100 in
+    // the test env; the prepaid balance is shared per-provider (D-01) and defaults
+    // high (100000) with no balance row, so remainingBalance == that default.
+    await db.insert(socialProviderSpend).values({
+      datePacific: today,
+      platform: "tiktok",
+      provider: "scrapecreators",
+      poolKind: "user",
+      creditsUsed: 9,
+    });
+
+    await withTiktokConfigured(adminEmail, async () => {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const u = await seedUserDirectly({ email: adminEmail });
+      const res = await app.request("/api/admin/quota", {
+        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        tiktok:
+          | {
+              isConfigured: true;
+              requestsToday: number;
+              creditsUsed: number;
+              dailyCap: number;
+              remainingBalance: number;
+              prepaidBalance: number;
+              throttleState: string;
+            }
+          | { isConfigured: false };
+      };
+      expect(body.tiktok.isConfigured).toBe(true);
+      if (!body.tiktok.isConfigured) throw new Error("expected configured tiktok block");
+      // 1 credit/request (D-18) ⇒ requestsToday == creditsUsed == seeded spend.
+      expect(body.tiktok.requestsToday).toBe(9);
+      expect(body.tiktok.creditsUsed).toBe(9);
+      expect(body.tiktok.dailyCap).toBe(100);
+      // remainingBalance is the shared prepaid funded balance (D-16 hard ceiling).
+      expect(body.tiktok.remainingBalance).toBe(100000);
+      expect(body.tiktok.prepaidBalance).toBe(100000);
+      // 9/100 daily-cap usage is below the 80 threshold → 'ok'.
+      expect(body.tiktok.throttleState).toBe("ok");
     });
   });
 

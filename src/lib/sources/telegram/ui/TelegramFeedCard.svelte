@@ -40,8 +40,8 @@
   // Registered via ./index.ts as `cardComponent` so /feed/+page.svelte's
   // `getCardComponent("telegram_post")` returns this component.
 
-  import { metricColor } from "$lib/util/metric-colors.js";
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
+  import StatChips from "$lib/components/feed/parts/StatChips.svelte";
   import { deriveMediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
   import {
     formatStat,
@@ -152,25 +152,7 @@
          only when the card is too narrow to hold them. -->
     <div class="card-stats stats-line tg-stats-row">
       {#if stats && stats.viewCount !== null}
-        <span class="stat">
-          <svg
-            class="stat-icon"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.75"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-            style={`color:${metricColor("views")}`}
-          >
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          <span class="num">{formatStat(stats.viewCount)}</span>
-        </span>
+        <StatChips chips={[{ metric: "views", value: formatStat(stats.viewCount) }]} />
       {/if}
       {#if reactions && reactions.length > 0}
         <!-- E1: top-5 reactions — one chip per reaction (glyph + count). -->

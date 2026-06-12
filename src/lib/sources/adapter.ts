@@ -26,7 +26,8 @@ export type SourceKind =
   | "twitter_account"
   | "telegram_channel"
   | "discord_server"
-  | "instagram_account";
+  | "instagram_account"
+  | "tiktok_account";
 
 export type EventKind =
   | "youtube_video"
@@ -39,7 +40,8 @@ export type EventKind =
   | "press"
   | "other"
   | "post"
-  | "instagram_post";
+  | "instagram_post"
+  | "tiktok_post";
 
 export type SnapshotStatus = "ok" | "rate_limited" | "auth_error" | "not_found" | "private";
 
@@ -57,7 +59,11 @@ export interface StatsSnapshot {
   polledAt: Date;
   status: SnapshotStatus;
   metrics?: { view_count?: number; like_count?: number; comment_count?: number };
-  metadata?: { duration_seconds?: number; is_short?: boolean };
+  // duration_seconds is the Shorts duration PREFILTER input (videos.list
+  // contentDetails). It is NOT a Short verdict — duration alone never decides
+  // short-vs-video (a ≤3min video can be a regular video); the redirect probe
+  // does. The poll worker reads this to skip probing over-ceiling videos.
+  metadata?: { duration_seconds?: number };
 }
 
 export interface PollableEvent {

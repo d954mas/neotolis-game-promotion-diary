@@ -244,7 +244,8 @@ export interface DataSourceDto {
     | "twitter_account"
     | "telegram_channel"
     | "discord_server"
-    | "instagram_account";
+    | "instagram_account"
+    | "tiktok_account";
   handleUrl: string;
   channelId: string | null;
   displayName: string | null;
@@ -414,7 +415,8 @@ export interface EventDto {
     | "press"
     | "other"
     | "post"
-    | "instagram_post";
+    | "instagram_post"
+    | "tiktok_post";
   authorIsMe: boolean;
   occurredAt: Date;
   title: string;

@@ -16,13 +16,17 @@ import {
   SOURCE_KIND_DISPLAY,
   POLLABLE_EVENT_KINDS,
   CHARTABLE_EVENT_KINDS,
+  FEED_FILTERABLE_EVENT_KINDS,
   MANUAL_EVENT_KINDS,
   SOURCE_PLATFORM_GROUPS,
   eventKindLabel,
   sourceKindDisplayLabel,
+  sourceCadenceLabel,
+  addSourceUiCadenceLabel,
   sourcePlatformGroupKey,
 } from "../../src/lib/sources/kind-display.js";
 import type { EventKind, SourceKind } from "../../src/lib/sources/adapter.js";
+import type { AddSourceUiKind } from "../../src/lib/sources/kind-matrix.js";
 
 // Authoritative rosters (mirror the adapter.ts unions). `satisfies` keeps these
 // honest: if they drift from EventKind / SourceKind, tsc flags it here.
@@ -38,6 +42,7 @@ const ALL_EVENT_KINDS = [
   "other",
   "post",
   "instagram_post",
+  "tiktok_post",
 ] as const satisfies readonly EventKind[];
 
 const ALL_SOURCE_KINDS = [
@@ -48,6 +53,7 @@ const ALL_SOURCE_KINDS = [
   "telegram_channel",
   "discord_server",
   "instagram_account",
+  "tiktok_account",
 ] as const satisfies readonly SourceKind[];
 
 describe("kind-display config — EVENT_KIND_DISPLAY", () => {
@@ -68,6 +74,7 @@ describe("kind-display config — EVENT_KIND_DISPLAY", () => {
       expect(typeof d.pollable).toBe("boolean");
       expect(typeof d.chartable).toBe("boolean");
       expect(typeof d.manualCreatable).toBe("boolean");
+      expect(typeof d.feedFilterable).toBe("boolean");
     }
   });
 
@@ -117,6 +124,72 @@ describe("kind-display config — SOURCE_KIND_DISPLAY", () => {
   });
 });
 
+describe("kind-display config — per-platform auto-import cadence labels", () => {
+  // The `satisfies Record<SourceKind, SourceKindDisplay>` on SOURCE_KIND_DISPLAY
+  // is the COMPILE-TIME guard that every SourceKind carries a `cadence`
+  // resolver (a new adapter kind that forgets it fails `pnpm typecheck`). This
+  // test is the runtime complement: every key resolves a NON-EMPTY string and
+  // the paraglide wiring isn't vacuous (the stale global "every 6 hours" copy
+  // is gone, replaced by the real per-platform cadence).
+
+  it("every SourceKind resolves a non-empty cadence label", () => {
+    for (const k of ALL_SOURCE_KINDS) {
+      const label = sourceCadenceLabel(k);
+      expect(typeof label, `${k} cadence must be a string`).toBe("string");
+      expect(label.length, `${k} cadence must be non-empty`).toBeGreaterThan(0);
+    }
+  });
+
+  it("cadence strings state the REAL per-platform cadence, not a global 'every 6 hours'", () => {
+    // The whole point of this change: the copy is per-platform, not a stale
+    // global constant. IG/TikTok poll DAILY; their warm lane WAKES hourly but
+    // the 26h staleness gate (#70) means each recent post is paid-refreshed
+    // ~once a day — the label states the per-post rate, never "hourly".
+    // YouTube/Telegram poll every 6h. Assert the load-bearing distinctions so a
+    // regression to a single hardcoded string fails here.
+    expect(sourceCadenceLabel("youtube_channel")).toContain("6 hours");
+    expect(sourceCadenceLabel("instagram_account").toLowerCase()).toContain("daily");
+    expect(sourceCadenceLabel("instagram_account").toLowerCase()).toContain("once a day");
+    expect(sourceCadenceLabel("instagram_account").toLowerCase()).not.toContain("hourly");
+    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("daily");
+    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("once a day");
+    expect(sourceCadenceLabel("tiktok_account").toLowerCase()).not.toContain("hourly");
+    // The two paid daily-pollers must NOT inherit the YouTube 6h cadence.
+    expect(sourceCadenceLabel("instagram_account")).not.toContain("6 hours");
+    expect(sourceCadenceLabel("tiktok_account")).not.toContain("6 hours");
+    // reddit_account + reddit_subreddit share one cadence (same enqueue crons).
+    expect(sourceCadenceLabel("reddit_subreddit")).toBe(sourceCadenceLabel("reddit_account"));
+  });
+
+  it("addSourceUiCadenceLabel resolves the synthetic 'reddit' chip to reddit_account", () => {
+    expect(addSourceUiCadenceLabel("reddit")).toBe(sourceCadenceLabel("reddit_account"));
+  });
+
+  it("addSourceUiCadenceLabel covers every Add-Source UI kind with a non-empty string", () => {
+    const ALL_UI_KINDS = [
+      "youtube_channel",
+      "reddit",
+      "twitter_account",
+      "telegram_channel",
+      "discord_server",
+      "instagram_account",
+      "tiktok_account",
+    ] as const satisfies readonly AddSourceUiKind[];
+    for (const k of ALL_UI_KINDS) {
+      const label = addSourceUiCadenceLabel(k);
+      expect(label.length, `${k} UI cadence must be non-empty`).toBeGreaterThan(0);
+    }
+  });
+
+  it("addSourceUiCadenceLabel falls back to the neutral default for an unknown widened string", () => {
+    // The BackfillPicker prop is `kind?: string`; an unrecognized value must
+    // not crash the lookup (returns the neutral default instead).
+    expect(addSourceUiCadenceLabel("not_a_real_kind" as AddSourceUiKind)).toBe(
+      SOURCE_KIND_DISPLAY.twitter_account.cadence(),
+    );
+  });
+});
+
 describe("kind-display config — derived helper sets stay in lockstep", () => {
   it("POLLABLE_EVENT_KINDS equals exactly the pollable=true entries", () => {
     const expected = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_DISPLAY[k].pollable);
@@ -141,6 +214,25 @@ describe("kind-display config — derived helper sets stay in lockstep", () => {
     // Phase 09 — telegram_post charts its view_count series.
     expect(CHARTABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
     expect(CHARTABLE_EVENT_KINDS.has("other")).toBe(false);
+  });
+
+  it("FEED_FILTERABLE_EVENT_KINDS equals exactly the feedFilterable=true entries", () => {
+    const expected = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_DISPLAY[k].feedFilterable);
+    expect([...FEED_FILTERABLE_EVENT_KINDS].sort()).toEqual([...expected].sort());
+    // Phase 10 D-08 — the user-reported regression: the social adapter kinds
+    // were missing from the /feed KIND axis. They MUST be members now, and a
+    // new adapter kind auto-appears the moment it's marked feedFilterable.
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("youtube_video")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("reddit_post")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("instagram_post")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
+    // Free-form kinds stay filterable (they were never the regression).
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("post")).toBe(true);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("other")).toBe(true);
+    // No-adapter kinds stay OUT — filtering to a kind you can't create is a
+    // footgun (same rationale as manualCreatable:false).
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("twitter_post")).toBe(false);
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("discord_drop")).toBe(false);
   });
 });
 
@@ -170,11 +262,13 @@ describe("kind-display config — Add Event manual picker is config-driven + in 
     }
   });
 
-  it("includes instagram_post (Phase 08) + telegram_post (Phase 09) and excludes the still-deferred kinds", () => {
+  it("includes instagram_post (Phase 08) + telegram_post (Phase 09) + tiktok_post (Phase 10) and excludes the still-deferred kinds", () => {
     const set = new Set<string>(MANUAL_EVENT_KINDS);
     expect(set.has("instagram_post")).toBe(true);
     // Phase 09 — telegram_post joins the paste-flow kinds (free t.me/s).
     expect(set.has("telegram_post")).toBe(true);
+    // Phase 10 — tiktok_post joins the paste-flow kinds (paid ScrapeCreators).
+    expect(set.has("tiktok_post")).toBe(true);
     // The deferred kinds (no adapter, no paste flow, filtered from /feed) must
     // NOT be manually creatable — letting a user create un-filterable events
     // is the footgun manualCreatable:false prevents.
@@ -182,12 +276,14 @@ describe("kind-display config — Add Event manual picker is config-driven + in 
     expect(set.has("discord_drop")).toBe(false);
   });
 
-  it("preserves the picker order (instagram_post after reddit_post, telegram_post after instagram_post)", () => {
+  it("preserves the picker order (instagram after reddit, telegram after instagram, tiktok after telegram)", () => {
     const ri = MANUAL_EVENT_KINDS.indexOf("reddit_post");
     const ii = MANUAL_EVENT_KINDS.indexOf("instagram_post");
     const ti = MANUAL_EVENT_KINDS.indexOf("telegram_post");
+    const tk = MANUAL_EVENT_KINDS.indexOf("tiktok_post");
     expect(ri).toBeGreaterThanOrEqual(0);
     expect(ii).toBe(ri + 1);
     expect(ti).toBe(ii + 1);
+    expect(tk).toBe(ti + 1);
   });
 });

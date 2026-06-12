@@ -11,6 +11,7 @@ import * as youtubeUiServer from "./youtube/ui/server.js";
 import * as redditUiServer from "./reddit/ui/server.js";
 import * as instagramUiServer from "./instagram/ui/server.js";
 import * as telegramUiServer from "./telegram/ui/server.js";
+import * as tiktokUiServer from "./tiktok/ui/server.js";
 
 export interface AdapterUiServer {
   /** Pure-function mapper safe to call from +page.server.ts (no Svelte
@@ -35,6 +36,7 @@ const uiRegistry = new Map<SourceKind, AdapterUiServer>([
   ["reddit_subreddit", redditUiServer as unknown as AdapterUiServer],
   ["instagram_account", instagramUiServer as unknown as AdapterUiServer],
   ["telegram_channel", telegramUiServer as unknown as AdapterUiServer],
+  ["tiktok_account", tiktokUiServer as unknown as AdapterUiServer],
 ]);
 
 export function getAdapterUI(kind: SourceKind): AdapterUiServer {

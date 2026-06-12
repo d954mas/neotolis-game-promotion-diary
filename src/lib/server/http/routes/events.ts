@@ -70,25 +70,19 @@ import { requestRefreshPoll } from "../../services/refresh-poll.js";
 import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "$lib/sources/adapter.js";
+import { isMediaTypeCategory, type MediaTypeCategory } from "$lib/feed/media-type-filter.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { getEventMetricSeries } from "../../services/event-metric-series.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
-const eventKindEnum = z.enum([
-  "youtube_video",
-  "reddit_post",
-  "instagram_post",
-  "twitter_post",
-  "telegram_post",
-  "discord_drop",
-  "conference",
-  "talk",
-  "press",
-  "other",
-  "post",
-]);
+// Route enum DERIVED from the service's VALID_EVENT_KINDS (itself asserted equal
+// to the pgEnum's enumValues by a unit test) so the route can NEVER drift behind a
+// new kind — adding `tiktok_post` to the pgEnum + VALID_EVENT_KINDS now flows here
+// automatically. The `as` cast satisfies z.enum's `[string, ...string[]]` tuple
+// shape; VALID_EVENT_KINDS is `as const` so the literal union is preserved.
+export const eventKindEnum = z.enum(VALID_EVENT_KINDS as unknown as [EventKind, ...EventKind[]]);
 
 /**
  * URL-required validator for pollable event kinds. youtube_video AND
@@ -321,6 +315,13 @@ eventsRoutes.get(
     const sourceList = c.req.queries("source") ?? undefined;
     const kindList = c.req.queries("kind") as EventKind[] | undefined;
     const gameList = c.req.queries("game") ?? [];
+    // MEDIA-TYPE axis multi-select — repeated ?type=short&type=video params.
+    // Validated by DERIVING from MEDIA_FILTER_CATEGORIES (no hand-list); an
+    // unrecognized value is silently dropped (mirrors the url-state.ts parser
+    // + the kind axis's malformed-param fallback).
+    const typeList = (c.req.queries("type") ?? []).filter((t): t is MediaTypeCategory =>
+      isMediaTypeCategory(t),
+    );
     // Defense-in-depth: validate each kind value against the closed enum
     // BEFORE the service. Service-level assertValidKind is the second
     // layer; the route-layer 422 here keeps the failure mode crisp for
@@ -370,6 +371,7 @@ eventsRoutes.get(
           kind: kindList && kindList.length > 0 ? kindList : undefined,
           show: showFilter,
           gameTags: gameTagsFromUrl,
+          mediaType: typeList.length > 0 ? typeList : undefined,
           authorIsMe: q.authorIsMe === "true" ? true : q.authorIsMe === "false" ? false : undefined,
           // Date-only (YYYY-MM-DD) is inclusive on both ends — see /feed/+page.server.ts.
           from: q.from ? new Date(`${q.from}T00:00:00.000Z`) : undefined,

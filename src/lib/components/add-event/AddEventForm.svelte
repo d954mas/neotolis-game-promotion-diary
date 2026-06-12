@@ -29,6 +29,7 @@
     | "youtube_video"
     | "reddit_post"
     | "instagram_post"
+    | "tiktok_post"
     | "twitter_post"
     | "telegram_post"
     | "discord_drop"
@@ -157,6 +158,8 @@
         return "Reddit";
       case "instagram_post":
         return "Instagram";
+      case "tiktok_post":
+        return "TikTok";
       case "twitter_post":
         return "Twitter";
       case "telegram_post":
@@ -184,6 +187,8 @@
         return m.event_kind_label_reddit_post();
       case "instagram_post":
         return m.event_kind_label_instagram_post();
+      case "tiktok_post":
+        return m.event_kind_label_tiktok_post();
       case "post":
         return m.event_kind_label_post();
       case "conference":
@@ -319,6 +324,7 @@
         "youtube_video",
         "reddit_post",
         "instagram_post",
+        "tiktok_post",
         "twitter_post",
         "telegram_post",
         "discord_drop",
@@ -450,6 +456,8 @@
         return "var(--k-reddit)";
       case "instagram_post":
         return "var(--k-instagram)";
+      case "tiktok_post":
+        return "var(--k-tiktok)";
       case "twitter_post":
         return "var(--k-twitter)";
       case "telegram_post":

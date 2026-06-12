@@ -11,9 +11,11 @@ import type { SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
 import { eventGames } from "../db/schema/event-games.js";
+import { instagramPosts, tiktokPosts, youtubeVideos } from "../db/schema/index.js";
 import { env } from "../config/env.js";
 import { NotFoundError } from "./errors.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
+import { kindLevelKindsForCategory, type MediaTypeCategory } from "$lib/feed/media-type-filter.js";
 import {
   FEED_PAGE_SIZE,
   OFF_TOPIC_TAG,
@@ -83,6 +85,127 @@ function pushAxis<T>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     parts.push(eq(column, value as any));
   }
+}
+
+/**
+ * buildMediaTypeClause — the MEDIA-TYPE axis (Short / Video / Other) SQL
+ * predicate, shared by listFeedPage + buildFeedBaseFilterParts. Returns a single
+ * SQL OR clause, or null when the axis is empty (no filter).
+ *
+ * Filtered IN SQL (not post-enrichment) so cursor pagination stays honest. For
+ * each selected category the clause is an OR of:
+ *   (a) KIND-LEVEL — `events.kind IN (kinds whose default category == this one)`
+ *       (youtube_video → video; reddit/telegram/twitter/discord/conference/talk/
+ *       press/other/post → other; none currently default to short). Per-post
+ *       kinds (instagram_post / tiktok_post) are NEVER in this set — they need
+ *       the cache-row subquery instead.
+ *   (b) PER-POST (instagram_post / tiktok_post) — an EXISTS subquery against the
+ *       platform cache table whose media_type maps to this category:
+ *         short → media_type = 'short'
+ *         video → media_type = 'video'
+ *         other → media_type IN ('image','carousel','text') OR missing/NULL
+ *       The join key is events.external_id → instagram_posts.post_id /
+ *       tiktok_posts.aweme_id (the cache PKs — verified against
+ *       feed-enrichment.ts).
+ *   (b') PER-POST (youtube_video) — DIFFERENT default rule. youtube_videos
+ *       .media_type ('short' | 'video' | NULL) joins on
+ *       events.external_id → youtube_videos.video_id (the PK). A youtube_video
+ *       is ALWAYS a video at worst (never "other"):
+ *         short → EXISTS a cache row with media_type='short'
+ *         video → NOT EXISTS a 'short' cache row (i.e. media_type='video', NULL,
+ *                 or no row at all — Shorts detection lazily heals NULLs; an
+ *                 unclassified video must default to Video, never vanish)
+ *         other → youtube_video NEVER matches (it is never "other")
+ *   (c) OTHER also matches IG/TikTok per-post events whose cache row is MISSING
+ *       or whose media_type is NULL/unrecognized (a NOT EXISTS / NULL arm), so
+ *       NO event silently vanishes from all three categories. This is what makes
+ *       the three categories PARTITION the feed: selecting all three == no
+ *       filter (youtube_video partitions via its short/video arms above).
+ *
+ * Tenant scope: the EXISTS subqueries hit the PUBLIC-DATA cache tables
+ * (instagram_posts / tiktok_posts — ESLint-allowlisted, no userId column),
+ * keyed by external_id. The tenant guarantee comes from the outer
+ * `eq(events.userId, userId)` clause (mirrors feed-enrichment's public-data
+ * read pattern). Raw `sql` is used (not db.select().from(...)) so the
+ * structural ESLint tenant rule — which keys on `.from(<Identifier>)` — does
+ * not fire.
+ */
+function buildMediaTypeClause(categories: readonly MediaTypeCategory[] | undefined): SQL | null {
+  if (categories === undefined || categories.length === 0) return null;
+
+  const categoryClauses: SQL[] = [];
+  for (const category of categories) {
+    const orParts: SQL[] = [];
+
+    // (a) Kind-level default kinds for this category.
+    const kindLevelKinds = kindLevelKindsForCategory(category);
+    if (kindLevelKinds.length > 0) {
+      orParts.push(
+        sql`${events.kind} IN (${sql.join(
+          kindLevelKinds.map((k) => sql`${k}`),
+          sql.raw(", "),
+        )})` as SQL,
+      );
+    }
+
+    // (b) Per-post arms (instagram_post + tiktok_post).
+    //   - short / video: an EXISTS subquery whose cache-row media_type EQUALS
+    //     the category. (short ← 'short', video ← 'video'.)
+    //   - other: a NOT EXISTS for a short/video cache row — i.e. the per-post
+    //     event is "other" iff it does NOT have a short/video cache row. This
+    //     covers media_type IN {image, carousel, text}, NULL media_type, AND a
+    //     missing cache row, so NO event vanishes from all three categories
+    //     (the categories PARTITION the feed: selecting all three == no filter).
+    if (category === "other") {
+      orParts.push(
+        sql`(${events.kind} = 'instagram_post' AND NOT EXISTS (SELECT 1 FROM ${instagramPosts} WHERE ${instagramPosts.postId} = ${events.externalId} AND ${instagramPosts.mediaType} IN ('short', 'video')))` as SQL,
+      );
+      orParts.push(
+        sql`(${events.kind} = 'tiktok_post' AND NOT EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} IN ('short', 'video')))` as SQL,
+      );
+      // youtube_video is NEVER "other" — no arm. It always lands in short or
+      // video (the video arm catches NULL/unclassified rows), so the three
+      // categories still partition the feed.
+    } else if (category === "short") {
+      // short — exact media_type='short' on the cache row.
+      orParts.push(
+        sql`(${events.kind} = 'instagram_post' AND EXISTS (SELECT 1 FROM ${instagramPosts} WHERE ${instagramPosts.postId} = ${events.externalId} AND ${instagramPosts.mediaType} = 'short'))` as SQL,
+      );
+      orParts.push(
+        sql`(${events.kind} = 'tiktok_post' AND EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} = 'short'))` as SQL,
+      );
+      orParts.push(
+        sql`(${events.kind} = 'youtube_video' AND EXISTS (SELECT 1 FROM ${youtubeVideos} WHERE ${youtubeVideos.videoId} = ${events.externalId} AND ${youtubeVideos.mediaType} = 'short'))` as SQL,
+      );
+    } else {
+      // video — exact media_type='video' for IG/TikTok; for youtube_video the
+      // default is video, so it's NOT EXISTS a 'short' cache row (covers
+      // media_type='video', NULL, AND no row — an unclassified video defaults to
+      // Video, never vanishing from all three categories).
+      orParts.push(
+        sql`(${events.kind} = 'instagram_post' AND EXISTS (SELECT 1 FROM ${instagramPosts} WHERE ${instagramPosts.postId} = ${events.externalId} AND ${instagramPosts.mediaType} = 'video'))` as SQL,
+      );
+      // NOTE: tiktok_posts writes only 'short'/'carousel' since the video→short
+      // remap, so this arm normally never matches — it is kept DELIBERATELY as
+      // the partition guard for any legacy 'video' row (pre-remap data): the
+      // "other" arm excludes media_type IN ('short','video'), so without this
+      // arm such a row would vanish from all three categories.
+      orParts.push(
+        sql`(${events.kind} = 'tiktok_post' AND EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} = 'video'))` as SQL,
+      );
+      orParts.push(
+        sql`(${events.kind} = 'youtube_video' AND NOT EXISTS (SELECT 1 FROM ${youtubeVideos} WHERE ${youtubeVideos.videoId} = ${events.externalId} AND ${youtubeVideos.mediaType} = 'short'))` as SQL,
+      );
+    }
+
+    categoryClauses.push(sql`(${sql.join(orParts, sql.raw(" OR "))})` as SQL);
+  }
+
+  // The selected categories are OR'd together (a row matching ANY selected
+  // category passes). One category → its clause directly; many → OR-joined.
+  return categoryClauses.length === 1
+    ? categoryClauses[0]!
+    : (sql`(${sql.join(categoryClauses, sql.raw(" OR "))})` as SQL);
 }
 
 // ── Exported query functions ───────────────────────────────────────────
@@ -406,6 +529,12 @@ export async function listFeedPage(
     }
   }
 
+  // MEDIA-TYPE axis (Short / Video / Other) — filtered in SQL so pagination
+  // stays honest. See buildMediaTypeClause for the full kind-level + per-post
+  // cache-row partition rationale.
+  const mediaTypeClause = buildMediaTypeClause(filters.mediaType);
+  if (mediaTypeClause !== null) filterParts.push(mediaTypeClause);
+
   if (filters.authorIsMe !== undefined) {
     filterParts.push(eq(events.authorIsMe, filters.authorIsMe));
   }
@@ -518,7 +647,7 @@ export async function listFeedPage(
  * through this helper — callers add it directly to their .where(...) so
  * the ESLint tenant-scope rule sees it lexically.
  */
-type FeedAxis = "kind" | "source" | "show" | "gameTags" | "author" | "date" | "query";
+type FeedAxis = "kind" | "source" | "show" | "gameTags" | "mediaType" | "author" | "date" | "query";
 function buildFeedBaseFilterParts(
   userId: string,
   filters: FeedFilters,
@@ -593,6 +722,11 @@ function buildFeedBaseFilterParts(
     if (orParts.length === 1) filterParts.push(orParts[0]!);
     else if (orParts.length > 1)
       filterParts.push(sql`(${sql.join(orParts, sql.raw(" OR "))})` as SQL);
+  }
+
+  if (!exclude.has("mediaType")) {
+    const mediaTypeClause = buildMediaTypeClause(filters.mediaType);
+    if (mediaTypeClause !== null) filterParts.push(mediaTypeClause);
   }
 
   if (!exclude.has("author") && filters.authorIsMe !== undefined) {
@@ -734,6 +868,35 @@ export async function listFeedFacets(
       ),
     );
 
+  // MEDIA-TYPE facet — exclude the mediaType axis from the base, then run one
+  // COUNT per category with the single-category clause applied. `all` is the
+  // base count with the axis cleared (the "All" sentinel chip). Each per-
+  // category count answers "how many events would match if THIS were the only
+  // TYPE selection" — stable across same-axis toggles (the axis is excluded
+  // from the base).
+  const mediaTypeBaseParts = buildFeedBaseFilterParts(
+    userId,
+    filters,
+    scope,
+    new Set(["mediaType"]),
+  );
+  const mediaTypeAllQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...mediaTypeBaseParts));
+  const mediaTypeShortQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...mediaTypeBaseParts, buildMediaTypeClause(["short"])!));
+  const mediaTypeVideoQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...mediaTypeBaseParts, buildMediaTypeClause(["video"])!));
+  const mediaTypeOtherQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...mediaTypeBaseParts, buildMediaTypeClause(["other"])!));
+
   // AUTHOR facet — `anyone` reuses the full-axes base count; `mine` /
   // `others` apply the authorIsMe predicate on the author-excluded base.
   const authorBaseParts = buildFeedBaseFilterParts(userId, filters, scope, new Set(["author"]));
@@ -766,6 +929,10 @@ export async function listFeedFacets(
     kindsAllRows,
     showAllRows,
     showInboxRows,
+    mediaTypeAllRows,
+    mediaTypeShortRows,
+    mediaTypeVideoRows,
+    mediaTypeOtherRows,
     authorAnyoneRows,
     authorMineRows,
     authorOthersRows,
@@ -778,6 +945,10 @@ export async function listFeedFacets(
     kindsAllQuery,
     showAllQuery,
     showInboxQuery,
+    mediaTypeAllQuery,
+    mediaTypeShortQuery,
+    mediaTypeVideoQuery,
+    mediaTypeOtherQuery,
     authorAnyoneQuery,
     authorMineQuery,
     authorOthersQuery,
@@ -800,6 +971,12 @@ export async function listFeedFacets(
     show: {
       all: Number(showAllRows[0]?.count ?? 0),
       inbox: Number(showInboxRows[0]?.count ?? 0),
+    },
+    mediaType: {
+      short: Number(mediaTypeShortRows[0]?.count ?? 0),
+      video: Number(mediaTypeVideoRows[0]?.count ?? 0),
+      other: Number(mediaTypeOtherRows[0]?.count ?? 0),
+      all: Number(mediaTypeAllRows[0]?.count ?? 0),
     },
     author: {
       anyone: Number(authorAnyoneRows[0]?.count ?? 0),

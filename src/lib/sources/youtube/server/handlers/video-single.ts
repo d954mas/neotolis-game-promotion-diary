@@ -151,6 +151,13 @@ export interface HandleVideoSingleArgs {
    *  room for cron-only behavior changes (e.g. always-fetch). */
   paste?: boolean;
   ipAddress?: string;
+  /** Shorts classification known FROM THE URL ITSELF: a pasted
+   *  youtube.com/shorts/<id> URL IS the answer — media_type='short' with no
+   *  probe (the redirect probe would just confirm what the /shorts/ path already
+   *  states). Only ever "short" (a /watch URL carries no Short/video signal —
+   *  that's decided later by the poll worker's probe). Persisted on the
+   *  youtube_videos UPSERT. */
+  mediaTypeHint?: "short";
 }
 
 /**
@@ -186,6 +193,16 @@ export async function handleVideoSingle(
   if (args.paste === true) {
     const cached = await readCachedVideo(args.videoId);
     if (cached !== null) {
+      // /shorts/ paste intrinsic still applies on a dedup hit: the row may have
+      // been first cached via a /watch paste (media_type NULL) seconds ago, and
+      // this /shorts/ paste is the decisive signal. COALESCE-set it without a
+      // probe (forward-only: never clobbers an existing 'short'/'video').
+      if (args.mediaTypeHint !== undefined) {
+        await db
+          .update(youtubeVideos)
+          .set({ mediaType: sql`COALESCE(${youtubeVideos.mediaType}, ${args.mediaTypeHint})` })
+          .where(eq(youtubeVideos.videoId, args.videoId));
+      }
       logger.debug(
         { videoId: args.videoId, userId: args.userId, paste: true },
         "youtube video_single: dedup — reused cached row < 60s old",
@@ -257,6 +274,9 @@ export async function handleVideoSingle(
         description: null,
         channelId: dataApiResult?.channelId ?? null,
         publishedAt: dataApiResult?.publishedAt ?? null,
+        // /shorts/ paste intrinsic: the URL the user pasted IS the answer.
+        // Otherwise NULL — the poll worker's redirect probe decides later.
+        mediaType: args.mediaTypeHint ?? null,
         fetchedAt: now,
       })
       .onConflictDoUpdate({
@@ -271,6 +291,10 @@ export async function handleVideoSingle(
           // previously-resolved channel_id.
           channelId: sql`COALESCE(EXCLUDED.channel_id, ${youtubeVideos.channelId})`,
           publishedAt: sql`COALESCE(EXCLUDED.published_at, ${youtubeVideos.publishedAt})`,
+          // media_type: COALESCE so a /shorts/ paste sets it on first sight but a
+          // later /watch re-paste (EXCLUDED.media_type = NULL) never clobbers an
+          // existing verdict. A probe-set 'short'/'video' is likewise preserved.
+          mediaType: sql`COALESCE(EXCLUDED.media_type, ${youtubeVideos.mediaType})`,
           fetchedAt: sql`EXCLUDED.fetched_at`,
           updatedAt: now,
         },

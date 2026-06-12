@@ -50,6 +50,7 @@ import {
   type YoutubeDailyByType,
 } from "$lib/sources/youtube/server/observability.js";
 import { getInstagramProviderBlock } from "$lib/sources/instagram/server/observability.js";
+import { getTikTokProviderBlock } from "$lib/sources/tiktok/server/observability.js";
 
 // Re-export types so the /admin Svelte components (which can only
 // type-import from this server-service module, not from reddit/server
@@ -146,6 +147,27 @@ export type AdminInstagramBlock =
     }
   | { isConfigured: false };
 
+/**
+ * TikTok (ScrapeCreators) provider block surfaced on /admin/quota — the twin of
+ * AdminInstagramBlock (same shape, same collapse-when-unconfigured contract).
+ * TikTok shares the provider-wide prepaid balance with Instagram (D-01), so the
+ * remainingBalance / prepaidBalance fields read the SAME ceiling; the per-platform
+ * creditsUsed / requestsToday are TikTok's own daily spend (visibility). When the
+ * operator hasn't configured TIKTOK_PROVIDER, the block collapses to
+ * `{ isConfigured: false }` and the page renders the placeholder.
+ */
+export type AdminTiktokBlock =
+  | {
+      isConfigured: true;
+      requestsToday: number;
+      creditsUsed: number;
+      dailyCap: number;
+      remainingBalance: number;
+      prepaidBalance: number;
+      throttleState: "ok" | "eighty" | "ninetyfive";
+    }
+  | { isConfigured: false };
+
 export async function loadAdminQuotaPage(): Promise<{
   today: string;
   keys: QuotaKeyRow[];
@@ -153,6 +175,7 @@ export async function loadAdminQuotaPage(): Promise<{
   reddit: AdminRedditBlock;
   youtube: AdminYoutubeBlock;
   instagram: AdminInstagramBlock;
+  tiktok: AdminTiktokBlock;
 }> {
   const today = todayPacific();
   const now = new Date();
@@ -234,6 +257,24 @@ export async function loadAdminQuotaPage(): Promise<{
       }
     : { isConfigured: false };
 
+  // TikTok provider block — the twin of the Instagram block, mirroring its
+  // collapse-when-unconfigured contract. getTikTokProviderBlock reads
+  // isTikTokConfigured() at call time; when TIKTOK_PROVIDER is empty the block
+  // collapses to { isConfigured: false } so the page renders the placeholder
+  // instead of a zeroed spend table that looks like an outage.
+  const tt = await getTikTokProviderBlock(now);
+  const tiktok: AdminTiktokBlock = tt.isConfigured
+    ? {
+        isConfigured: true,
+        requestsToday: tt.requestsToday,
+        creditsUsed: tt.creditsUsed,
+        dailyCap: tt.dailyCap,
+        remainingBalance: tt.remainingBalance,
+        prepaidBalance: tt.prepaidBalance,
+        throttleState: tt.throttleState,
+      }
+    : { isConfigured: false };
+
   return {
     today,
     keys: keyRows,
@@ -241,6 +282,7 @@ export async function loadAdminQuotaPage(): Promise<{
     reddit,
     youtube,
     instagram,
+    tiktok,
   };
 }
 

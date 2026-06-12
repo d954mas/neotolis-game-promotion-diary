@@ -32,6 +32,7 @@
     inferSourceKindFromUrl,
     normalizeHandleUrl,
   } from "$lib/components/sources/infer-source-kind.js";
+  import { addSourceUiCadenceLabel } from "$lib/sources/kind-display.js";
 
   // Mirror the synthetic UI kind picker from /sources/new — "reddit" is
   // resolved server-side to reddit_account / reddit_subreddit by URL
@@ -40,6 +41,7 @@
     | "youtube_channel"
     | "reddit"
     | "instagram_account"
+    | "tiktok_account"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
@@ -50,6 +52,7 @@
     | "source_kind_label_telegram_channel"
     | "source_kind_label_discord_server"
     | "source_kind_label_instagram_account"
+    | "source_kind_label_tiktok_account"
     | "common_kind_reddit";
 
   type KindStatusKey =
@@ -57,7 +60,8 @@
     | "source_kind_status_twitter_account"
     | "source_kind_status_telegram_channel"
     | "source_kind_status_discord_server"
-    | "source_kind_status_instagram_account";
+    | "source_kind_status_instagram_account"
+    | "source_kind_status_tiktok_account";
 
   // disabledReason distinguishes "adapter built, operator env unset"
   // (Reddit / Instagram unconfigured) from "not built yet" (Twitter /
@@ -162,6 +166,14 @@
   const pickerPostCap = $derived(
     pickerKind === "telegram_channel" ? telegramBackfillMaxPosts : socialBackfillMaxPosts,
   );
+  // Auto-import toggle copy: the per-platform cadence once the URL pins the kind
+  // (submitKind), else a neutral fallback before detection. Single source of
+  // truth — addSourceUiCadenceLabel resolves the synthetic "reddit" chip too.
+  const autoImportLabel = $derived(
+    submitKind === null
+      ? m.source_auto_import_toggle_label_fallback()
+      : m.source_auto_import_toggle_label({ cadence: addSourceUiCadenceLabel(submitKind) }),
+  );
 
   // Picker collapse → reset value (same effect as /sources/new).
   $effect(() => {
@@ -182,6 +194,8 @@
         return m.source_kind_label_discord_server();
       case "source_kind_label_instagram_account":
         return m.source_kind_label_instagram_account();
+      case "source_kind_label_tiktok_account":
+        return m.source_kind_label_tiktok_account();
       case "common_kind_reddit":
         return m.common_kind_reddit();
     }
@@ -205,6 +219,8 @@
         return m.source_kind_status_discord_server();
       case "source_kind_status_instagram_account":
         return m.source_kind_status_instagram_account();
+      case "source_kind_status_tiktok_account":
+        return m.source_kind_status_tiktok_account();
     }
   }
 
@@ -279,11 +295,22 @@
         onClose();
         return;
       }
-      let body: { error?: string; metadata?: { kind?: string; status?: string } } = {};
+      let body: { error?: string; metadata?: { kind?: string; status?: string; handle?: string } } =
+        {};
       try {
         body = (await res.json()) as typeof body;
       } catch {
         // ignore parse failures
+      }
+      // Adapter resolved the handle against the live platform and it doesn't
+      // exist / isn't public — surface the handle, not the generic copy.
+      if (
+        res.status === 422 &&
+        (body.error === "tiktok_handle_unresolvable" ||
+          body.error === "instagram_handle_unresolvable")
+      ) {
+        formError = m.sources_error_handle_unresolvable({ handle: body.metadata?.handle ?? "" });
+        return;
       }
       if (res.status === 422 && body.error === "kind_not_yet_functional") {
         const kindLabel = body.metadata?.kind ?? submitKind ?? "";
@@ -440,7 +467,7 @@
 
       <label class="toggle">
         <input type="checkbox" bind:checked={autoImport} />
-        <span>Auto-import (poll every 6 hours)</span>
+        <span>{autoImportLabel}</span>
       </label>
 
       <details class="description-details">

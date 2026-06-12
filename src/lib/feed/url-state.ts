@@ -49,6 +49,12 @@
 // top level — breaks unit tests / SSR client bundles).
 
 import type { EventKind } from "$lib/sources/adapter.js";
+import { EVENT_KIND_DISPLAY } from "$lib/sources/kind-display.js";
+import {
+  MEDIA_FILTER_CATEGORIES,
+  isMediaTypeCategory,
+  type MediaTypeCategory,
+} from "$lib/feed/media-type-filter.js";
 
 /**
  * Off-topic sentinel value in the GAME axis multi-select. Carried as a
@@ -69,28 +75,25 @@ export const OFF_TOPIC_TAG = "off_topic";
  */
 export type ShowFilter = { kind: "any" } | { kind: "inbox" };
 
-// Local kind-axis validation. We cannot reuse `filterValidKinds` from
-// `$lib/util/filter-event-kinds.js` because that helper imports
-// `VALID_EVENT_KINDS` from the server-only events service, which would
-// drag the env-loading chain into the client bundle / unit-test runner.
-// Documented as Plan 03.4-02 deviation Rule 3 (auto-fix blocking issue);
-// follow-up: extract VALID_EVENT_KINDS to a client-safe shared module
-// so all three callers (events service, filter-event-kinds helper, this
-// URL parser) reuse a single source of truth.
-const URL_VALID_KINDS: ReadonlySet<EventKind> = new Set<EventKind>([
-  "youtube_video",
-  "reddit_post",
-  "twitter_post",
-  "telegram_post",
-  "discord_drop",
-  "conference",
-  "talk",
-  "press",
-  "other",
-  "post",
-]);
+// Local kind-axis validation, DERIVED from kind-display (client-safe, the
+// compile-enforced `satisfies Record<EventKind, …>` map) — the same single
+// source of truth the /feed KIND axis renders from (D-08). The previous
+// hand-list here silently dropped `instagram_post` / `tiktok_post` from
+// `?kind=` URLs, so clicking those filter chips did nothing (Phase 10 UAT,
+// 2026-06-12) — a kind that renders in the axis MUST round-trip the URL.
+const URL_VALID_KINDS: ReadonlySet<EventKind> = new Set<EventKind>(
+  Object.keys(EVENT_KIND_DISPLAY) as EventKind[],
+);
 function filterValidKindsLocal(raw: string[]): EventKind[] {
   return raw.filter((k): k is EventKind => URL_VALID_KINDS.has(k as EventKind));
+}
+
+// MEDIA-TYPE axis validation, DERIVED from MEDIA_FILTER_CATEGORIES (the single
+// source of truth, client-safe) — same no-hand-list discipline as
+// URL_VALID_KINDS above. A malformed `?type=foo` never reaches the SSR loader's
+// filter; an unknown value is silently dropped (mirrors the kind axis).
+function filterValidMediaTypes(raw: string[]): MediaTypeCategory[] {
+  return raw.filter((t): t is MediaTypeCategory => isMediaTypeCategory(t));
 }
 
 export type DateRangePreset = "all" | "today" | "week" | "month" | "year";
@@ -111,6 +114,13 @@ export interface FilterState {
    * is present) its triage.offTopic flag is true.
    */
   gameTags: string[];
+  /**
+   * MEDIA-TYPE axis multi-select (Short / Video / Other). Each entry is a
+   * MediaTypeCategory. Empty array = no media-type filter. Multi-value via
+   * repeated `?type=short&type=video` params. Validated by DERIVING from
+   * MEDIA_FILTER_CATEGORIES so a malformed `?type=foo` is silently dropped.
+   */
+  mediaType: MediaTypeCategory[];
   authorIsMe: boolean | undefined;
   dateRange: DateRangeFilter;
   sortDir: "asc" | "desc";
@@ -204,6 +214,7 @@ export function parseSearchParams(url: URL): FilterState {
     source: sp.getAll("source"),
     kind: filterValidKindsLocal(sp.getAll("kind")),
     gameTags: parseGameTags(sp),
+    mediaType: filterValidMediaTypes(sp.getAll("type")),
     authorIsMe: parseAuthorIsMe(sp),
     dateRange: parseDateRange(sp),
     sortDir: sp.get("sort") === "asc" ? "asc" : "desc",
@@ -233,6 +244,13 @@ export function serializeFilterState(state: FilterState): URLSearchParams {
 
   // multi-value kind axis.
   for (const k of state.kind) sp.append("kind", k);
+
+  // multi-value MEDIA-TYPE axis. Emit in MEDIA_FILTER_CATEGORIES order (not
+  // selection order) so the serialized URL is canonical / stable regardless of
+  // the click order — one `?type=` param per selected category.
+  for (const c of MEDIA_FILTER_CATEGORIES) {
+    if (state.mediaType.includes(c)) sp.append("type", c);
+  }
 
   // authorIsMe tri-state — omit when undefined.
   if (state.authorIsMe === true) sp.set("authorIsMe", "true");

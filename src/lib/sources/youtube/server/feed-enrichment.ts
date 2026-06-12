@@ -104,12 +104,20 @@ export async function youtubeEnrichFeedDtos(
       .select({
         videoId: youtubeVideos.videoId,
         channelTitle: youtubeChannels.channelTitle,
+        // media_type drives the Short/Video pill + the media-type feed filter's
+        // client mirror. NULL until the poll worker's redirect probe classifies
+        // (Shorts detection); the card treats NULL as "video" (no Short pill).
+        mediaType: youtubeVideos.mediaType,
       })
       .from(youtubeVideos)
       .leftJoin(youtubeChannels, eq(youtubeVideos.channelId, youtubeChannels.channelId))
       .where(inArray(youtubeVideos.videoId, youtubeExternalIds));
     const titleByVideo = new Map<string, string | null>();
-    for (const v of videoChannels) titleByVideo.set(v.videoId, v.channelTitle);
+    const mediaTypeByVideo = new Map<string, string | null>();
+    for (const v of videoChannels) {
+      titleByVideo.set(v.videoId, v.channelTitle);
+      mediaTypeByVideo.set(v.videoId, v.mediaType);
+    }
 
     // 3. In-place mutation. Iterate dtos (not just the filtered subset)
     //    so the index matches the caller's expectation; skip non-YouTube
@@ -118,6 +126,11 @@ export async function youtubeEnrichFeedDtos(
       if (r.kind !== "youtube_video" || r.externalId === null) continue;
       r.stats = latest.get(r.externalId) ?? null;
       r.channelTitle = titleByVideo.get(r.externalId) ?? null;
+      // Carry media_type the same way TikTok carries its enrichment.mediaType,
+      // so the card overlay + filter-math client mirror read one shape.
+      (r as EventDto & { youtubeEnrichment?: { mediaType: string | null } }).youtubeEnrichment = {
+        mediaType: mediaTypeByVideo.get(r.externalId) ?? null,
+      };
     }
   } catch (err) {
     // Failure is non-fatal. Log and return; the feed still renders, just
