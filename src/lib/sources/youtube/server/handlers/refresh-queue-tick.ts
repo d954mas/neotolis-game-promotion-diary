@@ -149,30 +149,47 @@ async function refreshVideoGroup(
   // probe per video, ever). The per-tick probe budget bounds network round-trips
   // so a large legacy NULL backlog heals across many ticks, not all at once.
   const unclassified = await loadUnclassifiedVideoIds(videoIds);
-  let probeBudget = PROBE_BUDGET_PER_TICK;
+
+  // Decide the media_type verdicts up front (undefined = leave the column
+  // untouched):
+  //   - already classified (not in `unclassified`)  → undefined.
+  //   - a failed poll (status !== ok)                → undefined (no signal).
+  //   - duration > Shorts ceiling                    → "video" (no probe).
+  //   - duration ≤ ceiling / unknown AND budget left → probe (decider).
+  //   - budget exhausted                             → undefined (next tick).
+  // Probes run with bounded CONCURRENCY (not one-by-one): the worst case of a
+  // full budget of hung probes is one timeout window per chunk, not
+  // budget × timeout sequentially blocking the worker slot (review P2).
+  const verdictByVideoId = new Map<string, "short" | "video">();
+  const probeCandidates: string[] = [];
+  for (const videoId of videoIds) {
+    const snap = snapshotByVideoId.get(videoId)!;
+    if (snap.status !== "ok" || !unclassified.has(videoId)) continue;
+    const prefilter = durationPrefilter(snap.metadata?.duration_seconds ?? null);
+    if (prefilter === "skip-video") {
+      verdictByVideoId.set(videoId, "video");
+    } else if (probeCandidates.length < PROBE_BUDGET_PER_TICK) {
+      probeCandidates.push(videoId);
+    }
+  }
+  const PROBE_CONCURRENCY = 5;
+  for (let i = 0; i < probeCandidates.length; i += PROBE_CONCURRENCY) {
+    const chunk = probeCandidates.slice(i, i + PROBE_CONCURRENCY);
+    const results = await Promise.allSettled(chunk.map((videoId) => probeIsShort(videoId)));
+    for (let j = 0; j < chunk.length; j++) {
+      const r = results[j]!;
+      // null/rejected (ambiguous / probe failure) → leave NULL: classifies as
+      // video downstream, never guessed. Heals on a future tick's probe.
+      if (r.status === "fulfilled" && r.value !== null) {
+        verdictByVideoId.set(chunk[j]!, r.value);
+      }
+    }
+  }
 
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshotByVideoId.get(videoId)!;
-
-    // Decide the media_type verdict (undefined = leave the column untouched):
-    //   - already classified (not in `unclassified`)  → undefined.
-    //   - a failed poll (status !== ok)                → undefined (no signal).
-    //   - duration > Shorts ceiling                    → "video" (no probe).
-    //   - duration ≤ ceiling / unknown AND budget left → probe (decider).
-    //   - budget exhausted                             → undefined (next tick).
-    let mediaType: "short" | "video" | undefined;
-    if (snap.status === "ok" && unclassified.has(videoId)) {
-      const prefilter = durationPrefilter(snap.metadata?.duration_seconds ?? null);
-      if (prefilter === "skip-video") {
-        mediaType = "video";
-      } else if (probeBudget > 0) {
-        probeBudget -= 1;
-        // null (ambiguous / probe failure) → leave NULL: classifies as video
-        // downstream, never guessed. Heals on a future tick's probe.
-        mediaType = (await probeIsShort(videoId)) ?? undefined;
-      }
-    }
+    const mediaType: "short" | "video" | undefined = verdictByVideoId.get(videoId);
 
     await writeSnapshot({
       videoId,

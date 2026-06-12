@@ -185,6 +185,11 @@ function buildMediaTypeClause(categories: readonly MediaTypeCategory[] | undefin
       orParts.push(
         sql`(${events.kind} = 'instagram_post' AND EXISTS (SELECT 1 FROM ${instagramPosts} WHERE ${instagramPosts.postId} = ${events.externalId} AND ${instagramPosts.mediaType} = 'video'))` as SQL,
       );
+      // NOTE: tiktok_posts writes only 'short'/'carousel' since the video→short
+      // remap, so this arm normally never matches — it is kept DELIBERATELY as
+      // the partition guard for any legacy 'video' row (pre-remap data): the
+      // "other" arm excludes media_type IN ('short','video'), so without this
+      // arm such a row would vanish from all three categories.
       orParts.push(
         sql`(${events.kind} = 'tiktok_post' AND EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} = 'video'))` as SQL,
       );

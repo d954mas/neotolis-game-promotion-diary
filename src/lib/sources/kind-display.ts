@@ -185,7 +185,7 @@ export const EVENT_KIND_DISPLAY = {
 //   - reddit_*        : enqueue-service-sources "0 0,6,12,18" + posts
 //                        "0 3,9,15,21" → a fresh walk every 6h, no warm lane.
 //   - instagram_account: active poll "0 6 * * *" (daily) + warm per-post lane
-//                        "0 * * * *" (hourly, >24h staleness gate → ~1 paid
+//                        "0 * * * *" (hourly, >26h staleness gate → ~1 paid
 //                        stats refresh/day per recent post).
 //   - tiktok_account  : active poll "0 6 * * *" (daily) + warm lane "0 * * * *"
 //                        (hourly, >26h gate → ~1 paid refresh/day).
