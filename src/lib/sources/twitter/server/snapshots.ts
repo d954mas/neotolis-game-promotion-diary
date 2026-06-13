@@ -32,7 +32,11 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { twitterAccounts, twitterPosts, twitterPostSnapshots } from "$lib/server/db/schema/index.js";
+import {
+  twitterAccounts,
+  twitterPosts,
+  twitterPostSnapshots,
+} from "$lib/server/db/schema/index.js";
 
 export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
 

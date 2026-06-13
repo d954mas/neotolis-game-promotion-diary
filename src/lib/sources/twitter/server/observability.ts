@@ -113,7 +113,9 @@ export interface TwitterProviderBlock {
   throttleState: SocialThrottleState;
 }
 
-export async function getTwitterProviderBlock(now: Date = new Date()): Promise<TwitterProviderBlock> {
+export async function getTwitterProviderBlock(
+  now: Date = new Date(),
+): Promise<TwitterProviderBlock> {
   const { creditsUsed, dailyCap, prepaidBalance } = await getSocialSpendToday(
     PLATFORM,
     PROVIDER,

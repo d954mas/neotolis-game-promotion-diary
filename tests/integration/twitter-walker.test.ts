@@ -108,7 +108,13 @@ function tweet(
     retweeted_tweet: opts.retweeted_tweet ?? null,
     quoted_tweet: null,
     extendedEntities: {},
-    author: { id: ACCOUNT, userName: "walkeracct", name: "Walker", profilePicture: null, followers: 1 },
+    author: {
+      id: ACCOUNT,
+      userName: "walkeracct",
+      name: "Walker",
+      profilePicture: null,
+      followers: 1,
+    },
   };
 }
 
@@ -124,7 +130,11 @@ async function pageFrom(
       nextCursor,
       endOfFeed,
       creditsUsed: 1,
-      owner: { accountId: ACCOUNT, username: "walkeracct", avatarUrl: "https://pbs.twimg.com/a.jpg" },
+      owner: {
+        accountId: ACCOUNT,
+        username: "walkeracct",
+        avatarUrl: "https://pbs.twimg.com/a.jpg",
+      },
     },
     rawTweets: tweets,
   };
@@ -223,7 +233,11 @@ describe("twitter account walker (single-feed, resumable, cursor-persisted)", ()
   it("[11-03] snapshot rows carry the D-05 raw retweet/quote/bookmark components", async () => {
     await seedSource();
     provider.pages = [
-      await pageFrom([tweet("r1", 1, { retweetCount: 40, quoteCount: 2, bookmarkCount: 17 })], null, true),
+      await pageFrom(
+        [tweet("r1", 1, { retweetCount: 40, quoteCount: 2, bookmarkCount: 17 })],
+        null,
+        true,
+      ),
     ];
 
     await handleBackfillAccount({
@@ -282,12 +296,22 @@ describe("twitter account walker (single-feed, resumable, cursor-persisted)", ()
 
     provider.pages = [await makePage()];
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
     // Reset channel state so the second walk re-fetches page 1 (incremental sweep).
     provider.pages = [await makePage()];
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "auto_passive" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
     });
 
     const inserted = await db.select().from(events).where(eq(events.kind, "twitter_post"));
@@ -300,7 +324,12 @@ describe("twitter account walker (single-feed, resumable, cursor-persisted)", ()
     provider.pages = [await pageFrom([tweet("p1", 1), tweet("p2", 2)], "CURSOR_A", false)];
 
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const st1 = await getTwitterBackfillState(ACCOUNT);
@@ -312,7 +341,12 @@ describe("twitter account walker (single-feed, resumable, cursor-persisted)", ()
     provider.calls = [];
 
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     expect(provider.calls[0]?.cursor).toBe("CURSOR_A");
@@ -328,7 +362,12 @@ describe("twitter account walker (single-feed, resumable, cursor-persisted)", ()
     provider.pages = [emptyPage()];
 
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const [src] = await db.select().from(dataSources).where(eq(dataSources.id, sourceId)).limit(1);
@@ -383,7 +422,12 @@ describe("twitter account walker — self-enqueued continuation", () => {
     provider.pages = [await pageFrom([tweet("c1", 1), tweet("c2", 2)], "PAGE2", false)];
 
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     let cs = await readChannelState();
@@ -396,7 +440,12 @@ describe("twitter account walker — self-enqueued continuation", () => {
 
     provider.pages = [await pageFrom([tweet("c3", 3)], null, true)];
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     cs = await readChannelState();
@@ -413,7 +462,12 @@ describe("twitter account walker — self-enqueued continuation", () => {
     provider.throwOn = "rate-limited";
 
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const cs = await readChannelState();
@@ -434,7 +488,12 @@ describe("twitter account walker — self-enqueued continuation", () => {
     provider.throwOn = "operator-issue";
 
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const cs = await readChannelState();

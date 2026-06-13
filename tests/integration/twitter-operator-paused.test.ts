@@ -83,13 +83,25 @@ function tweet(id: string, daysAgo: number): Tweet {
     retweeted_tweet: null,
     quoted_tweet: null,
     extendedEntities: {},
-    author: { id: ACCOUNT, userName: "pausedacct", name: "Paused", profilePicture: null, followers: 1 },
+    author: {
+      id: ACCOUNT,
+      userName: "pausedacct",
+      name: "Paused",
+      profilePicture: null,
+      followers: 1,
+    },
   };
 }
 
 function pageOf(tweets: Tweet[]): TwitterFeedPage {
   return {
-    page: { posts: tweets.map(normalizeTweet), nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null },
+    page: {
+      posts: tweets.map(normalizeTweet),
+      nextCursor: null,
+      endOfFeed: true,
+      creditsUsed: 1,
+      owner: null,
+    },
     rawTweets: tweets,
   };
 }
@@ -136,7 +148,12 @@ describe("BUDGET-01: twitter operator_paused producer (walker sets/clears, reade
     provider.paused = false;
     provider.page = pageOf([tweet("tw-p1", 1)]);
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     expect((await getTwitterBackfillState(ACCOUNT)).operatorPaused).toBe(false);
@@ -147,7 +164,12 @@ describe("BUDGET-01: twitter operator_paused producer (walker sets/clears, reade
     //    catches it, pauses, and persists operatorPaused=true.
     provider.paused = true;
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "incremental" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "incremental",
+      },
     });
 
     expect((await getTwitterBackfillState(ACCOUNT)).operatorPaused).toBe(true);
@@ -159,7 +181,12 @@ describe("BUDGET-01: twitter operator_paused producer (walker sets/clears, reade
     provider.paused = false;
     provider.page = emptyPage();
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "incremental" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "incremental",
+      },
     });
 
     expect((await getTwitterBackfillState(ACCOUNT)).operatorPaused).toBe(false);

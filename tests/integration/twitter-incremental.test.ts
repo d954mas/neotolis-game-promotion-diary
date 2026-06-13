@@ -24,7 +24,10 @@ vi.mock("../../src/lib/sources/twitter/server/provider/registry.js", async (impo
     isTwitterConfigured: () => true,
     getSocialProvider: (platform: string) =>
       platform === "twitter" ? ({ name: "twitterapi.io" } as never) : null,
-    fetchTwitterFeedPageWithRaw: async (_h: string, cursor: string | null): Promise<TwitterFeedPage> => {
+    fetchTwitterFeedPageWithRaw: async (
+      _h: string,
+      cursor: string | null,
+    ): Promise<TwitterFeedPage> => {
       provider.calls.push({ cursor });
       return provider.pages.shift() ?? emptyPage();
     },
@@ -71,7 +74,9 @@ function page(tweets: Tweet[], nextCursor: string | null, endOfFeed: boolean): T
 }
 
 async function seedSource(): Promise<void> {
-  const user = await seedUserDirectly({ email: `incr-tw-${Math.random().toString(36).slice(2)}@t.io` });
+  const user = await seedUserDirectly({
+    email: `incr-tw-${Math.random().toString(36).slice(2)}@t.io`,
+  });
   await db.insert(dataSources).values({
     userId: user.id,
     kind: "twitter_account",
@@ -94,7 +99,12 @@ describe("twitter incremental backfill (BACK-03)", () => {
     // 1. Initial deep walk completes with i1, i2.
     provider.pages = [page([tweet("i1", 3), tweet("i2", 5)], null, true)];
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     let inserted = await db.select().from(events).where(eq(events.kind, "twitter_post"));
@@ -105,7 +115,12 @@ describe("twitter incremental backfill (BACK-03)", () => {
     provider.calls = [];
     provider.pages = [page([tweet("i0", 1), tweet("i1", 3)], null, true)];
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: new Date(Date.now() - 14 * 86_400_000).toISOString(), flow: "auto_passive" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: new Date(Date.now() - 14 * 86_400_000).toISOString(),
+        flow: "auto_passive",
+      },
     });
 
     // The incremental branch reset to page 1 (cursor null), NOT the historical cursor.
@@ -118,13 +133,23 @@ describe("twitter incremental backfill (BACK-03)", () => {
     await seedSource();
     provider.pages = [page([tweet("n1", 2)], null, true)];
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     // Second sweep returns the SAME single tweet → dedup → no new events.
     provider.pages = [page([tweet("n1", 2)], null, true)];
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: new Date(Date.now() - 14 * 86_400_000).toISOString(), flow: "auto_passive" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: new Date(Date.now() - 14 * 86_400_000).toISOString(),
+        flow: "auto_passive",
+      },
     });
 
     const inserted = await db.select().from(events).where(eq(events.kind, "twitter_post"));

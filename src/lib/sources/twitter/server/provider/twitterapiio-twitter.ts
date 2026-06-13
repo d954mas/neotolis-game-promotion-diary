@@ -169,6 +169,12 @@ export async function fetchTwitterFeedPageWithRaw(
   cursor: string | null,
   origin: ProviderOrigin | undefined,
 ): Promise<TwitterFeedPage> {
-  const json = await fetchFeedJson("twitter", twitterapiioTwitterProvider.name, handle, cursor, origin);
+  const json = await fetchFeedJson(
+    "twitter",
+    twitterapiioTwitterProvider.name,
+    handle,
+    cursor,
+    origin,
+  );
   return normalizeFeedResponseWithRaw(json);
 }

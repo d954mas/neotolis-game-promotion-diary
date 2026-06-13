@@ -65,7 +65,13 @@ async function seedCandidate(userId: string, opts: SeedOpts): Promise<string> {
   if (opts.attachEvent !== false) {
     const ev = await createEvent(
       userId,
-      { kind: "twitter_post", title: "warm", externalId: tweetId, occurredAt: new Date().toISOString(), gameIds: [] },
+      {
+        kind: "twitter_post",
+        title: "warm",
+        externalId: tweetId,
+        occurredAt: new Date().toISOString(),
+        gameIds: [],
+      },
       "127.0.0.1",
     );
     if (opts.deleteEvent === true) {
@@ -118,8 +124,16 @@ describe("selectWarmTwitterPostIds predicate", () => {
 
   it("[11-03] excludes terminal not_found / private tweets", async () => {
     const u = await seedUserDirectly({ email: `warm-tw-term-${uniq()}@t.io` });
-    const gone = await seedCandidate(u.id, { publishedAgoDays: 2, lastPolledAgoHours: 30, lastPollStatus: "not_found" });
-    const priv = await seedCandidate(u.id, { publishedAgoDays: 2, lastPolledAgoHours: 30, lastPollStatus: "private" });
+    const gone = await seedCandidate(u.id, {
+      publishedAgoDays: 2,
+      lastPolledAgoHours: 30,
+      lastPollStatus: "not_found",
+    });
+    const priv = await seedCandidate(u.id, {
+      publishedAgoDays: 2,
+      lastPolledAgoHours: 30,
+      lastPollStatus: "private",
+    });
     const warm = await selectWarmTwitterPostIds(new Date());
     expect(warm).not.toContain(gone);
     expect(warm).not.toContain(priv);
@@ -127,8 +141,16 @@ describe("selectWarmTwitterPostIds predicate", () => {
 
   it("[11-03] excludes a tweet with NO alive event (warm refresh is event-attached only)", async () => {
     const u = await seedUserDirectly({ email: `warm-tw-noevt-${uniq()}@t.io` });
-    const orphan = await seedCandidate(u.id, { publishedAgoDays: 2, lastPolledAgoHours: 30, attachEvent: false });
-    const deleted = await seedCandidate(u.id, { publishedAgoDays: 2, lastPolledAgoHours: 30, deleteEvent: true });
+    const orphan = await seedCandidate(u.id, {
+      publishedAgoDays: 2,
+      lastPolledAgoHours: 30,
+      attachEvent: false,
+    });
+    const deleted = await seedCandidate(u.id, {
+      publishedAgoDays: 2,
+      lastPolledAgoHours: 30,
+      deleteEvent: true,
+    });
     const warm = await selectWarmTwitterPostIds(new Date());
     expect(warm).not.toContain(orphan);
     expect(warm).not.toContain(deleted);

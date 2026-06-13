@@ -71,7 +71,13 @@ function tweet(id: string, daysAgo: number): Tweet {
     retweeted_tweet: null,
     quoted_tweet: null,
     extendedEntities: {},
-    author: { id: ACCOUNT, userName: "boundacct", name: "Bound", profilePicture: null, followers: 1 },
+    author: {
+      id: ACCOUNT,
+      userName: "boundacct",
+      name: "Bound",
+      profilePicture: null,
+      followers: 1,
+    },
   };
 }
 
@@ -79,13 +85,21 @@ function tweet(id: string, daysAgo: number): Tweet {
 function fullPage(seed: number): TwitterFeedPage {
   const tweets = Array.from({ length: 12 }, (_, i) => tweet(`c${seed}_${i}`, 1));
   return {
-    page: { posts: tweets.map(normalizeTweet), nextCursor: `CURSOR_${seed}`, endOfFeed: false, creditsUsed: 1, owner: null },
+    page: {
+      posts: tweets.map(normalizeTweet),
+      nextCursor: `CURSOR_${seed}`,
+      endOfFeed: false,
+      creditsUsed: 1,
+      owner: null,
+    },
     rawTweets: tweets,
   };
 }
 
 async function seedSource(): Promise<string> {
-  const user = await seedUserDirectly({ email: `bound-tw-${Math.random().toString(36).slice(2)}@t.io` });
+  const user = await seedUserDirectly({
+    email: `bound-tw-${Math.random().toString(36).slice(2)}@t.io`,
+  });
   const [row] = await db
     .insert(dataSources)
     .values({
@@ -123,7 +137,12 @@ describe("twitter backfill bounding", () => {
       const st = await getTwitterBackfillState(ACCOUNT);
       if (st.complete) break;
       await handleBackfillAccount({
-        data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+        data: {
+          kind: "twitter_account",
+          channelKey: ACCOUNT,
+          depthBoundIso: "1970-01-01T00:00:00Z",
+          flow: "initial",
+        },
       });
     }
 
@@ -141,12 +160,26 @@ describe("twitter backfill bounding", () => {
     // Newest-first: two tweets inside 7d, then one beyond — stop at the boundary.
     const tweets = [tweet("w1", 1), tweet("w2", 5), tweet("w3", 30)];
     provider.pages = [
-      { page: { posts: tweets.map(normalizeTweet), nextCursor: "MORE", endOfFeed: false, creditsUsed: 1, owner: null }, rawTweets: tweets },
+      {
+        page: {
+          posts: tweets.map(normalizeTweet),
+          nextCursor: "MORE",
+          endOfFeed: false,
+          creditsUsed: 1,
+          owner: null,
+        },
+        rawTweets: tweets,
+      },
     ];
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: sevenDaysAgo, flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: sevenDaysAgo,
+        flow: "initial",
+      },
     });
 
     const imported = await db.select().from(events).where(eq(events.kind, "twitter_post"));
@@ -159,11 +192,25 @@ describe("twitter backfill bounding", () => {
     await seedSource();
     const tweets = [tweet("e1", 1), tweet("e2", 2)];
     provider.pages = [
-      { page: { posts: tweets.map(normalizeTweet), nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null }, rawTweets: tweets },
+      {
+        page: {
+          posts: tweets.map(normalizeTweet),
+          nextCursor: null,
+          endOfFeed: true,
+          creditsUsed: 1,
+          owner: null,
+        },
+        rawTweets: tweets,
+      },
     ];
 
     await handleBackfillAccount({
-      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const st = await getTwitterBackfillState(ACCOUNT);

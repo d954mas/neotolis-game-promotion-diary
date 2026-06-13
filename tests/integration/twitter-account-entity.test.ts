@@ -129,14 +129,24 @@ describe("twitter account subject entity (CHECKLIST §1a)", () => {
 
   it("[11-03] a changed @handle appends the old value to handle_aliases", async () => {
     const accountId = `acct_${uniq()}`;
-    await upsertTwitterAccount({ accountId, username: "oldhandle", name: "Old", followerCount: 100 });
+    await upsertTwitterAccount({
+      accountId,
+      username: "oldhandle",
+      name: "Old",
+      followerCount: 100,
+    });
     const first = await readAccount(accountId);
     expect(first!.username).toBe("oldhandle");
     const firstSeen = first!.firstSeenAt.getTime();
 
     await new Promise((r) => setTimeout(r, 5));
     // Rename: SAME account_id (rename-proof key), new handle + grown follower count.
-    await upsertTwitterAccount({ accountId, username: "newhandle", name: "New", followerCount: 250 });
+    await upsertTwitterAccount({
+      accountId,
+      username: "newhandle",
+      name: "New",
+      followerCount: 250,
+    });
 
     const second = await readAccount(accountId);
     expect(second!.accountId).toBe(accountId);
