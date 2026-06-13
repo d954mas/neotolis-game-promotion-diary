@@ -11,7 +11,8 @@
 // a string ("" on page 1), createdAt a string date, derived shares = retweet+quote.
 //
 // Requirements: PLAT-03 (D-04 filter, D-05 derived shares + raw-component retention), SOC-02/03/04.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { randomBytes } from "node:crypto";
 import {
   deriveShares,
   keepForAccount,
@@ -23,6 +24,24 @@ import {
   tweetRawComponents,
   type Tweet,
 } from "$lib/sources/twitter/server/normalize.js";
+
+// isTwitterConfigured reads the CACHED `env` singleton (parsed once at module
+// load), so asserting its TWITTER_PROVIDER branches requires re-parsing env.ts
+// against a staged process.env — not the developer's ambient .env. Mock dotenv
+// (scoped per-file, hoisted by vitest) to a no-op so a vi.resetModules() re-import
+// reads ONLY process.env and never reloads .env from disk; otherwise the dev .env
+// (which may set TWITTER_PROVIDER) leaks in and the unconfigured case fails locally.
+// Mirrors tests/unit/env.test.ts.
+vi.mock("dotenv", () => ({ config: () => ({ parsed: {} }) }));
+
+// Required env keys env.ts's zod schema demands, seeded with ??= so a CI-provided
+// value is never clobbered (mirrors tests/unit/env.test.ts).
+process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
+process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
+process.env.BETTER_AUTH_SECRET ??= "x".repeat(40);
+process.env.OAUTH_CLIENT_ID ??= "test";
+process.env.OAUTH_CLIENT_SECRET ??= "test";
+process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
 const ACCOUNT_ID = "115216851"; // supergiantgames numeric user id (11-SPIKE.md)
 
@@ -271,7 +290,22 @@ vi.mock("$lib/sources/twitter/server/http.js", async (importOriginal) => {
 
 const { twitterapiioTwitterProvider } =
   await import("$lib/sources/twitter/server/provider/twitterapiio-twitter.js");
-const { isTwitterConfigured } = await import("$lib/sources/twitter/server/provider/registry.js");
+
+/** Stage the two TWITTER_* keys, force env.ts + registry.ts to re-parse against the
+ *  staged process.env (env.ts caches the parsed singleton on import), and read the
+ *  fresh isTwitterConfigured. Deterministic regardless of the ambient .env. */
+async function readIsTwitterConfigured(
+  provider: string | undefined,
+  apiKey: string | undefined,
+): Promise<boolean> {
+  vi.stubEnv("TWITTER_PROVIDER", provider ?? "");
+  vi.stubEnv("TWITTERAPIIO_API_KEY", apiKey ?? "");
+  vi.resetModules();
+  // KEK material may have been scrubbed by a prior env parse — re-seed before re-parse.
+  process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
+  const { isTwitterConfigured } = await import("$lib/sources/twitter/server/provider/registry.js");
+  return isTwitterConfigured();
+}
 
 function jsonResponse(body: unknown): { json: () => Promise<unknown> } {
   return { json: async () => body };
@@ -280,6 +314,13 @@ function jsonResponse(body: unknown): { json: () => Promise<unknown> } {
 describe("twitterapiioTwitterProvider (endpoint + credit mapping)", () => {
   beforeEach(() => {
     twitterFetch.mockReset();
+  });
+
+  afterEach(() => {
+    // Undo readIsTwitterConfigured's stubs so a later test (or another file in the
+    // worker) sees the real env again.
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   it("[11-02] name is twitterapi.io (the OBS provider label)", () => {
@@ -350,8 +391,16 @@ describe("twitterapiioTwitterProvider (endpoint + credit mapping)", () => {
     expect(twitterFetch).not.toHaveBeenCalled();
   });
 
-  it("[11-02] isTwitterConfigured is false when TWITTER_PROVIDER is unset (graceful degrade)", () => {
-    // The test env leaves TWITTER_PROVIDER empty → not configured → null provider path.
-    expect(isTwitterConfigured()).toBe(false);
+  it("[11-02] isTwitterConfigured is false when TWITTER_PROVIDER is unset (graceful degrade)", async () => {
+    // Empty provider → not configured, regardless of any ambient .env value.
+    expect(await readIsTwitterConfigured("", "some-key")).toBe(false);
+  });
+
+  it("[11-02] isTwitterConfigured is false when the provider is set but the key is empty (SOC-05)", async () => {
+    expect(await readIsTwitterConfigured("twitterapi.io", "")).toBe(false);
+  });
+
+  it("[11-02] isTwitterConfigured is true when provider == twitterapi.io AND the key is non-empty", async () => {
+    expect(await readIsTwitterConfigured("twitterapi.io", "sk-twitterapiio-123")).toBe(true);
   });
 });
