@@ -18,7 +18,7 @@ import type { TwitterFeedPage, Tweet } from "../../src/lib/sources/twitter/serve
 // fake bypasses the HTTP seam (reserves NO credits).
 interface ScriptedProvider {
   pages: TwitterFeedPage[];
-  calls: Array<{ cursor: string | null }>;
+  calls: Array<{ handle: string; cursor: string | null }>;
   /** When set, the next fetch throws an AdapterError of this category. */
   throwOn: "rate-limited" | "operator-issue" | null;
 }
@@ -42,10 +42,10 @@ vi.mock("../../src/lib/sources/twitter/server/provider/registry.js", async (impo
       return { name: "twitterapi.io" };
     },
     fetchTwitterFeedPageWithRaw: async (
-      _handle: string,
+      handle: string,
       cursor: string | null,
     ): Promise<TwitterFeedPage> => {
-      provider.calls.push({ cursor });
+      provider.calls.push({ handle, cursor });
       if (provider.throwOn !== null) {
         const { AdapterError: Err } = await import("../../src/lib/sources/errors.js");
         throw new Err("scripted budget pause", { category: provider.throwOn });
@@ -228,6 +228,57 @@ describe("twitter account walker (single-feed, resumable, cursor-persisted)", ()
     expect(acct!.username).toBe("walkeracct");
     // Only ONE provider call (the single feed) — no posts/reels two-feed split.
     expect(provider.calls).toHaveLength(1);
+  });
+
+  it("[11-03] resolveHandle prefers the current twitter_accounts.username over a stale metadata.handle (rename-resilience)", async () => {
+    // The source was created when the account's @handle was "oldhandle" (frozen in
+    // metadata). The account has since renamed; the subject entity (UPSERTed from the
+    // free feed owner on a prior poll) holds the CURRENT @handle "newhandle".
+    await db.insert(dataSources).values({
+      userId: (
+        await seedUserDirectly({
+          email: `walker-rename-${Math.random().toString(36).slice(2)}@t.io`,
+        })
+      ).id,
+      kind: "twitter_account",
+      handleUrl: "https://x.com/oldhandle",
+      channelId: ACCOUNT,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: { handle: "oldhandle", accountId: ACCOUNT },
+    });
+    await db
+      .insert(twitterAccounts)
+      .values({ accountId: ACCOUNT, username: "newhandle" })
+      .onConflictDoNothing();
+
+    provider.pages = [await pageFrom([tweet("rn1", 1)], null, true)];
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    // The walker queried the CURRENT username, not the stale create-time handle.
+    expect(provider.calls[0]?.handle).toBe("newhandle");
+  });
+
+  it("[11-03] resolveHandle falls back to metadata.handle before the entity row exists (first backfill)", async () => {
+    // No twitter_accounts row yet (first-ever poll) → the create-time hint is used.
+    await seedSource();
+    provider.pages = [await pageFrom([tweet("fb1", 1)], null, true)];
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+    expect(provider.calls[0]?.handle).toBe("walkeracct");
   });
 
   it("[11-03] snapshot rows carry the D-05 raw retweet/quote/bookmark components", async () => {

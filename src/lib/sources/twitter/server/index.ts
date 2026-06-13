@@ -279,12 +279,15 @@ async function canonicalizeOnCreate(
     // The display name resolveAccount already fetched (name / username) so
     // data_sources.display_name is the real account name, not the bare account_id.
     displayName: resolved.displayName,
-    // Persist the URL-intrinsic handle (+ resolved account_id) onto the source row's
-    // metadata at create time. The account-scoped walker keys off
-    // channelId=account_id (intrinsic, survives handle rename) but MUST have the
-    // handle to call fetchPosts(?userName=…) — it reads it via metadata.handle. The
-    // handle is the provider query key (URL-intrinsic, not a renameable display
-    // value), so it is the safe-denorm carve-out (AGENTS.md no-denorm).
+    // Persist the create-time handle (+ resolved account_id) onto the source row's
+    // metadata. The account-scoped walker keys off channelId=account_id (intrinsic,
+    // survives a handle rename) but MUST have a @handle to call fetchPosts(?userName=…).
+    // The @handle is a MUTABLE query hint, NOT a rename-proof value — it goes stale the
+    // moment the account renames. The current username lives on twitter_accounts
+    // (the subject entity, UPSERTed from the free feed owner on every poll); the walker
+    // prefers that and falls back to this hint only before the first poll has populated
+    // it (resolveHandle, backfill-account.ts). So this is NOT a denorm carve-out — it is
+    // a best-effort seed for the very first fetch.
     metadata: { handle: parsed.handle, accountId: resolved.accountId },
   };
 }

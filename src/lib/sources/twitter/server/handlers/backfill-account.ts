@@ -68,6 +68,7 @@ import {
 import { getSocialProvider, fetchTwitterFeedPageWithRaw } from "../provider/registry.js";
 import { TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS } from "../http.js";
 import { writeSnapshot, upsertTwitterAccount } from "../snapshots.js";
+import { twitterAccounts } from "../schema/index.js";
 import { readTwitterBackfillState, writeTwitterBackfillState } from "../backfill-state.js";
 import { buildTwitterTitle, keepForAccount, tweetRawComponents } from "../normalize.js";
 import { env } from "$lib/server/config/env.js";
@@ -159,9 +160,11 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
     return;
   }
 
-  // The provider query handle. All subscribers to one account_id share the same
-  // canonical handle; read it off any active subscriber's metadata.
-  const handle = resolveHandle(subscribers);
+  // The provider query handle. Prefer the CURRENT scraped @handle on the subject
+  // entity (twitter_accounts.username, UPSERTed from the feed owner on every poll —
+  // the rename-resilient source of truth); fall back to the create-time
+  // data_sources.metadata.handle only before the first poll has populated it.
+  const handle = await resolveHandle(channelKey, subscribers);
   if (handle === null) {
     logger.warn(
       { jobId: job.id, channelKey },
@@ -646,9 +649,23 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   );
 }
 
-/** All subscribers to one account_id share the canonical handle; read it from any
- *  active subscriber's metadata. */
-function resolveHandle(subscribers: Array<{ metadata: unknown }>): string | null {
+/** The provider query handle for an account_id. The @handle is RENAMEABLE upstream,
+ *  so the create-time data_sources.metadata.handle is only a hint — it goes stale the
+ *  moment the account renames. The rename-resilient truth is twitter_accounts.username
+ *  (the subject entity, UPSERTed from the free feed owner object on every successful
+ *  poll). Prefer it; fall back to the create-time metadata.handle only when the entity
+ *  row is absent (first backfill, before any poll has populated it). */
+async function resolveHandle(
+  channelKey: string,
+  subscribers: Array<{ metadata: unknown }>,
+): Promise<string | null> {
+  const [account] = await db
+    .select({ username: twitterAccounts.username })
+    .from(twitterAccounts)
+    .where(eq(twitterAccounts.accountId, channelKey))
+    .limit(1);
+  if (typeof account?.username === "string" && account.username !== "") return account.username;
+
   for (const sub of subscribers) {
     const handle = (sub.metadata as { handle?: string } | null)?.handle;
     if (typeof handle === "string" && handle !== "") return handle;
