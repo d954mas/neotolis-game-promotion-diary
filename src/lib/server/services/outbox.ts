@@ -40,6 +40,13 @@ export interface OutboxEnqueueOptions {
   /** pg-boss priority — higher runs first when the worker has multiple
    *  jobs in the queue. */
   priority?: number;
+  /** pg-boss SendOptions `startAfter` — delay before the job becomes
+   *  visible, in SECONDS. Used to PACE a self-enqueued continuation under
+   *  a per-account QPS ceiling (twitterapi.io 0.2 QPS): a deep-backfill
+   *  page schedules its successor ≥5s out so consecutive provider calls
+   *  never burst past the floor. Flows through the forwarder verbatim
+   *  (it spreads `row.options` into boss.send's 3rd arg). */
+  startAfter?: number;
 }
 
 /**

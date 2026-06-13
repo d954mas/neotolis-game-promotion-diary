@@ -66,6 +66,7 @@ import {
   markChannelBackfillComplete,
 } from "$lib/server/services/channel-state.js";
 import { getSocialProvider, fetchTwitterFeedPageWithRaw } from "../provider/registry.js";
+import { TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS } from "../http.js";
 import { writeSnapshot, upsertTwitterAccount } from "../snapshots.js";
 import { readTwitterBackfillState, writeTwitterBackfillState } from "../backfill-state.js";
 import { buildTwitterTitle, keepForAccount, tweetRawComponents } from "../normalize.js";
@@ -236,6 +237,13 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   let requestsUsed = 0;
   let oldestFetchedOccurredAt: Date | null = null;
   let pausedByBudget = false;
+  // A transient per-account QPS 429 (NOT a prepaid-balance/daily-cap pause): the
+  // limit clears in seconds, so this tick re-enqueues a paced continuation rather
+  // than stranding until the next daily poll-cron. `pausedByBudget` is still set so
+  // the cursor persists WITHOUT advancing/completing — `pausedByRateLimit` only adds
+  // the resume.
+  let pausedByRateLimit = false;
+  let rateLimitRetryAfterMs = TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS;
   let walkedThisTick = false;
   // The RAW upstream page size (pre-D-04-filter). The Pitfall-4 not-found
   // heuristic keys on this, NOT on collectedEvents.length — D-04 can drop EVERY
@@ -256,9 +264,23 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
       feedPage = await fetchTwitterFeedPageWithRaw(handle, state.cursor, origin);
     } catch (err) {
       if (err instanceof AdapterError) {
-        if (err.category === "rate-limited" || err.category === "operator-issue") {
-          // Budget paused (null permit), throttled, OR the per-account QPS 429 — stop
-          // this tick and persist the cursor for resume. Do NOT advance / complete.
+        if (err.category === "rate-limited") {
+          // Per-account QPS 429 (or the daily-pool throttle) — TRANSIENT. Stop this
+          // tick and persist the cursor (pausedByBudget keeps the no-advance/no-complete
+          // behavior), but ALSO flag a re-enqueue: the limit clears in seconds, so a
+          // paced continuation resumes the walk instead of stranding until the daily
+          // poll-cron. Honor the seam's Retry-After, floored at the 0.2-QPS interval.
+          logger.info(
+            { jobId: job.id, channelKey, category: err.category },
+            "twitter.backfill.account: budget/throttle/QPS pause — persisting cursor for resume",
+          );
+          pausedByBudget = true;
+          pausedByRateLimit = true;
+          rateLimitRetryAfterMs = err.retryAfterMs ?? TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS;
+        } else if (err.category === "operator-issue") {
+          // Prepaid-balance depleted / daily cap — the next reserve would be refused
+          // too, so retrying in 5s is pointless. Pause WITHOUT a re-enqueue: the daily
+          // poll-cron retries after the budget reset.
           logger.info(
             { jobId: job.id, channelKey, category: err.category },
             "twitter.backfill.account: budget/throttle/QPS pause — persisting cursor for resume",
@@ -524,9 +546,23 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   //                                  depth (belt-and-suspenders).
   const shouldContinue =
     branch === "deep" && !accountComplete && !pausedByBudget && state.collected < maxPosts;
+  // SEPARATE rate-limit resume path: a transient QPS 429 set pausedByRateLimit (which
+  // implies pausedByBudget), so shouldContinue is false here — re-enqueue the SAME
+  // continuation paced past the limit rather than stranding until the daily poll-cron.
+  // Mutually exclusive with shouldContinue (it requires !pausedByBudget), so no double-
+  // enqueue. The post-count cap + feed-not-exhausted guards still hold.
+  const shouldResumeAfterRateLimit =
+    pausedByRateLimit && branch === "deep" && !state.complete && state.collected < maxPosts;
+  // Pace consecutive deep-backfill pages ≥5s apart — the 0.2-QPS floor (a never-paid
+  // twitterapi.io account is 1 req/5s). The rate-limit resume waits the honored
+  // Retry-After, floored at the same interval.
+  const NORMAL_CONTINUATION_DELAY_S = Math.ceil(TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS / 1000);
+  const RATE_LIMIT_RESUME_DELAY_S = Math.ceil(
+    Math.max(rateLimitRetryAfterMs, TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS) / 1000,
+  );
   await db.transaction(async (tx) => {
     await writeTwitterBackfillState(channelKey, state, tx);
-    if (shouldContinue) {
+    if (shouldContinue || shouldResumeAfterRateLimit) {
       await enqueueViaOutbox(
         tx,
         QUEUES.TWITTER_BACKFILL_ACCOUNT,
@@ -540,7 +576,12 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
           flow,
           forceDeep: job.data.forceDeep,
         },
-        { singletonKey: `backfill-account-${channelKey}` },
+        {
+          singletonKey: `backfill-account-${channelKey}`,
+          startAfter: shouldResumeAfterRateLimit
+            ? RATE_LIMIT_RESUME_DELAY_S
+            : NORMAL_CONTINUATION_DELAY_S,
+        },
       );
     }
   });

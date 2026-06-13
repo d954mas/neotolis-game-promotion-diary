@@ -408,7 +408,7 @@ describe("twitter account walker — self-enqueued continuation", () => {
     expect(inserted.map((e) => e.externalId).sort()).toEqual(["c1", "c2", "c3"]);
   });
 
-  it("[11-03] a budget/QPS-paused tick enqueues NO continuation and persists operatorPaused=true", async () => {
+  it("[11-03] a QPS-429 (rate-limited) paused tick RE-ENQUEUES a paced continuation and persists operatorPaused=true", async () => {
     await seedSource();
     provider.throwOn = "rate-limited";
 
@@ -420,6 +420,29 @@ describe("twitter account walker — self-enqueued continuation", () => {
     expect(cs?.backfillComplete).toBe(false);
     const st = await getTwitterBackfillState(ACCOUNT);
     expect(st.operatorPaused).toBe(true);
+    // THE FIX: a transient 429 must resume after the limit clears (not strand until the
+    // daily poll-cron) — exactly one continuation, paced ≥5s out (the 0.2-QPS floor).
+    const continuations = await readContinuationOutbox();
+    expect(continuations).toHaveLength(1);
+    expect(
+      Number((continuations[0]!.options as { startAfter?: number }).startAfter),
+    ).toBeGreaterThanOrEqual(5);
+  });
+
+  it("[11-03] an operator-issue (budget) paused tick enqueues NO continuation (strands for the daily cron)", async () => {
+    await seedSource();
+    provider.throwOn = "operator-issue";
+
+    await handleBackfillAccount({
+      data: { kind: "twitter_account", channelKey: ACCOUNT, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+    });
+
+    const cs = await readChannelState();
+    expect(cs?.backfillComplete).toBe(false);
+    const st = await getTwitterBackfillState(ACCOUNT);
+    expect(st.operatorPaused).toBe(true);
+    // A prepaid-balance/daily-cap pause genuinely needs the daily reset — retrying in
+    // 5s is pointless, so NO continuation (current behavior preserved).
     const continuations = await readContinuationOutbox();
     expect(continuations).toHaveLength(0);
   });

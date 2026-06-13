@@ -8,7 +8,12 @@ import { eq } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { TwitterFeedPage, Tweet } from "../../src/lib/sources/twitter/server/normalize.js";
 
-const provider = { pages: [] as TwitterFeedPage[] };
+const provider = {
+  pages: [] as TwitterFeedPage[],
+  /** When set, the next fetch throws this AdapterError instead of returning a page
+   *  (simulates the per-account QPS 429 / operator-issue pause). */
+  throwError: null as Error | null,
+};
 
 function emptyPage(): TwitterFeedPage {
   return {
@@ -24,8 +29,10 @@ vi.mock("../../src/lib/sources/twitter/server/provider/registry.js", async (impo
     isTwitterConfigured: () => true,
     getSocialProvider: (platform: string) =>
       platform === "twitter" ? ({ name: "twitterapi.io" } as never) : null,
-    fetchTwitterFeedPageWithRaw: async (): Promise<TwitterFeedPage> =>
-      provider.pages.shift() ?? emptyPage(),
+    fetchTwitterFeedPageWithRaw: async (): Promise<TwitterFeedPage> => {
+      if (provider.throwError !== null) throw provider.throwError;
+      return provider.pages.shift() ?? emptyPage();
+    },
   };
 });
 
@@ -33,11 +40,13 @@ const { db } = await import("../../src/lib/server/db/client.js");
 const { env } = await import("../../src/lib/server/config/env.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { outbox } = await import("../../src/lib/server/db/schema/outbox.js");
 const { normalizeTweet } = await import("../../src/lib/sources/twitter/server/normalize.js");
 const { handleBackfillAccount } =
   await import("../../src/lib/sources/twitter/server/handlers/backfill-account.js");
 const { getTwitterBackfillState } =
   await import("../../src/lib/sources/twitter/server/backfill-state.js");
+const { AdapterError } = await import("../../src/lib/sources/errors.js");
 
 const ACCOUNT = "acct-bound-tw";
 const envMut = env as { SOCIAL_BACKFILL_MAX_POSTS: number };
@@ -94,6 +103,7 @@ async function seedSource(): Promise<string> {
 
 beforeEach(() => {
   provider.pages = [];
+  provider.throwError = null;
   originalMaxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
 });
 afterEach(() => {
@@ -159,5 +169,138 @@ describe("twitter backfill bounding", () => {
     const st = await getTwitterBackfillState(ACCOUNT);
     expect(st.complete).toBe(true);
     expect(st.collected).toBe(2);
+  });
+});
+
+// ── QPS-429 self-resume + continuation pacing (the strand-until-cron fix). The
+//    backfill must NOT self-enqueue the next page with zero delay (consecutive pages
+//    would burst past the 0.2-QPS floor → 429 every page), and a transient 429 must
+//    re-enqueue a paced continuation rather than stranding until the daily poll-cron.
+describe("twitter backfill QPS-429 resume + pacing", () => {
+  /** Seed a deep-backfill source under a distinct account so the global outbox table
+   *  reads back exactly this test's continuation. */
+  async function seedSourceFor(account: string): Promise<void> {
+    const user = await seedUserDirectly({
+      email: `qps-tw-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    await db.insert(dataSources).values({
+      userId: user.id,
+      kind: "twitter_account",
+      handleUrl: `https://x.com/${account}`,
+      channelId: account,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: { handle: account, accountId: account },
+    });
+  }
+
+  /** The backfill-account continuation outbox row for this channelKey, if any. */
+  async function continuationRow(
+    account: string,
+  ): Promise<{ payload: Record<string, unknown>; options: Record<string, unknown> } | null> {
+    const rows = await db
+      .select({ payload: outbox.payload, options: outbox.options, queue: outbox.queue })
+      .from(outbox)
+      .where(eq(outbox.queue, "twitter.backfill.account"));
+    const mine = rows.find((r) => (r.payload as { channelKey?: string }).channelKey === account);
+    return mine ? { payload: mine.payload, options: mine.options } : null;
+  }
+
+  it("[11-03] a deep multi-page continuation carries options.startAfter >= 5 (paces the 0.2-QPS floor)", async () => {
+    const account = `acct-pace-${Math.random().toString(36).slice(2)}`;
+    await seedSourceFor(account);
+
+    // A full page with a non-null cursor + feed-not-exhausted → the walker self-enqueues
+    // the next deep page. It MUST be delayed ≥5s, never fired back-to-back.
+    const tweets = Array.from({ length: 3 }, (_, i) => tweet(`p_${i}`, 1));
+    provider.pages = [
+      {
+        page: {
+          posts: tweets.map(normalizeTweet),
+          nextCursor: "NEXT",
+          endOfFeed: false,
+          creditsUsed: 1,
+          owner: null,
+        },
+        rawTweets: tweets,
+      },
+    ];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: account,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    const cont = await continuationRow(account);
+    expect(cont, "expected a deep continuation outbox row").toBeTruthy();
+    expect(cont!.payload.channelKey).toBe(account);
+    expect(Number(cont!.options.startAfter)).toBeGreaterThanOrEqual(5);
+  });
+
+  it("[11-03] a rate-limited (429) deep page re-enqueues a paced continuation (no strand-until-cron)", async () => {
+    const account = `acct-429-${Math.random().toString(36).slice(2)}`;
+    await seedSourceFor(account);
+
+    // The first deep page throws the per-account QPS 429 with the honored Retry-After.
+    // The feed is NOT exhausted (cursor still null = first page never fetched), so the
+    // walker must persist the cursor + re-enqueue a paced continuation.
+    provider.throwError = new AdapterError("twitterapi.io rate-limited (429)", {
+      category: "rate-limited",
+      retryAfterMs: 5000,
+    });
+
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: account,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    // No events imported, cursor persisted, NOT marked complete (paused mid-walk).
+    const imported = await db.select().from(events).where(eq(events.externalId, "irrelevant"));
+    expect(imported.length).toBe(0);
+    const st = await getTwitterBackfillState(account);
+    expect(st.complete).toBe(false);
+    expect(st.operatorPaused).toBe(true);
+
+    // THE FIX: a continuation row exists, paced ≥5s out (so it resumes after the limit
+    // clears instead of stranding until the next 06:00 poll-cron).
+    const cont = await continuationRow(account);
+    expect(cont, "rate-limit pause must re-enqueue a continuation").toBeTruthy();
+    expect(cont!.payload.channelKey).toBe(account);
+    expect(Number(cont!.options.startAfter)).toBeGreaterThanOrEqual(5);
+  });
+
+  it("[11-03] an operator-issue (budget) pause does NOT re-enqueue (strands for the daily cron)", async () => {
+    const account = `acct-oi-${Math.random().toString(36).slice(2)}`;
+    await seedSourceFor(account);
+
+    // Prepaid balance depleted — retrying in 5s is pointless; the daily reset is the
+    // only fix. Current behavior preserved: NO continuation row.
+    provider.throwError = new AdapterError("operator budget exhausted", {
+      category: "operator-issue",
+    });
+
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: account,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+
+    const st = await getTwitterBackfillState(account);
+    expect(st.operatorPaused).toBe(true);
+    expect(st.complete).toBe(false);
+
+    const cont = await continuationRow(account);
+    expect(cont, "operator-issue pause must NOT re-enqueue").toBeNull();
   });
 });
