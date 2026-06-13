@@ -85,11 +85,13 @@ describe("media-type-filter vocabulary (Short / Video / Other)", () => {
     expect(EVENT_KIND_MEDIA_CATEGORY.instagram_post).toBe("per-post");
     expect(EVENT_KIND_MEDIA_CATEGORY.tiktok_post).toBe("per-post");
     expect(EVENT_KIND_MEDIA_CATEGORY.youtube_video).toBe("per-post");
+    // twitter_post joined the per-post set in Phase 11 (D-06): media_type lives
+    // on twitter_posts ('video' → video; 'image'/'text'/missing → other).
+    expect(EVENT_KIND_MEDIA_CATEGORY.twitter_post).toBe("per-post");
     // Everything else → other.
     for (const k of [
       "reddit_post",
       "telegram_post",
-      "twitter_post",
       "discord_drop",
       "conference",
       "talk",
@@ -105,10 +107,12 @@ describe("media-type-filter vocabulary (Short / Video / Other)", () => {
     const derived = ALL_EVENT_KINDS.filter((k) => EVENT_KIND_MEDIA_CATEGORY[k] === "per-post");
     expect([...PER_POST_MEDIA_KINDS].sort()).toEqual(derived.sort());
     // The current per-post kinds are exactly instagram_post + tiktok_post +
-    // youtube_video (youtube joined when Shorts detection shipped).
+    // twitter_post + youtube_video (youtube joined when Shorts detection
+    // shipped; twitter joined in Phase 11 D-06).
     expect([...PER_POST_MEDIA_KINDS].sort()).toEqual([
       "instagram_post",
       "tiktok_post",
+      "twitter_post",
       "youtube_video",
     ]);
   });

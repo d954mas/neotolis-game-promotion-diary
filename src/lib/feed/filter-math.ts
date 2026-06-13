@@ -53,6 +53,10 @@ export interface FilterableEvent {
   // the server's honest pagination).
   instagramEnrichment?: { mediaType?: string | null } | null;
   tiktokEnrichment?: { mediaType?: string | null } | null;
+  // Twitter per-post media kind from twitter_posts.media_type ("video" |
+  // "image" | "text", D-06). Like IG/TikTok: a missing / NULL value → "other"
+  // ('image' / 'text' both classify to "other"; only 'video' → video).
+  twitterEnrichment?: { mediaType?: string | null } | null;
   // YouTube per-post media kind from youtube_videos.media_type. Differs from
   // IG/TikTok: a missing / NULL value → "video" (a YouTube video is a video at
   // worst — Shorts detection heals NULLs lazily; never demoted to "other").
@@ -79,14 +83,17 @@ export function eventMediaCategory(e: FilterableEvent): MediaTypeCategory {
   if (e.kind === "youtube_video") {
     return e.youtubeEnrichment?.mediaType === "short" ? "short" : "video";
   }
-  // IG / TikTok per-post kind — read the cache media kind off the matching
-  // enrichment; missing / unrecognized → "other".
+  // IG / TikTok / Twitter per-post kind — read the cache media kind off the
+  // matching enrichment; missing / unrecognized → "other". Twitter's vocabulary
+  // is 'video' | 'image' | 'text' (no 'short'); 'video' → video, the rest → other.
   const raw =
     e.kind === "instagram_post"
       ? e.instagramEnrichment?.mediaType
       : e.kind === "tiktok_post"
         ? e.tiktokEnrichment?.mediaType
-        : null;
+        : e.kind === "twitter_post"
+          ? e.twitterEnrichment?.mediaType
+          : null;
   if (
     raw === "short" ||
     raw === "video" ||
