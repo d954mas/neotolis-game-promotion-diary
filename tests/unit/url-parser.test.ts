@@ -58,6 +58,14 @@ describe("URL parser canonicalization", () => {
     if (t.kind === "twitter_post") {
       expect(t.canonicalUrl).toContain("twitter.com/AnnaIndie/status/12345");
     }
+
+    // D-07: the ?s=/?t= share-tracker tail is STRIPPED — the canonical tweet URL is
+    // host + path only (matches the adapter's twitterParseUrl permalink).
+    const tailed = parseIngestUrl("https://x.com/AnnaIndie/status/12345?s=20&t=abc");
+    expect(tailed.kind).toBe("twitter_post");
+    if (tailed.kind === "twitter_post") {
+      expect(tailed.canonicalUrl).toBe("https://twitter.com/AnnaIndie/status/12345");
+    }
   });
 
   it("parseIngestUrl returns reddit_post for reddit POST URLs (Phase 03.1 plan 09)", () => {

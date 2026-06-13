@@ -32,7 +32,7 @@ export interface EventKindDisplay {
   /** Surfaces the PollingBadge (freshness / operator-paused / refresh-now).
    *  true for the polled kinds (youtube_video / reddit_post / instagram_post /
    *  telegram_post); false for free-form (post/conference/talk/press/other)
-   *  and the not-yet-functional kinds (twitter/discord). */
+   *  and the not-yet-functional discord_drop. */
   pollable: boolean;
   /** Mounts the per-event metric-history chart (and game-chart markers).
    *  Matches the kinds whose adapter implements fetchEventMetricSeries. */
@@ -41,10 +41,10 @@ export interface EventKindDisplay {
    *  (AddEventForm). true for the kinds a user can manually log today —
    *  the polled kinds with a paste flow (youtube_video / reddit_post /
    *  instagram_post / telegram_post) PLUS the free-form kinds (press / post /
-   *  conference / talk / other). false for the not-yet-functional kinds
-   *  (twitter_post / discord_drop), which have no adapter, no paste flow,
-   *  and are filtered out of the /feed KIND axis — letting a user create
-   *  events they can't then filter to would be a footgun.
+   *  conference / talk / other). false for the not-yet-functional discord_drop,
+   *  which has no adapter, no paste flow, and is filtered out of the /feed KIND
+   *  axis — letting a user create events they can't then filter to would be a
+   *  footgun.
    *
    *  This flag (via the `satisfies Record<EventKind, …>` below) is the
    *  COMPILE-TIME guard that a future new kind can't be silently omitted
@@ -56,9 +56,8 @@ export interface EventKindDisplay {
    *  kinds a user can see in their feed and meaningfully filter — the pollable
    *  paste-flow kinds (youtube_video / reddit_post / instagram_post /
    *  telegram_post) PLUS the free-form kinds (press / post / conference / talk
-   *  / other); false for twitter_post / discord_drop, which have no adapter —
-   *  filtering to a kind you can't create is a footgun (same rationale as
-   *  manualCreatable).
+   *  / other); false for discord_drop, which has no adapter — filtering to a
+   *  kind you can't create is a footgun (same rationale as manualCreatable).
    *
    *  Phase 10 D-08: this flag REPLACES the hand-maintained allowlist that used
    *  to live in FiltersSheet.svelte (FUNCTIONAL_KIND_OPTIONS). That hand-list
@@ -81,9 +80,8 @@ export interface SourceKindDisplay {
    *  in the Add-Source auto-import toggle, the source-settings card, and the
    *  BackfillPicker blurb. The string states what THIS kind's crons actually do
    *  (scheduleCronTicks in `<kind>/server/index.ts`) — NOT a global "every 6
-   *  hours" (the stale copy this field replaced). The two free-form not-built
-   *  kinds (twitter / discord) carry a neutral string since they have no
-   *  auto-import cron yet; `satisfies Record<SourceKind, …>` still forces an
+   *  hours" (the stale copy this field replaced). The free-form not-built
+   *  discord kind carries a neutral string since it has no auto-import cron yet; `satisfies Record<SourceKind, …>` still forces an
    *  explicit entry for every future kind, so a new adapter can't ship with a
    *  wrong-but-inherited cadence label. */
   cadence: () => string;

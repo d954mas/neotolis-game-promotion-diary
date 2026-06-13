@@ -183,14 +183,12 @@ export function parseIngestUrl(input: string): ParsedUrl {
   }
   const host = url.hostname.toLowerCase();
   if (X_HOSTS.has(host)) {
-    // Canonicalize x.com / mobile.twitter.com → twitter.com so
-    // publish.twitter.com/oembed accepts the URL. The canonical form is
-    // what gets stored in events.url and audit metadata.
-    const canonical =
-      host === "x.com" || host === "mobile.twitter.com"
-        ? `https://twitter.com${url.pathname}${url.search}`
-        : url.toString();
-    return { kind: "twitter_post", canonicalUrl: canonical };
+    // Canonicalize x.com / mobile.twitter.com → twitter.com (the canonical host)
+    // and STRIP the query tail (?s=/?t= share trackers — D-07). The canonical tweet
+    // URL is host + path only; it's what gets stored in events.url + audit metadata,
+    // and it matches the permalink the adapter's twitterParseUrl derives so the event
+    // URL and the twitter_posts cache row agree.
+    return { kind: "twitter_post", canonicalUrl: `https://twitter.com${url.pathname}` };
   }
   if (TG_HOSTS.has(host)) {
     return { kind: "telegram_post", canonicalUrl: url.toString() };

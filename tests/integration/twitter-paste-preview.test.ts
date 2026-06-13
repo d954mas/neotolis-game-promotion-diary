@@ -51,6 +51,7 @@ const { twitterPosts, twitterPostSnapshots } =
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
 const { twitterAdapter: adapter } = await import("../../src/lib/sources/twitter/server/index.js");
+const { enrichFromUrl } = await import("../../src/lib/server/services/events-mutation.js");
 
 // USER-QUOTA keyspace = the source kind (mirrors TikTok's "tiktok_account"), NOT the
 // social-budget label "twitter".
@@ -212,5 +213,74 @@ describe("twitter paste preview (single-tweet fetch, adapter seam)", () => {
       .from(twitterPosts)
       .where(eq(twitterPosts.tweetId, "1700000000000000004"));
     expect(cached).toHaveLength(0);
+  });
+});
+
+// Cross-source enrichFromUrl wiring (the activation seam Plan 04 owed — mirrors the
+// TikTok 10-05 "FIX 2" seam): a pasted x.com/status URL routes parseIngestUrl →
+// enrichFromUrl(twitter_post) → twitterAdapter.fetchEventPreviewMetadata, NOT the
+// old hardcoded kind_not_yet_functional stub. This block is the gate that would have
+// caught that stub — the adapter-seam tests above call the hook directly and so
+// could not. The provider seam is mocked at provider/registry; the DB is real.
+describe("twitter enrichFromUrl wiring (the cross-source paste seam)", () => {
+  it("[11-04] a pasted tweet URL returns an enriched twitter_post preview (not kind_not_yet_functional)", async () => {
+    const user = await seedUserDirectly({ email: `tw-enrich-ok-${Math.random()}@t.io` });
+    single.next = singlePost({ id: "1710000000000000001", shortcode: "1710000000000000001" });
+
+    const result = await enrichFromUrl(
+      user.id,
+      "https://x.com/supergiantgames/status/1710000000000000001",
+      "127.0.0.1",
+    );
+
+    expect(result.kind).toBe("twitter_post");
+    // The tweet id, threaded from preview.externalId = post.id — NOT a URL guess.
+    expect(result.externalId).toBe("1710000000000000001");
+    expect(result.title).toBeTruthy();
+    expect(result.thumbnailUrl).toBe("https://pbs.twimg.com/cover.jpg");
+    // The parser canonicalizes x.com → twitter.com (the canonical host).
+    expect(result.canonicalUrl).toBe(
+      "https://twitter.com/supergiantgames/status/1710000000000000001",
+    );
+    // Metered against the user pool (cost guardrail).
+    expect(single.calls[0]!.origin).toBe("user");
+  });
+
+  it("[11-04] a query-tailed paste (?s=20) canonicalizes before the fetch (D-07 strip)", async () => {
+    const user = await seedUserDirectly({ email: `tw-enrich-tail-${Math.random()}@t.io` });
+    single.next = singlePost({ id: "1710000000000000002", shortcode: "1710000000000000002" });
+
+    const result = await enrichFromUrl(
+      user.id,
+      "https://x.com/supergiantgames/status/1710000000000000002?s=20&t=abc",
+      "127.0.0.1",
+    );
+
+    expect(result.kind).toBe("twitter_post");
+    // The stored URL is the clean canonical permalink (x.com → twitter.com, tail stripped).
+    expect(result.canonicalUrl).toBe(
+      "https://twitter.com/supergiantgames/status/1710000000000000002",
+    );
+  });
+
+  it("[11-04] recognition-only degrade when the provider is unconfigured (SOC-05)", async () => {
+    providerConfigured = false;
+    const user = await seedUserDirectly({ email: `tw-enrich-noprov-${Math.random()}@t.io` });
+
+    const result = await enrichFromUrl(
+      user.id,
+      "https://x.com/h/status/1710000000000000003",
+      "127.0.0.1",
+    );
+
+    // SOC-05: manual entry never dead-ends — kind + canonical URL are recognized but
+    // title is empty + externalId null (no live fetch resolved a tweet id; never the
+    // URL slug, which would strand the event on a pending badge).
+    expect(result.kind).toBe("twitter_post");
+    expect(result.title).toBe("");
+    expect(result.externalId).toBeNull();
+    expect(result.canonicalUrl).toBe("https://twitter.com/h/status/1710000000000000003");
+    // No provider call (unconfigured) → no cache row.
+    expect(single.calls).toHaveLength(0);
   });
 });
