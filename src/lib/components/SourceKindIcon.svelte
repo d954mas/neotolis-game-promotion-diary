@@ -1,9 +1,11 @@
 <script lang="ts">
   // SourceKindIcon — inline SVG dispatch on the data_sources.kind enum.
-  // Five geometric forms (camera/film for youtube_channel, speech bubble
-  // for reddit_account, generic bubble for twitter_account, paper-plane
-  // for telegram_channel, two-circle chat for discord_server). Geometric,
-  // not brand marks — same approach as the original KindIcon.svelte.
+  // Geometric forms for youtube_channel (camera/film), reddit_account (Snoo) and
+  // instagram_account (camera-frame) — their geometry already reads as the brand.
+  // twitter_account (X), telegram_channel (paper plane), tiktok_account (note glyph)
+  // and discord_server (Clyde) use the brand mark — no geometric primitive reads as
+  // those platforms. Mirrors kind-icon-svg.ts twitter_post / telegram_post /
+  // tiktok_post / discord_drop for cross-surface consistency.
   //
   // Style contract:
   //   - 24px viewBox
@@ -107,7 +109,9 @@
     aria-hidden="true"
   >
     <path
-      d="M21 5c-.6.4-1.4.7-2.2.9.8-.5 1.4-1.2 1.7-2.1-.7.4-1.6.8-2.5 1A4 4 0 0011 8.5c0 .3 0 .6.1.9A11 11 0 013 4.5a4 4 0 001.2 5.4 4 4 0 01-1.8-.5v.1a4 4 0 003.2 4 4 4 0 01-1.8.1 4 4 0 003.7 2.8A8 8 0 013 18a11 11 0 006 1.7c7.2 0 11.1-6 11.1-11.2v-.5c.8-.5 1.4-1.2 1.9-2z"
+      d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"
+      fill="currentColor"
+      stroke="none"
     />
   </svg>
 {:else if kind === "telegram_channel"}
@@ -140,10 +144,10 @@
     aria-hidden="true"
   >
     <path
-      d="M5 17l-1 3 4-2a12 12 0 008 0l4 2-1-3a14 14 0 001-7c0-2-1-3-3-4a13 13 0 00-10 0c-2 1-3 2-3 4a14 14 0 001 7z"
+      d="M20.317 4.3698a19.7913 19.7913 0 0 0-4.8851-1.5152.0741.0741 0 0 0-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 0 0-.0785-.037 19.7363 19.7363 0 0 0-4.8852 1.515.0699.0699 0 0 0-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 0 0 .0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 0 0 .0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 0 0-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 0 1-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 0 1 .0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 0 1 .0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 0 1-.0066.1276 12.2986 12.2986 0 0 1-1.873.8914.0766.0766 0 0 0-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 0 0 .0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 0 0 .0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 0 0-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189z"
+      fill="currentColor"
+      stroke="none"
     />
-    <circle cx="9" cy="13" r="1" />
-    <circle cx="15" cy="13" r="1" />
   </svg>
 {:else if kind === "instagram_account"}
   <!-- Instagram — camera-frame: rounded square + lens circle + top-corner
@@ -166,9 +170,8 @@
     <circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none" />
   </svg>
 {:else if kind === "tiktok_account"}
-  <!-- TikTok — music note (short-form video): note stem + flag + filled note
-       head. Geometric primitives only (NO brand glyph); mirrors the
-       tiktok_post icon in kind-icon-svg.ts for cross-surface consistency. -->
+  <!-- TikTok logo (note glyph). Brand mark — mirrors the tiktok_post icon in
+       kind-icon-svg.ts for cross-surface consistency. -->
   <svg
     class="icon"
     viewBox="0 0 24 24"
@@ -181,8 +184,11 @@
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path d="M10 18V6l8-2v3" />
-    <circle cx="7.5" cy="18" r="2.5" fill="currentColor" stroke="none" />
+    <path
+      d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"
+      fill="currentColor"
+      stroke="none"
+    />
   </svg>
 {/if}
 

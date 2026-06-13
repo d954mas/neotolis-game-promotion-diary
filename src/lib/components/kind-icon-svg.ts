@@ -49,16 +49,18 @@ export const KIND_ICON_INNER: Record<EventKind, string> = {
   talk: `<rect x="9" y="3" width="6" height="12" rx="3" />
     <path d="M5 11a7 7 0 0014 0" />
     <path d="M12 18v3" />`,
-  // speech bubble (no brand mark)
-  twitter_post: `<path d="M21 15a2 2 0 01-2 2H8l-5 4V5a2 2 0 012-2h14a2 2 0 012 2z" />`,
-  // chat
-  telegram_post: `<path
-      d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8z"
-    />`,
-  // chat with two heads
-  discord_drop: `<circle cx="9" cy="11" r="2" />
-    <circle cx="15" cy="11" r="2" />
-    <path d="M5 19a8 8 0 0114 0" />`,
+  // X logo (formerly Twitter). Brand glyph — unlike IG (camera) / TikTok (note),
+  // no geometric primitive reads as "X", so the old speech-bubble placeholder read
+  // as nothing. Filled (stroke none). Mirrors SourceKindIcon.svelte twitter_account.
+  twitter_post: `<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" fill="currentColor" stroke="none" />`,
+  // Telegram paper plane (send). Mirrors SourceKindIcon.svelte telegram_channel so
+  // /feed (event kind) and /sources (source kind) read identically.
+  telegram_post: `<path d="M21 4L3 11l5 2 2 6 3-4 5 4z" />
+    <path d="M8 13l8-5" />`,
+  // Discord logo (Clyde face). Brand glyph — the old two-heads shape read as
+  // generic "community", not Discord. Filled (stroke none). Mirrors
+  // SourceKindIcon.svelte discord_server.
+  discord_drop: `<path d="M20.317 4.3698a19.7913 19.7913 0 0 0-4.8851-1.5152.0741.0741 0 0 0-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 0 0-.0785-.037 19.7363 19.7363 0 0 0-4.8852 1.515.0699.0699 0 0 0-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 0 0 .0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 0 0 .0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 0 0-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 0 1-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 0 1 .0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 0 1 .0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 0 1-.0066.1276 12.2986 12.2986 0 0 1-1.873.8914.0766.0766 0 0 0-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 0 0 .0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 0 0 .0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 0 0-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189z" fill="currentColor" stroke="none" />`,
   // newspaper
   press: `<rect x="3" y="5" width="18" height="14" rx="1" />
     <line x1="7" y1="9" x2="17" y2="9" />
@@ -74,10 +76,9 @@ export const KIND_ICON_INNER: Record<EventKind, string> = {
   instagram_post: `<rect x="3" y="3" width="18" height="18" rx="5" />
     <circle cx="12" cy="12" r="4" />
     <circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none" />`,
-  // music note (short-form video): note stem + flag + filled note head.
-  // Geometric primitives only (NO brand glyph) per the Iconography Contract.
-  tiktok_post: `<path d="M10 18V6l8-2v3" />
-    <circle cx="7.5" cy="18" r="2.5" fill="currentColor" stroke="none" />`,
+  // TikTok logo (note glyph). Brand glyph — the geometric note read as a generic
+  // music note, not TikTok. Filled (stroke none). Mirrors SourceKindIcon.svelte.
+  tiktok_post: `<path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" fill="currentColor" stroke="none" />`,
   // other / generic dot
   other: `<circle cx="12" cy="12" r="9" />
     <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />`,
