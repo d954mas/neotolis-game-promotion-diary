@@ -43,6 +43,7 @@
   import {
     deriveThumbnailUrl,
     isMediaShape as deriveIsMediaShape,
+    resolveSourceLabel,
     type CardEventLite,
   } from "$lib/components/feed/parts/derive-card-data.js";
   import type { EventDto, GameDto, DataSourceDto } from "$lib/server/dto.js";
@@ -173,8 +174,13 @@
     event.sourceId ? sources.find((s) => s.id === event.sourceId) : undefined,
   );
 
+  // Live source name wins; for a source-less manual paste (sourceId null) fall
+  // back to the author @handle snapshot — same rule as the feed card byline.
   const sourceLabel = $derived(
-    sourceRow?.channelTitle ?? sourceRow?.displayName ?? sourceRow?.handleUrl ?? "",
+    resolveSourceLabel(
+      sourceRow?.channelTitle ?? sourceRow?.displayName ?? sourceRow?.handleUrl ?? "",
+      event,
+    ),
   );
 
   // Compact "Mon, May 12" date format — mirrors prototype dateGroup.
