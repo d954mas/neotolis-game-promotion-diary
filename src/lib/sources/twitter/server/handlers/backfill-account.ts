@@ -237,6 +237,12 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   let oldestFetchedOccurredAt: Date | null = null;
   let pausedByBudget = false;
   let walkedThisTick = false;
+  // The RAW upstream page size (pre-D-04-filter). The Pitfall-4 not-found
+  // heuristic keys on this, NOT on collectedEvents.length — D-04 can drop EVERY
+  // tweet from a NON-empty page (e.g. a first page that is all retweets), which
+  // is a valid populated handle, not a missing one. Only a genuinely empty
+  // upstream page means "no such handle / no tweets".
+  let fetchedThisTick = 0;
 
   if (!state.complete && !(branch === "deep" && state.collected >= maxPosts)) {
     walkedThisTick = true;
@@ -283,6 +289,7 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
       const page = feedPage.page;
       const rawTweets = feedPage.rawTweets;
       requestsUsed += page.creditsUsed;
+      fetchedThisTick += page.posts.length;
 
       // Opportunistically refresh the account subject entity (twitter_accounts) from
       // the FREE feed owner object the page already carries — NO extra credit. The
@@ -372,13 +379,16 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   }
 
   // 4. Pitfall 4 — empty first page on a brand-new source = probable bad/private
-  //    handle. No events, a request was made, the feed reports end-of-feed with no
-  //    cursor on the very first poll → not_found, NOT complete.
+  //    handle. An EMPTY UPSTREAM page (fetchedThisTick === 0), a request was made,
+  //    the feed reports end-of-feed with no cursor on the very first poll →
+  //    not_found, NOT complete. Keying on the RAW page size (not the post-D-04
+  //    collectedEvents count) avoids a false not-found when a valid handle's first
+  //    page is entirely filtered out by D-04 (e.g. all retweets / foreign replies).
   if (
     wasNeverPolled &&
     !pausedByBudget &&
     walkedThisTick &&
-    collectedEvents.length === 0 &&
+    fetchedThisTick === 0 &&
     requestsUsed > 0 &&
     state.complete &&
     state.cursor === null

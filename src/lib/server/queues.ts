@@ -123,8 +123,8 @@ export const QUEUES = {
    *  Twitter account id dedupes parallel triggers. */
   TWITTER_BACKFILL_ACCOUNT: "twitter.backfill.account",
   /** Active + cold ongoing poll + warm per-post producer collapsed via pg-boss
-   *  key-based schedules ({ tier } payload — active 6h / cold daily / warm
-   *  hourly). The poll-cron handler dispatches on job.data.tier. */
+   *  key-based schedules ({ tier } payload — active daily 06:00 UTC / cold daily /
+   *  warm hourly). The poll-cron handler dispatches on job.data.tier. */
   TWITTER_POLL_CRON: "twitter.poll.cron",
   /** Midnight-Pacific daily-cap counter reset. Clears ONLY the daily-cap spend
    *  counter / audit-transition Set — NEVER the prepaid balance (the twitterapi.io

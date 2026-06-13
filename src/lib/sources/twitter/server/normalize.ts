@@ -267,21 +267,10 @@ const FEED_RESPONSE = z.object({
  * account-id scope, and the feed owner's id IS the account id the walker filters by).
  */
 export function normalizeFeedResponse(json: unknown): ProviderPage {
-  const parsed = FEED_RESPONSE.parse(json);
-  const tweets = parsed.data?.tweets ?? [];
-  const nextCursor =
-    parsed.next_cursor !== null && parsed.next_cursor !== undefined && parsed.next_cursor !== ""
-      ? parsed.next_cursor
-      : null;
-  return {
-    posts: tweets.map((t) => normalizeTweet(t)),
-    nextCursor,
-    // 11-SPIKE.md Q2: has_next_page is a clean boolean; end-of-feed is signalled
-    // either by has_next_page false OR by an empty/absent next_cursor.
-    endOfFeed: parsed.has_next_page !== true || nextCursor === null,
-    creditsUsed: 1,
-    owner: pickFeedOwner(tweets[0]?.author),
-  };
+  // ONE feed-mapping body lives in normalizeFeedResponseWithRaw; this neutral
+  // entry point just drops the Twitter-specific rawTweets, returning the port
+  // ProviderPage for any generic consumer (the walker calls …WithRaw directly).
+  return normalizeFeedResponseWithRaw(json).page;
 }
 
 /**

@@ -47,10 +47,13 @@ export const twitterPosts = pgTable(
     // key). Nullable until the account resolves. Intrinsic identifier (the
     // account key), not a renameable display name — safe to carry.
     accountId: text("account_id"),
-    // The content form: "video" | "other" (D-06) — a tweet carrying a native
-    // video → "video"; a text/image tweet → "other". One-kind-per-platform:
-    // events.kind stays the platform-level 'twitter_post' for both forms; the
-    // per-post form lives here. (NOT the TikTok "short"/"carousel" vocabulary.)
+    // The content form: "video" | "image" | "text" (D-06) — a tweet carrying a
+    // native video → "video"; a photo/animated_gif tweet → "image"; a text-only
+    // tweet → "text". ("image" and "text" both classify into the cross-source
+    // "other" FILTER category via media-type-filter.ts postMediaKindToCategory.)
+    // One-kind-per-platform: events.kind stays the platform-level 'twitter_post'
+    // for all forms; the per-post form lives here. (NOT the TikTok
+    // "short"/"carousel" vocabulary — a tweet is not a short-form vertical clip.)
     mediaType: text("media_type"),
     // The tweet text.
     caption: text("caption"),

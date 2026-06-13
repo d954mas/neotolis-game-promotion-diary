@@ -8,7 +8,7 @@
 //
 // Per-kind queue topology:
 //   twitter.backfill.account  (the account-scoped single-feed resumable walker)
-//   twitter.poll.cron         (key=active 6h / key=cold daily 5am PT / key=warm hourly)
+//   twitter.poll.cron         (key=active daily 06:00 UTC / key=cold daily 5am PT / key=warm hourly)
 //   twitter.quota_reset       (midnight PT — daily-cap reset, never the twitterapi.io
 //                              prepaid balance)
 //

@@ -34,14 +34,12 @@ import type {
 } from "$lib/sources/adapter.js";
 import { isTwitterConfigured } from "./provider/registry.js";
 import { getSocialSpendToday, getSocialThrottleState, type SocialThrottleState } from "./quota.js";
+// Real-dollar cost of ONE provider request (11-SPIKE.md Q5) — ONE source of truth
+// in http.ts; the costEstimateUsd projection multiplies it by requests used.
+import { USD_PER_REQUEST } from "./http.js";
 
 const PLATFORM = "twitter";
 const PROVIDER = "twitterapi.io";
-
-/** Real-dollar cost of ONE provider request (11-SPIKE.md Q5): a 20-tweet feed page
- *  bills ~300 twitterapi.io credits at their 100k-credits-per-$1 rate ≈ $0.003.
- *  Informational cost estimate only — the ledger counts requests, not native credits. */
-const USD_PER_REQUEST = 0.003;
 
 /**
  * Project today's prepaid-credit spend + balance into the cross-source
