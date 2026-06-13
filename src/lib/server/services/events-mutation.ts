@@ -477,7 +477,9 @@ export interface EnrichmentResult {
  *   - telegram_post any failure      → soft-degrade to recognition-only (no 422
  *                                       dead-end; mirrors the IG branch — free
  *                                       source, manual entry always preserved)
- *   - twitter_post                   → AppError 'kind_not_yet_functional' 422
+ *   - twitter_post any failure       → soft-degrade to recognition-only (no 422
+ *                                       dead-end; mirrors the IG/TikTok branch —
+ *                                       paid source, manual entry always preserved)
  *   - oEmbed 5xx/network             → AppError 'youtube_oembed_unreachable' 502
  *   - oEmbed 401 (private)           → AppError 'youtube_unavailable' 422
  *   - oEmbed 404 (unavailable)       → AppError 'youtube_unavailable' 422

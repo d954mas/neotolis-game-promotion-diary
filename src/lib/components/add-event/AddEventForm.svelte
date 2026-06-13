@@ -153,12 +153,12 @@
   // silently omitted from this picker (the exact gap this replaces).
   //
   // The set today: the paste-flow kinds (youtube_video / reddit_post /
-  // instagram_post) + the free-form kinds (press / post / conference /
-  // talk / other). Twitter / Telegram / Discord are declared in the DB
-  // enum (forward-compat) but have no adapter or manual entry, are filtered
-  // out of the /feed KIND axis, and so carry manualCreatable:false — keeping
-  // the picker aligned with the filter axis avoids the awkward state where a
-  // user can create events that don't show up in their own filter list.
+  // instagram_post / tiktok_post / telegram_post / twitter_post) + the
+  // free-form kinds (press / post / conference / talk / other). Only
+  // discord_drop carries manualCreatable:false (no adapter, no manual entry,
+  // filtered out of the /feed KIND axis) — keeping the picker aligned with the
+  // filter axis avoids the awkward state where a user can create events that
+  // don't show up in their own filter list.
   const KIND_FLOW: readonly EventKind[] = MANUAL_EVENT_KINDS;
 
   function kindShort(k: EventKind): string {
