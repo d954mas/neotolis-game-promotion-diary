@@ -1331,6 +1331,151 @@ describe("createEventSchema + preview-url", () => {
     expect(res.status).toBe(201);
   });
 
+  it("POST /api/events kind=post + arbitrary url → 201 (freeform kind: no kind↔URL check)", async () => {
+    // A free-form kind may link to anything — urlValidation:"freeform".
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t4b-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "post",
+        url: "https://bsky.app/profile/me/post/abc",
+        title: "Bluesky launch",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /api/events kind=reddit_post + url=null → 422 field='url' (required)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t6-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit_post",
+        url: null,
+        title: "x",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      details: Array<{ path: string[] }>;
+    };
+    expect(body.error).toBe("validation_failed");
+    expect(body.details.map((d) => d.path?.[0])).toContain("url");
+  });
+
+  it("POST /api/events kind=twitter_post + url=null → 201 (match-if-present: url optional for social log)", async () => {
+    // A manual social-log entry may have no link. urlValidation:"match-if-present"
+    // accepts a URL-less twitter/tiktok/instagram/telegram event.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t7-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        url: null,
+        title: "Reply thread on the trailer",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /api/events kind=tiktok_post + url=null → 201 (match-if-present: url optional)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t8-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "tiktok_post",
+        url: null,
+        title: "Behind the scenes clip",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /api/events kind=twitter_post + YouTube url → 422 (wrong-platform URL rejected — the gap being closed)", async () => {
+    // Previously SILENTLY ACCEPTED: twitter_post was absent from the hardcoded
+    // URL_REQUIRED_KINDS map, so a wrong-domain URL slipped through with no
+    // kind↔URL check. Now match-if-present rejects it (parseIngestUrl(url).kind
+    // !== "twitter_post").
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t9-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        url: "https://www.youtube.com/watch?v=ABCDEFGHIJK",
+        title: "x",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      details: Array<{ path: string[] }>;
+    };
+    expect(body.error).toBe("validation_failed");
+    expect(body.details.map((d) => d.path?.[0])).toContain("url");
+  });
+
+  it("POST /api/events kind=twitter_post + valid x.com tweet url → 201 (normal paste flow passes)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t10-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        url: "https://x.com/neotolis/status/1234567890123456789",
+        title: "Trailer drop",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
   it("POST /api/events with authorIsMe=true → 201 + body.authorIsMe===true (round-trip)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();

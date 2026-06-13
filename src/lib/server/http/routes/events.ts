@@ -70,6 +70,7 @@ import { requestRefreshPoll } from "../../services/refresh-poll.js";
 import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "$lib/sources/adapter.js";
+import { EVENT_KIND_DISPLAY } from "$lib/sources/kind-display.js";
 import { isMediaTypeCategory, type MediaTypeCategory } from "$lib/feed/media-type-filter.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { getEventMetricSeries } from "../../services/event-metric-series.js";
@@ -85,41 +86,43 @@ import { mapErr, type RouteVars } from "./_shared.js";
 export const eventKindEnum = z.enum(VALID_EVENT_KINDS as unknown as [EventKind, ...EventKind[]]);
 
 /**
- * URL-required validator for pollable event kinds. youtube_video AND
- * reddit_post both MUST carry a parseable URL of the matching shape;
- * the service-layer createEvent is the second layer of defense
+ * kind↔URL consistency validator, driven from the per-kind `urlValidation`
+ * mode in EVENT_KIND_DISPLAY (the SINGLE source of truth — no hardcoded kind
+ * list here). The service-layer createEvent is the second layer of defense
  * (opportunistic external_id derivation + adapter.syncStats.fetch).
  *
- * Shared between createEventSchema and updateEventSchema so a kind-change
- * PATCH that drops the url tripwires here too. Free-form kinds (post,
- * conference, talk, press, other) accept null/undefined url.
+ *   - "required":         url present AND parses as this kind (youtube_video /
+ *                         reddit_post — identity IS the URL).
+ *   - "match-if-present": url optional, but a present url MUST parse as this
+ *                         kind (social pastes — twitter/tiktok/instagram/
+ *                         telegram_post — reject a wrong-platform URL).
+ *   - "freeform":         no check (post/conference/talk/press/other).
  *
- * Adding a new pollable kind = extend the {kind→expected ParsedUrl.kind}
- * map below. Mirrors the FUNCTIONAL_KINDS expansion in /events/new UI.
+ * Shared between createEventSchema and updateEventSchema so a kind-change PATCH
+ * that drops/swaps the url tripwires here too. A new pollable kind picks up the
+ * check automatically the moment its EVENT_KIND_DISPLAY entry declares a
+ * non-"freeform" mode — the `satisfies Record<EventKind, …>` compile-forces a
+ * mode on every future kind.
  */
-const URL_REQUIRED_KINDS: Readonly<Record<string, string>> = {
-  youtube_video: "youtube_video",
-  reddit_post: "reddit_post",
-};
-
 function urlRequiredForPollableKinds(
   obj: { kind?: string | undefined; url?: string | null | undefined },
   ctx: z.RefinementCtx,
 ): void {
   const kind = obj.kind;
   if (kind === undefined) return;
-  const expectedParsedKind = URL_REQUIRED_KINDS[kind];
-  if (expectedParsedKind === undefined) return;
+  const mode = EVENT_KIND_DISPLAY[kind as EventKind].urlValidation;
+  if (mode === "freeform") return;
   if (!obj.url) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["url"],
-      message: `url is required for kind=${kind}`,
-    });
+    if (mode === "required") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["url"],
+        message: `url is required for kind=${kind}`,
+      });
+    }
     return;
   }
-  const parsed = parseIngestUrl(obj.url);
-  if (parsed.kind !== expectedParsedKind) {
+  if (parseIngestUrl(obj.url).kind !== kind) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["url"],

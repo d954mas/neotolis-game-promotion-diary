@@ -68,6 +68,28 @@ export interface EventKindDisplay {
    *  edit, and the `satisfies Record<EventKind, …>` below forces the explicit
    *  yes/no decision for every future kind. */
   feedFilterable: boolean;
+  /** How the manual-create boundary (createEventSchema / updateEventSchema in
+   *  events.ts) validates the `url` field against THIS kind. The SINGLE source
+   *  of truth for kind↔URL consistency — the route reads this instead of
+   *  carrying its own hardcoded {kind→expected} map (which silently omitted the
+   *  social kinds, accepting a twitter_post with a YouTube URL).
+   *
+   *   - "required":         url MUST be present AND parse as this exact kind.
+   *                         The kind's identity IS the URL (youtube_video /
+   *                         reddit_post — no link, no event).
+   *   - "match-if-present": url is OPTIONAL (a manual social log may have no
+   *                         link), but IF present it MUST parse as this kind —
+   *                         a wrong-platform URL is rejected.
+   *   - "freeform":         no kind↔URL check — a link to anything is fine
+   *                         (post / conference / talk / press / other).
+   *
+   *  parseIngestUrl returns the matching kind name for every URL-parseable kind
+   *  (youtube_video / reddit_post / instagram_post / tiktok_post /
+   *  telegram_post / twitter_post), so the expected parsed kind IS the event
+   *  kind — the validator compares `parseIngestUrl(url).kind === kind`. The
+   *  `satisfies Record<EventKind, …>` below compile-forces a mode on every
+   *  future kind, so a new pollable kind can't slip past the boundary unchecked. */
+  urlValidation: "required" | "match-if-present" | "freeform";
 }
 
 export interface SourceKindDisplay {
@@ -96,6 +118,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "required",
   },
   reddit_post: {
     label: () => m.event_kind_label_reddit_post(),
@@ -103,6 +126,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "required",
   },
   instagram_post: {
     label: () => m.event_kind_label_instagram_post(),
@@ -110,6 +134,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   tiktok_post: {
     label: () => m.event_kind_label_tiktok_post(),
@@ -117,6 +142,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   twitter_post: {
     label: () => m.event_kind_label_twitter_post(),
@@ -124,6 +150,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   telegram_post: {
     label: () => m.event_kind_label_telegram_post(),
@@ -131,6 +158,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   discord_drop: {
     label: () => m.event_kind_label_discord_drop(),
@@ -138,6 +166,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: false,
     feedFilterable: false,
+    urlValidation: "freeform",
   },
   conference: {
     label: () => m.event_kind_label_conference(),
@@ -145,6 +174,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   talk: {
     label: () => m.event_kind_label_talk(),
@@ -152,6 +182,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   press: {
     label: () => m.event_kind_label_press(),
@@ -159,6 +190,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   post: {
     label: () => m.event_kind_label_post(),
@@ -166,6 +198,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   other: {
     label: () => m.event_kind_label_other(),
@@ -173,6 +206,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
 } satisfies Record<EventKind, EventKindDisplay>;
 
