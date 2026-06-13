@@ -238,10 +238,9 @@ describe("twitter enrichFromUrl wiring (the cross-source paste seam)", () => {
     expect(result.externalId).toBe("1710000000000000001");
     expect(result.title).toBeTruthy();
     expect(result.thumbnailUrl).toBe("https://pbs.twimg.com/cover.jpg");
-    // The parser canonicalizes x.com → twitter.com (the canonical host).
-    expect(result.canonicalUrl).toBe(
-      "https://twitter.com/supergiantgames/status/1710000000000000001",
-    );
+    // The parser (the twitter adapter, single source of truth) canonicalizes
+    // every in-set host to the x.com permalink.
+    expect(result.canonicalUrl).toBe("https://x.com/supergiantgames/status/1710000000000000001");
     // Metered against the user pool (cost guardrail).
     expect(single.calls[0]!.origin).toBe("user");
   });
@@ -257,10 +256,8 @@ describe("twitter enrichFromUrl wiring (the cross-source paste seam)", () => {
     );
 
     expect(result.kind).toBe("twitter_post");
-    // The stored URL is the clean canonical permalink (x.com → twitter.com, tail stripped).
-    expect(result.canonicalUrl).toBe(
-      "https://twitter.com/supergiantgames/status/1710000000000000002",
-    );
+    // The stored URL is the clean canonical x.com permalink (tail stripped).
+    expect(result.canonicalUrl).toBe("https://x.com/supergiantgames/status/1710000000000000002");
   });
 
   it("[11-04] recognition-only degrade when the provider is unconfigured (SOC-05)", async () => {
@@ -279,7 +276,7 @@ describe("twitter enrichFromUrl wiring (the cross-source paste seam)", () => {
     expect(result.kind).toBe("twitter_post");
     expect(result.title).toBe("");
     expect(result.externalId).toBeNull();
-    expect(result.canonicalUrl).toBe("https://twitter.com/h/status/1710000000000000003");
+    expect(result.canonicalUrl).toBe("https://x.com/h/status/1710000000000000003");
     // No provider call (unconfigured) → no cache row.
     expect(single.calls).toHaveLength(0);
   });
