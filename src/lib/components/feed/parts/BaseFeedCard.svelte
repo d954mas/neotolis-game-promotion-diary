@@ -35,6 +35,7 @@
     isInboxRow as deriveIsInboxRow,
     isMediaShape,
     isStandalone as deriveIsStandalone,
+    resolveSourceLabel,
   } from "./derive-card-data.js";
 
   type GameLite = { id: string; title: string };
@@ -111,6 +112,13 @@
   // Kind label resolves through the central kind-display config
   // (eventKindLabel) — same source of truth EventDetailHeader / FilterChips use.
   const kindLabel = $derived(eventKindLabel(event.kind));
+
+  // Source-of-truth label with the author-handle fallback. The wrapper's
+  // `sourceLabel` (the LIVE data_sources name) always wins when non-empty; only
+  // a source-less manual paste with an empty label falls back to the persisted
+  // @handle snapshot. ONE shared treatment for every card variant (the
+  // wrappers don't fork this) — see resolveSourceLabel for the no-denorm note.
+  const displayedSourceLabel = $derived.by(() => resolveSourceLabel(sourceLabel, event));
 
   const dateLabel = $derived.by(() => formatOccurredAt(event.occurredAt));
   const mediaShape = $derived.by(() => isMediaShape(event.kind as CardEventKind));
@@ -361,7 +369,7 @@
         <KindIcon kind={event.kind} size={18} />
       </span>
 
-      <span class="src" title={sourceLabel}>{sourceLabel}</span>
+      <span class="src" title={displayedSourceLabel}>{displayedSourceLabel}</span>
       <span class="date">{dateLabel}</span>
     </div>
 

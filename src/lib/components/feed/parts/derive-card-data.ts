@@ -52,6 +52,12 @@ export interface CardEventLite {
   notes: string | null;
   url: string | null;
   sourceId: string | null;
+  /** Author @handle SNAPSHOT for source-less manual social pastes (NULL
+   *  otherwise). FALLBACK-only: the shared card uses it ONLY when the event has
+   *  no linked source (sourceId null) AND no source-resolved label — a live
+   *  data_sources name always wins. NOT a no-denorm violation: a source-less
+   *  paste has no owning row for the author (see events schema header). */
+  authorHandle?: string | null;
   publishedAt?: Date | string | null;
   lastPolledAt: Date | string | null;
   lastPollStatus: string | null;
@@ -261,6 +267,30 @@ export function telegramChannelLabel(metadata: unknown): string {
   if (metadata === null || typeof metadata !== "object") return "";
   const md = metadata as { channel?: unknown };
   return typeof md.channel === "string" && md.channel.length > 0 ? md.channel : "";
+}
+
+/** Resolve the .src account label rendered in the card meta row.
+ *
+ *  The per-platform wrapper already computed `sourceLabel` from its
+ *  source-of-truth read path (the LIVE data_sources name via the `source`
+ *  prop). When that resolves to a non-empty value it ALWAYS wins — a linked
+ *  source's live name is never overridden.
+ *
+ *  Only when the wrapper produced an EMPTY label AND the event has no linked
+ *  source (sourceId null — a manually-pasted social post from an account that
+ *  isn't a registered source) do we fall back to the author @handle SNAPSHOT
+ *  persisted on the event at paste time. This is NOT a no-denorm violation: a
+ *  source-less paste has no owning row for the author, so the snapshot is a
+ *  free-standing value like the event's own title/url, and it is never read
+ *  when a source IS linked (the live name takes the branch above). The handle
+ *  is stored bare (e.g. "neonicle_dev") and rendered "@neonicle_dev". */
+export function resolveSourceLabel(
+  sourceLabel: string,
+  event: Pick<CardEventLite, "sourceId" | "authorHandle">,
+): string {
+  if (sourceLabel.length > 0) return sourceLabel;
+  if (event.sourceId === null && event.authorHandle) return `@${event.authorHandle}`;
+  return sourceLabel;
 }
 
 /** Image-URL predicate — accepts Reddit's CDN hosts + common image

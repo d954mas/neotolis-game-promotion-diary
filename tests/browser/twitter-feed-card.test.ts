@@ -77,13 +77,16 @@ const source = {
   channelTitle: "Stardew Valley",
 };
 
-function mountCard(event: CardEventLite): {
+function mountCard(
+  event: CardEventLite,
+  sourceProp: typeof source | null = source,
+): {
   card: HTMLElement;
   component: ReturnType<typeof mount>;
 } {
   const component = mount(TwitterFeedCard, {
     target: host,
-    props: { event, source, games: [], view: "feed" },
+    props: { event, source: sourceProp, games: [], view: "feed" },
   });
   flushSync();
   const card = host.querySelector('[data-testid="feed-card"]') as HTMLElement | null;
@@ -216,6 +219,36 @@ describe("TwitterFeedCard (Phase 11 Plan 04 — PLAT-03)", () => {
     expect(card.querySelector(".card-thumb img")).toBeNull();
     expect(card.querySelector(".card-thumb")).toBeNull();
     expect(card.querySelector("img")).toBeNull();
+    unmount(component);
+  });
+
+  it("a source-less manual paste falls back to the @handle SNAPSHOT in the .src label", () => {
+    // The UAT bug: a pasted tweet from an account that isn't a registered source
+    // (sourceId null, source prop null). The author_handle snapshot persisted on
+    // the event is the only author signal — the shared card renders it as @handle.
+    const event = makeEvent({ stats: null, thumbnailUrl: null, mediaType: "text" });
+    event.sourceId = null;
+    event.authorHandle = "neonicle_dev";
+    // No URL-intrinsic @handle in metadata either — the snapshot is the fallback.
+    event.metadata = {};
+    const { card, component } = mountCard(event, null);
+    const src = card.querySelector(".card-meta .src") as HTMLElement | null;
+    expect(src).not.toBeNull();
+    expect(src!.textContent?.trim()).toBe("@neonicle_dev");
+    unmount(component);
+  });
+
+  it("the LIVE source name wins over the snapshot when a source is linked", () => {
+    // Same event but WITH a linked source — the live data_sources name
+    // (channelTitle "Stardew Valley") wins; the snapshot is never read.
+    const event = makeEvent({ stats: null, thumbnailUrl: null, mediaType: "text" });
+    event.sourceId = "src_tw_1";
+    event.authorHandle = "stale_snapshot";
+    event.metadata = {};
+    const { card, component } = mountCard(event, source);
+    const src = card.querySelector(".card-meta .src") as HTMLElement | null;
+    expect(src!.textContent?.trim()).toBe("Stardew Valley");
+    expect(src!.textContent).not.toContain("stale_snapshot");
     unmount(component);
   });
 });

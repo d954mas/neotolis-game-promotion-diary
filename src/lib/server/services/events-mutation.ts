@@ -263,6 +263,10 @@ export async function createEvent(
           notes: input.notes ?? null,
           metadata: input.metadata ?? {},
           externalId: derivedExternalId,
+          // Author @handle snapshot — fallback display label for source-less
+          // social pastes. The paste/enrich path threads the EnrichmentResult's
+          // authorName here; a hand-typed manual event leaves it null.
+          authorHandle: input.authorHandle ?? null,
         })
         .returning();
       if (!parent) throw new Error("createEvent: INSERT returned no row");

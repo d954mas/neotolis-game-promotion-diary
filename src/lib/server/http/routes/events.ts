@@ -152,6 +152,12 @@ const createEventSchema = z
     // own cache by canonical permalink (an adapter resolveCachedExternalId hook),
     // so a client cannot pair post A's URL with post B's media id (#70 P1).
     externalId: z.string().min(1).nullable().optional(),
+    // Author @handle snapshot from the URL-preview flow (the preview's
+    // authorName for twitter/tiktok/instagram). Fallback-only display label
+    // for source-less manual social pastes — never overrides a linked source's
+    // live name. Self-scoped display data (the user labels their own event), so
+    // the untrusted body is accepted as-is; trimmed to a sane cap.
+    authorHandle: z.string().min(1).max(100).nullable().optional(),
   })
   .superRefine(urlRequiredForPollableKinds)
   .transform((obj) => {

@@ -39,6 +39,12 @@ export interface CreateEventInput {
   sourceId?: string | null;
   authorIsMe?: boolean;
   externalId?: string | null;
+  // Author @handle SNAPSHOT carried only on the paste/enrich path (the
+  // EnrichmentResult's authorName for twitter/tiktok/instagram). A hand-typed
+  // manual event with no URL preview leaves this null. Persisted as the
+  // fallback display label for source-less social pastes (see events schema
+  // header for the no-denorm justification).
+  authorHandle?: string | null;
 }
 
 export interface UpdateEventInput {

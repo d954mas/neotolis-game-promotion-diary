@@ -19,6 +19,7 @@ import { env } from "../../src/lib/server/config/env.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
+import { toEventDto, loadGameIdsForEvent } from "../../src/lib/server/dto.js";
 
 /**
  * Unified events service tests.
@@ -2543,5 +2544,63 @@ describe("PATCH /api/events/:id youtube invariant (merged-state validator)", () 
     expect(bodyText).not.toContain("forbidden");
     expect(bodyText).not.toContain("permission");
     expect(bodyText).not.toContain("kind_url_inconsistent");
+  });
+});
+
+/**
+ * author_handle snapshot — fallback display label for source-less manual
+ * social pastes. The paste/enrich flow threads the EnrichmentResult's
+ * authorName into createEvent's authorHandle; a hand-typed manual event with no
+ * preview leaves it null. The column is fallback-only (see events schema header
+ * for the no-denorm justification) and PUBLIC display data (projected on the
+ * DTO, never redacted).
+ */
+describe("createEvent author_handle snapshot", () => {
+  it("persists author_handle from a paste and projects it on the DTO", async () => {
+    const u = await seedUserDirectly({ email: "authorhandle-paste@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "twitter_post",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Pasted tweet from an unregistered account",
+        url: "https://x.com/neonicle_dev/status/123",
+        // The paste flow forwards the EnrichmentResult's authorName here.
+        authorHandle: "neonicle_dev",
+      },
+      "127.0.0.1",
+    );
+    // No linked source — the snapshot is the only author signal.
+    expect(ev.sourceId).toBeNull();
+    expect(ev.authorHandle).toBe("neonicle_dev");
+
+    // The column round-trips from the DB row, not just the in-memory return.
+    const [persisted] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect(persisted!.authorHandle).toBe("neonicle_dev");
+
+    // PUBLIC display data — projected on the DTO (not stripped/redacted).
+    const dto = toEventDto(persisted!, await loadGameIdsForEvent(u.id, ev.id));
+    expect(dto.authorHandle).toBe("neonicle_dev");
+  });
+
+  it("leaves author_handle null for a hand-typed manual event (no paste/preview)", async () => {
+    const u = await seedUserDirectly({ email: "authorhandle-manual@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "post",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Hand-typed manual post",
+      },
+      "127.0.0.1",
+    );
+    expect(ev.authorHandle).toBeNull();
+    const dto = toEventDto(ev, []);
+    expect(dto.authorHandle).toBeNull();
   });
 });

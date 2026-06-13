@@ -100,6 +100,21 @@ export const events = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     externalId: text("external_id"),
+    // Author @handle SNAPSHOT for source-less manual social pastes. NULL by
+    // default; set ONLY on the paste/enrich path from the EnrichmentResult's
+    // authorName (twitter/tiktok/instagram return the @handle; telegram returns
+    // null → stays blank). Used as a FALLBACK display label in the shared feed
+    // card ONLY when the event has no linked data_source (source_id NULL).
+    //
+    // NOT a no-denorm violation (AGENTS.md): the rule forbids caching a value
+    // ANOTHER ROW OWNS, where a rename on the owning row must propagate. A
+    // source-less manual paste has NO owning row for the author — this is a
+    // free-standing snapshot exactly like the title / url / thumbnail we
+    // already store on the event. When a source IS linked the card prefers the
+    // LIVE data_sources name (this snapshot is never read), so there is no
+    // stale-data path: the column is fallback-only and never overrides a
+    // live-owned value.
+    authorHandle: text("author_handle"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

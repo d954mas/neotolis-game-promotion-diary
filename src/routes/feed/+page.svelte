@@ -387,6 +387,7 @@
         authorIsMe: payload.authorIsMe,
         metadata: payload.metadata,
         externalId: payload.externalId,
+        authorHandle: payload.authorHandle,
       }),
     });
     if (res.ok) {
