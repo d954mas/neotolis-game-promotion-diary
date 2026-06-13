@@ -252,24 +252,26 @@ describe("twitter snapshot writer (D-05 shares + raw components)", () => {
     expect(snap!.likeCount).toBe(80);
   });
 
-  it("[11-03] a non-ok poll updates polling state but writes NO snapshot row, and COALESCE-preserves the thumbnail", async () => {
+  it("[11-03] a non-ok poll updates polling state but writes NO snapshot row, and COALESCE-preserves the thumbnail + caption", async () => {
     const tweetId = `tweet_${uniq()}`;
     await writeSnapshot({
       tweetId,
       mediaType: "video",
+      caption: "the good caption",
       thumbnailUrl: "https://pbs.twimg.com/good-cover.jpg",
       metrics: { views: 1, likes: 1, comments: 1, shares: 1 },
       rawComponents: { retweetCount: 1, quoteCount: 0, bookmarkCount: 0 },
       status: "ok",
     });
-    // A failed refresh carries no metrics + no thumbnail.
+    // A failed refresh (refresh-queue-tick passes post=null → no caption/thumbnail).
     await writeSnapshot({ tweetId, metrics: null, status: "not_found" });
 
     const [post] = await db.select().from(twitterPosts).where(eq(twitterPosts.tweetId, tweetId));
     expect(post!.lastPollStatus).toBe("not_found");
     expect(post!.pollFailureCount).toBe(1);
-    // The working thumbnail was PRESERVED (not blanked by the failed poll).
+    // The working thumbnail + caption were PRESERVED (not blanked by the failed poll).
     expect(post!.thumbnailUrl).toBe("https://pbs.twimg.com/good-cover.jpg");
+    expect(post!.caption).toBe("the good caption");
 
     // Exactly one snapshot (the ok poll); the not_found poll wrote none.
     const snaps = await db

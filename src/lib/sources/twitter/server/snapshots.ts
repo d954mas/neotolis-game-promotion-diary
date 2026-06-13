@@ -110,12 +110,12 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         target: twitterPosts.tweetId,
         set: {
           // Refresh snippet fields. COALESCE keeps a prior non-null value when the
-          // caller passes null — an OK poll always carries the fresh fields; a
-          // NON-OK poll (a failed refresh) carries none → COALESCE PRESERVES the
-          // last good values instead of blanking them.
+          // caller passes null — an OK poll carries the fresh fields; a NON-OK poll
+          // (a failed refresh: post=null → caption/permalink/thumbnail all null)
+          // PRESERVES the last good values instead of blanking public data.
           accountId: sql`COALESCE(${args.accountId ?? null}, ${twitterPosts.accountId})`,
           mediaType: sql`COALESCE(${args.mediaType ?? null}, ${twitterPosts.mediaType})`,
-          caption: args.caption ?? null,
+          caption: sql`COALESCE(${args.caption ?? null}, ${twitterPosts.caption})`,
           permalink: sql`COALESCE(${args.permalink ?? null}, ${twitterPosts.permalink})`,
           thumbnailUrl: sql`COALESCE(${args.thumbnailUrl ?? null}, ${twitterPosts.thumbnailUrl})`,
           publishedAt: sql`COALESCE(${args.publishedAt ?? null}, ${twitterPosts.publishedAt})`,
