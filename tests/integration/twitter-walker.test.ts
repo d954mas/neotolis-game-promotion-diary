@@ -508,7 +508,7 @@ describe("twitter account walker — self-enqueued continuation", () => {
     expect(inserted.map((e) => e.externalId).sort()).toEqual(["c1", "c2", "c3"]);
   });
 
-  it("[11-03] a QPS-429 (rate-limited) paused tick RE-ENQUEUES a paced continuation and persists operatorPaused=true", async () => {
+  it("[11-03] a QPS-429 (rate-limited) DEEP tick RE-ENQUEUES a paced continuation and does NOT set operatorPaused", async () => {
     await seedSource();
     provider.throwOn = "rate-limited";
 
@@ -524,14 +524,52 @@ describe("twitter account walker — self-enqueued continuation", () => {
     const cs = await readChannelState();
     expect(cs?.backfillComplete).toBe(false);
     const st = await getTwitterBackfillState(ACCOUNT);
-    expect(st.operatorPaused).toBe(true);
-    // THE FIX: a transient 429 must resume after the limit clears (not strand until the
-    // daily poll-cron) — exactly one continuation, paced ≥5s out (the 0.2-QPS floor).
+    // A transient QPS slot wait is NOT operator-budget exhaustion — the badge stays off.
+    expect(st.operatorPaused).toBe(false);
+    // A transient 429 must resume after the limit clears (not strand until the daily
+    // poll-cron) — exactly one continuation, paced ≥5s out (the 0.2-QPS floor).
     const continuations = await readContinuationOutbox();
     expect(continuations).toHaveLength(1);
     expect(
       Number((continuations[0]!.options as { startAfter?: number }).startAfter),
     ).toBeGreaterThanOrEqual(5);
+  });
+
+  it("[11-03] a QPS-429 on a NON-deep (incremental) tick ALSO re-enqueues a paced continuation (no stranding)", async () => {
+    await seedSource();
+    // Drive the account to backfill_complete first so a follow-up tick takes the
+    // INCREMENTAL branch (resets to page 1, NOT a deep resume).
+    provider.pages = [await pageFrom([tweet("inc-seed", 1)], null, true)];
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
+    });
+    expect((await readChannelState())?.backfillComplete).toBe(true);
+
+    // The global pacer now strands the incremental cron sweep on a busy 5s slot.
+    provider.throwOn = "rate-limited";
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: ACCOUNT,
+        depthBoundIso: new Date(Date.now() - 14 * 86_400_000).toISOString(),
+        flow: "auto_passive",
+      },
+    });
+
+    // THE FIX: the non-deep branch (which previously did NOT re-enqueue) now resumes a
+    // paced continuation instead of stranding until the next daily poll-cron.
+    const continuations = await readContinuationOutbox();
+    expect(continuations).toHaveLength(1);
+    expect(
+      Number((continuations[0]!.options as { startAfter?: number }).startAfter),
+    ).toBeGreaterThanOrEqual(5);
+    // Still not a budget pause → operator_paused stays off.
+    expect((await getTwitterBackfillState(ACCOUNT)).operatorPaused).toBe(false);
   });
 
   it("[11-03] an operator-issue (budget) paused tick enqueues NO continuation (strands for the daily cron)", async () => {

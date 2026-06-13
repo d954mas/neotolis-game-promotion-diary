@@ -314,7 +314,9 @@ describe("twitter backfill QPS-429 resume + pacing", () => {
     expect(imported.length).toBe(0);
     const st = await getTwitterBackfillState(account);
     expect(st.complete).toBe(false);
-    expect(st.operatorPaused).toBe(true);
+    // A transient QPS slot wait is NOT operator-budget exhaustion — the badge stays off
+    // (only the operator-issue pause below sets it).
+    expect(st.operatorPaused).toBe(false);
 
     // THE FIX: a continuation row exists, paced ≥5s out (so it resumes after the limit
     // clears instead of stranding until the next 06:00 poll-cron).

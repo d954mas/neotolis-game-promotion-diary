@@ -239,12 +239,12 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   const collectedEvents: RawEvent[] = [];
   let requestsUsed = 0;
   let oldestFetchedOccurredAt: Date | null = null;
+  // A real operator/budget pause (prepaid balance depleted / daily cap). Sets the
+  // sticky operator_paused badge; strands until the daily poll-cron resets the budget.
   let pausedByBudget = false;
-  // A transient per-account QPS 429 (NOT a prepaid-balance/daily-cap pause): the
-  // limit clears in seconds, so this tick re-enqueues a paced continuation rather
-  // than stranding until the next daily poll-cron. `pausedByBudget` is still set so
-  // the cursor persists WITHOUT advancing/completing — `pausedByRateLimit` only adds
-  // the resume.
+  // A transient per-account QPS 429 — the limit clears in seconds, so this tick
+  // re-enqueues a paced continuation rather than stranding. Kept SEPARATE from
+  // pausedByBudget so a busy QPS slot is NOT mislabeled as operator-budget-exhausted.
   let pausedByRateLimit = false;
   let rateLimitRetryAfterMs = TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS;
   let walkedThisTick = false;
@@ -268,25 +268,20 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
     } catch (err) {
       if (err instanceof AdapterError) {
         if (err.category === "rate-limited") {
-          // Per-account QPS 429 (or the daily-pool throttle) — TRANSIENT. Stop this
-          // tick and persist the cursor (pausedByBudget keeps the no-advance/no-complete
-          // behavior), but ALSO flag a re-enqueue: the limit clears in seconds, so a
-          // paced continuation resumes the walk instead of stranding until the daily
-          // poll-cron. Honor the seam's Retry-After, floored at the 0.2-QPS interval.
+          // Transient QPS 429 — re-enqueue a paced continuation (see resume below).
+          // Honor the seam's Retry-After, floored at the 0.2-QPS interval.
           logger.info(
             { jobId: job.id, channelKey, category: err.category },
-            "twitter.backfill.account: budget/throttle/QPS pause — persisting cursor for resume",
+            "twitter.backfill.account: QPS pause — persisting cursor for paced resume",
           );
-          pausedByBudget = true;
           pausedByRateLimit = true;
           rateLimitRetryAfterMs = err.retryAfterMs ?? TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS;
         } else if (err.category === "operator-issue") {
-          // Prepaid-balance depleted / daily cap — the next reserve would be refused
-          // too, so retrying in 5s is pointless. Pause WITHOUT a re-enqueue: the daily
-          // poll-cron retries after the budget reset.
+          // Prepaid balance depleted / daily cap — the next reserve would be refused
+          // too, so retrying in 5s is pointless. Strand for the daily poll-cron.
           logger.info(
             { jobId: job.id, channelKey, category: err.category },
-            "twitter.backfill.account: budget/throttle/QPS pause — persisting cursor for resume",
+            "twitter.backfill.account: operator-budget pause — persisting cursor",
           );
           pausedByBudget = true;
         } else if (err.category === "not-found") {
@@ -310,7 +305,7 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
       }
     }
 
-    if (feedPage !== undefined && !pausedByBudget) {
+    if (feedPage !== undefined) {
       const page = feedPage.page;
       const rawTweets = feedPage.rawTweets;
       requestsUsed += page.creditsUsed;
@@ -403,6 +398,10 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
     }
   }
 
+  // Either pause kind stops advancing / completing this tick (cursor persists, feed
+  // not marked complete). A rate-limit pause additionally re-enqueues a paced resume.
+  const pausedThisTick = pausedByBudget || pausedByRateLimit;
+
   // 4. Pitfall 4 — empty first page on a brand-new source = probable bad/private
   //    handle. An EMPTY UPSTREAM page (fetchedThisTick === 0), a request was made,
   //    the feed reports end-of-feed with no cursor on the very first poll →
@@ -411,7 +410,7 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   //    page is entirely filtered out by D-04 (e.g. all retweets / foreign replies).
   if (
     wasNeverPolled &&
-    !pausedByBudget &&
+    !pausedThisTick &&
     walkedThisTick &&
     fetchedThisTick === 0 &&
     requestsUsed > 0 &&
@@ -522,40 +521,28 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
     }
   }
 
-  // 6. Persist state. BUDGET-01 producer: the account-level operator-budget-paused
-  //    hint. SET when this tick was paused on a refused page reserve (AdapterError
-  //    operator-issue | rate-limited); CLEARED when a tick completes without a budget
-  //    pause (budget restored) so the badge is not sticky.
+  // 6. Persist state. BUDGET-01 producer: the operator-budget-paused badge hint. SET
+  //    ONLY on a real operator-issue pause (NOT a transient QPS slot wait — a busy 5s
+  //    pacer slot is not budget exhaustion); CLEARED on any non-budget-paused tick.
   state.operatorPaused = pausedByBudget;
 
-  // Account-level complete = the single feed exhausted AND not paused mid-budget.
-  const accountComplete = !pausedByBudget && state.complete;
+  // Account-level complete = the single feed exhausted AND not paused this tick.
+  const accountComplete = !pausedThisTick && state.complete;
 
-  // SELF-ENQUEUE the next page of a bounded DEEP backfill (initial / historical) so a
-  // multi-page archive completes promptly. The cursor write + the continuation intent
-  // commit ATOMICALLY via the outbox in the SAME transaction (AGENTS.md
-  // atomic-dual-write — never boss.send outside a state-mutating tx).
-  //
-  // Enqueue ONLY when ALL hold (mirror TikTok):
-  //   - branch === "deep"            the resumable historical/initial walk that
-  //                                  RESUMES from the persisted cursor. The
-  //                                  incremental / exhausted branches reset to page 1
-  //                                  each tick (new-only sweep) and a continuation
-  //                                  there would re-fetch page 1 forever.
-  //   - !accountComplete             the feed NOT yet exhausted → real work left.
-  //   - !pausedByBudget              a budget pause means the next reserve would be
-  //                                  refused too — let cron retry after the reset.
-  //   - state.collected < maxPosts   the BACK-01 post-count cap bounds historical
-  //                                  depth (belt-and-suspenders).
+  // SELF-ENQUEUE the next page of a bounded DEEP backfill so a multi-page archive
+  // completes promptly. The cursor write + the continuation commit ATOMICALLY via the
+  // outbox in the SAME transaction (AGENTS.md atomic-dual-write). Incremental/exhausted
+  // branches reset to page 1 each tick, so a deep continuation there would re-fetch
+  // page 1 forever — gated to branch === "deep". A budget pause is excluded (the next
+  // reserve would refuse too).
   const shouldContinue =
-    branch === "deep" && !accountComplete && !pausedByBudget && state.collected < maxPosts;
-  // SEPARATE rate-limit resume path: a transient QPS 429 set pausedByRateLimit (which
-  // implies pausedByBudget), so shouldContinue is false here — re-enqueue the SAME
-  // continuation paced past the limit rather than stranding until the daily poll-cron.
-  // Mutually exclusive with shouldContinue (it requires !pausedByBudget), so no double-
-  // enqueue. The post-count cap + feed-not-exhausted guards still hold.
-  const shouldResumeAfterRateLimit =
-    pausedByRateLimit && branch === "deep" && !state.complete && state.collected < maxPosts;
+    branch === "deep" && !accountComplete && !pausedThisTick && state.collected < maxPosts;
+  // A transient QPS 429 re-enqueues on ANY branch (an incremental retry stays
+  // incremental, a deep resume stays deep — the payload re-derives the branch). It was
+  // paced out BEFORE doing work, so there is always work to retry. Mutually exclusive
+  // with shouldContinue (that requires !pausedThisTick ⟹ !pausedByRateLimit), so no
+  // double-enqueue.
+  const shouldResumeAfterRateLimit = pausedByRateLimit;
   // Pace consecutive deep-backfill pages ≥5s apart — the 0.2-QPS floor (a never-paid
   // twitterapi.io account is 1 req/5s). The rate-limit resume waits the honored
   // Retry-After, floored at the same interval.
@@ -644,6 +631,7 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
       collected: state.collected,
       accountComplete,
       pausedByBudget,
+      pausedByRateLimit,
     },
     "twitter.backfill.account: tick complete",
   );
