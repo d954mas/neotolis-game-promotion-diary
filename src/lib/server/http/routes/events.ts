@@ -155,9 +155,19 @@ const createEventSchema = z
     // Author @handle snapshot from the URL-preview flow (the preview's
     // authorName for twitter/tiktok/instagram). Fallback-only display label
     // for source-less manual social pastes — never overrides a linked source's
-    // live name. Self-scoped display data (the user labels their own event), so
-    // the untrusted body is accepted as-is; trimmed to a sane cap.
-    authorHandle: z.string().min(1).max(100).nullable().optional(),
+    // live name. Normalized at this boundary: trimmed + leading `@`(s) stripped
+    // (the card renders `@${authorHandle}`, so `@foo` would render `@@foo`), and
+    // a whitespace-only / @-only input collapses to null (not stored).
+    authorHandle: z
+      .string()
+      .max(100)
+      .nullable()
+      .optional()
+      .transform((s) => {
+        if (s == null) return s;
+        const cleaned = s.trim().replace(/^@+/, "");
+        return cleaned.length > 0 ? cleaned : null;
+      }),
   })
   .superRefine(urlRequiredForPollableKinds)
   .transform((obj) => {

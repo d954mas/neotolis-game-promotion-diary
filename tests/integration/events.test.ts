@@ -649,6 +649,50 @@ describe("event soft-delete recovery routes", () => {
     expect(body).not.toHaveProperty("userId");
   });
 
+  it("authenticated POST /api/events normalizes authorHandle at the route boundary (trim + strip leading @)", async () => {
+    // The card renders `@${authorHandle}`, so a raw " @foo " would render as
+    // `@@foo` / `@   foo`. The route schema trims + strips leading @(s) once at
+    // the boundary; a whitespace-/@-only input collapses to null.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev-authorhandle-norm@test.local" });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        title: "A pasted tweet event",
+        authorHandle: " @foo ",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.authorHandle).toBe("foo");
+
+    // An @-only input collapses to null (nothing to store).
+    const empty = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        title: "A pasted tweet with a junk handle",
+        authorHandle: "  @ ",
+      }),
+    });
+    expect(empty.status).toBe(201);
+    const emptyBody = (await empty.json()) as Record<string, unknown>;
+    expect(emptyBody.authorHandle).toBeNull();
+  });
+
   it("authenticated GET /api/events/deleted returns {rows: EventDto[]} scoped to RETENTION_DAYS", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
