@@ -532,6 +532,7 @@
         oninput={() => {
           fetched = false;
           fetchedExternalId = null;
+          fetchedAuthorHandle = null;
           fetchedMetadata = {};
           urlError = null;
         }}
