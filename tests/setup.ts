@@ -91,6 +91,13 @@ afterEach(async () => {
                           pause_level = 0,
                           last_pause_reason = NULL,
                           last_paused_at = NULL`);
+
+    // twitter_pacer is the same singleton-row pattern (Phase 11 — minus the pause
+    // columns). TRUNCATE CASCADE empties it; restore id=1 with an immediately-
+    // available slot so any integration test that issues a real twitterFetch is not
+    // blocked on a missing/future pacer row.
+    await pool.query(`INSERT INTO "twitter_pacer" ("id", "next_allowed_at") VALUES (1, NOW())
+                      ON CONFLICT ("id") DO UPDATE SET next_allowed_at = NOW()`);
   } catch {
     // Pre-migration: nothing to truncate. Swallow — integration tests will skip-with-context.
   }

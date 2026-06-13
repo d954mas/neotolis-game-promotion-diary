@@ -37,20 +37,18 @@
 //   - 400 → permanent
 //
 // QPS NOTE (the operator's explicit requirement — twitterapi.io rate-limits PER
-// ACCOUNT: 0.2 QPS = 1 request / 5s for a never-paid account, 3 QPS after the
-// first top-up, higher only with a subscription). twitterapi.io returns HTTP 429
-// when the account's QPS ceiling is crossed; this seam classifies 429 →
-// AdapterError(category:"rate-limited", retryAfterMs) so the walker pauses + persists
-// its cursor and the lane backs off, rather than failing the job. FULL inter-request
-// PACING (serialize calls + enforce a >=5s min interval so the 429 is never even
-// provoked) belongs to Plan 03's walker lanes — that is where the social-warm-lane
-// / adapter-lane-worker pacer lives across all adapters (memory `feedback_adapter_grounding`:
-// "lane pacer threaded already-acquired"). Building a parallel in-seam pacer here
-// would duplicate that shared machinery. This seam contributes the two halves Plan
-// 03 needs: (a) the reserve-before-HTTP budget gate below, and (b) the correct 429
-// → rate-limited classification with honored retryAfterMs. See TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS
-// below — the seam exposes the QPS floor as a constant Plan 03's lane pacer reads,
-// so the pacing knob has a single home even though the throttling loop lives in the lane.
+// API KEY: 0.2 QPS = 1 request / 5s for a never-paid account, 3 QPS after the first
+// top-up, higher only with a subscription). The ceiling is shared across EVERY call
+// path (backfill / warm-refresh / paste) and across replicas, so this seam enforces
+// it PROACTIVELY: every twitterFetch acquires the DB-backed twitter_pacer slot
+// (./pacer.ts, mirroring reddit_pacer) BEFORE reserving budget or making the call. A
+// denied slot throws AdapterError(rate-limited, retryAfterMs) with NO reservation and
+// NO HTTP — the backfill self-resumes and the lane defers, the same path 429 takes.
+// Two layers, one classification: (a) the proactive pacer keeps the global rate under
+// the floor so a 429 is rarely even provoked; (b) when twitterapi.io DOES return 429
+// (e.g. a manual top-up raised the ceiling and the floor is now conservative), the
+// honored Retry-After (below) drives the same rate-limited pause-and-resume. The QPS
+// knob (TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS) has its single home in ./pacer.ts.
 //
 // Credit reservation (reserve-before-HTTP, D-18 / BUDGET-02): every provider request
 // reserves one prepaid credit via reserveSocialCredits BEFORE the HTTP call when an
@@ -61,6 +59,7 @@
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
+import { acquireTwitterPacerSlot, TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS } from "./pacer.js";
 import {
   socialProviderCredits,
   socialProviderRequestDuration,
@@ -85,15 +84,10 @@ export const TWITTERAPIIO_BASE_URL = "https://api.twitterapi.io";
  *  above); this constant is documentation, never a reservation amount. */
 export const USD_PER_REQUEST = 0.003;
 
-/** The per-account QPS floor twitterapi.io enforces for a NEVER-PAID account:
- *  0.2 QPS = 1 request every 5000ms. Exposed as the seam's single home for the
- *  QPS knob so Plan 03's lane pacer reads ONE constant rather than re-deriving the
- *  interval. After the operator's first top-up the ceiling rises to 3 QPS
- *  (~334ms); this conservative floor keeps a never-paid account (the operator's
- *  CURRENT state) from ever provoking a 429. The seam itself does NOT loop/sleep —
- *  it classifies the 429 (below) and surfaces this constant; the throttling loop
- *  lives in Plan 03's walker lane (the shared pacer), NOT here. */
-export const TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS = 5000;
+// The QPS floor constant now lives in ./pacer.ts (its single home — the pacer is its
+// primary consumer). Re-exported here (imported above) so the seam + walker lane keep
+// their existing `import { TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS } from "./http.js"` sites.
+export { TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS };
 
 /**
  * Bare fetch with abort-on-timeout. 30s default mirrors the TikTok/IG wrappers.
@@ -147,6 +141,30 @@ function statusLabel(httpStatus: number): string {
  */
 export async function twitterFetch(url: URL, ctx: TwitterFetchContext): Promise<Response> {
   const { platform: reservePlatform, provider: reserveProvider } = ctx;
+
+  // Global QPS gate (the per-key twitterapi.io ceiling, shared across backfill / warm /
+  // paste / replicas). Acquire the pacer slot FIRST — before the budget reservation —
+  // so a denied slot consumes NO prepaid credit and makes NO HTTP call. A miss throws
+  // rate-limited with the exact wait; the backfill self-resumes and the lane defers,
+  // unified with the 429 handling below. In tests the slot is 0ms so this always passes.
+  const slot = await acquireTwitterPacerSlot();
+  if (!slot.acquired) {
+    logger.debug(
+      {
+        waitMs: slot.waitMs,
+        platform: reservePlatform,
+        provider: reserveProvider,
+        logTag: ctx.logTag,
+      },
+      `${ctx.logTag}: pacer slot denied -> AdapterError(rate-limited, proactive QPS gate)`,
+    );
+    throw new AdapterError("twitterapi.io paced (per-key QPS slot not yet available)", {
+      category: "rate-limited",
+      retryAfterMs: slot.waitMs,
+      context: { platform: reservePlatform, provider: reserveProvider, logTag: ctx.logTag },
+    });
+  }
+
   if (ctx.origin !== undefined) {
     // Reserve-before-HTTP (BUDGET-02): decrement the daily counter AND the shared
     // prepaid balance in one FOR-UPDATE tx before issuing the request. A null
