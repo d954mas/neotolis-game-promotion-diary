@@ -650,10 +650,12 @@ export async function enrichFromUrl(
   // manual entry never dead-ends (provider unconfigured, network, cap/budget, a
   // deleted/protected tweet).
   if (parsed.kind === "twitter_post") {
-    // Recognition-only carries no tweet id from a live fetch. externalId is null
-    // (NOT the URL slug): the create boundary re-keys off the cache by canonical
-    // permalink (resolveCachedExternalId), so a re-paste once the provider recovers
-    // enriches the same event. An honest stats-less manual card beats a guess.
+    // Recognition-only carries no tweet id from a live fetch, so this result sets
+    // externalId=null — but for twitter the saved event is STILL keyed by tweet id:
+    // the tweet id IS the /status/<id> URL slug, and resolveCachedExternalId at the
+    // create boundary recovers it from the URL on a cache miss (its `parsed.externalId`
+    // fallback). So unlike TikTok's vm./vt. short link (no id in the URL → genuinely
+    // null), a recognition-only twitter paste enriches the same event when re-pasted.
     const recognitionOnly: EnrichmentResult = {
       kind: "twitter_post",
       externalId: null,
