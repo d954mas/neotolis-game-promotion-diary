@@ -385,6 +385,11 @@ const RawSchema = z.object({
   TWITTER_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
   TWITTER_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
   TWITTER_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
+  // Global twitterapi.io QPS pacer floor — min ms between any two twitterapi.io calls
+  // (one DB slot across all paths + replicas). Default 5000 = 0.2 QPS (the never-paid
+  // floor, safe for a free-tier self-host). A paid operator on 3 QPS lowers it to ~400
+  // (≈2.5 QPS, margin under the ceiling). Read by twitter/server/pacer.ts.
+  TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -527,6 +532,7 @@ export const env = {
   TWITTER_WARM_WINDOW_DAYS: raw.TWITTER_WARM_WINDOW_DAYS,
   TWITTER_WARM_STALENESS_HOURS: raw.TWITTER_WARM_STALENESS_HOURS,
   TWITTER_WARM_MAX_FAILURES: raw.TWITTER_WARM_MAX_FAILURES,
+  TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: raw.TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS,
 } as const;
 
 export type Env = typeof env;
