@@ -36,7 +36,10 @@
   import EventDetailGames from "./EventDetailGames.svelte";
   import EventHistoryChart from "$lib/components/charts/EventHistoryChart.svelte";
   import MediaTypePill from "$lib/components/feed/parts/MediaTypePill.svelte";
-  import { deriveMediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
+  import {
+    deriveMediaTypeOverlay,
+    type MediaTypeOverlayEvent,
+  } from "$lib/components/feed/parts/media-type-overlay.js";
   import type { EventKind, EventMetricSeries } from "$lib/sources/adapter.js";
   import { CHARTABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
   import { m } from "$lib/paraglide/messages.js";
@@ -307,13 +310,10 @@
   // null → no pill. Rendered only over a present thumbnail <img> so it sits on
   // the picture, never on the empty KindIcon placeholder.
   const detailMediaOverlay = $derived.by(() =>
-    deriveMediaTypeOverlay(
-      event as {
-        kind: string;
-        instagramEnrichment?: { mediaType?: string | null } | null;
-        youtubeEnrichment?: { mediaType?: string | null } | null;
-      },
-    ),
+    // Cast to the shared overlay interface (all five *Enrichment seams), not an ad-hoc
+    // subset — twitter/tiktok/telegram overlays resolve at runtime regardless, but the
+    // narrow cast misled readers into thinking only IG/YouTube were handled.
+    deriveMediaTypeOverlay(event as MediaTypeOverlayEvent),
   );
   // YouTube click-to-play facade — flips to embedded iframe on user
   // click. Reset whenever the event changes (modal pagination).

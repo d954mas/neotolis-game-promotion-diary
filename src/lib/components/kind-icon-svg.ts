@@ -13,7 +13,10 @@
 // stroke="currentColor", stroke-width 1.75, round caps/joins, fill="none".
 // Some kinds use fill="var(--surface)" cut-outs (the Reddit eyes/smile) — these
 // resolve in the DOM tooltip (it's plain HTML, not the ECharts canvas) and in
-// the component's rendered SVG. Geometric forms only — NO brand marks.
+// the component's rendered SVG. Geometric forms by DEFAULT; the platforms whose
+// identity has no recognizable geometric primitive carry a minimal BRAND glyph
+// instead (the X wordmark, the Telegram plane, the TikTok note, the Discord/Clyde
+// face) — see the per-kind comments below for which is which.
 
 import type { EventDto } from "$lib/server/dto.js";
 

@@ -332,8 +332,16 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     if (link && isImageLikeUrl(link)) return link;
     return readMediaUrlFromMetadata(event.metadata);
   }
-  if (event.kind === "twitter_post" || event.kind === "telegram_post") {
-    return readMediaUrlFromMetadata(event.metadata);
+  if (event.kind === "twitter_post") {
+    // Twitter HOTLINKS the raw pbs.twimg.com cover (no proxy — unlike TikTok's ORB-
+    // blocked CDN). Read the enrichment thumbnail (the source-of-truth the chart marker
+    // + feed card read), NOT event.metadata — else the event-detail modal renders blank.
+    return event.twitterEnrichment?.thumbnailUrl ?? null;
+  }
+  if (event.kind === "telegram_post") {
+    // Same as twitter: the cover lives on the enrichment object (the t.me hotlink),
+    // not event.metadata. Reading metadata blanked the detail-modal thumbnail.
+    return event.telegramEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "instagram_post") {
     // IG's CDN serves thumbnails with Cross-Origin-Resource-Policy: same-origin,
