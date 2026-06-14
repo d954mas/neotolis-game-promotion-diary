@@ -147,6 +147,7 @@ export const ALLOWLIST_TABLES = new Set([
   "twitterAccounts", // public external data, no tenant scope (account subject entity)
   "twitterPosts", // public external data, no tenant scope
   "twitterPostSnapshots", // public external data, no tenant scope (time-series)
+  "twitterPacer", // singleton rate-limit-token row, no tenant scope (parity with redditPacer/telegramPacer)
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({

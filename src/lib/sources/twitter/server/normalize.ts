@@ -83,7 +83,13 @@ const TWEET = z.object({
   id: z.string(),
   url: z.string().nullable().optional(),
   text: z.string().nullable().optional(),
-  createdAt: z.string(),
+  // twitterapi.io speaks Twitter's legacy date format ("Wed Oct 10 20:19:24 +0000
+  // 2018"), NOT ISO 8601 — so .datetime() would reject every valid value. Guard at the
+  // boundary instead: reject a value `new Date()` can't parse, so a malformed upstream
+  // date fails validation here rather than emitting an Invalid Date into published_at.
+  createdAt: z.string().refine((s) => !Number.isNaN(new Date(s).getTime()), {
+    message: "unparseable tweet createdAt",
+  }),
   likeCount: z.number().nullable().optional(),
   retweetCount: z.number().nullable().optional(),
   replyCount: z.number().nullable().optional(),

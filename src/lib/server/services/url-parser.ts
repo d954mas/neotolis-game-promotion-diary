@@ -167,16 +167,13 @@ export function parseIngestUrl(input: string): ParsedUrl {
     };
   }
   if (routed.kind === "twitter_post") {
-    // The Twitter adapter's parseUrl already canonicalized the permalink into
-    // metadata.permalink (`https://x.com/<handle>/status/<id>` — query tail
-    // stripped by construction). A bare profile URL returns null from the
-    // adapter (a profile is a SOURCE), so it falls through to `unsupported`.
-    const meta = (routed.metadata ?? {}) as { permalink?: unknown };
-    const canonicalUrl =
-      typeof meta.permalink === "string"
-        ? meta.permalink
-        : `https://x.com/_/status/${routed.externalId}`;
-    return { kind: "twitter_post", canonicalUrl };
+    // The Twitter adapter's parseUrl ALWAYS sets metadata.permalink for a routed
+    // twitter_post (`https://x.com/<handle>/status/<id>` — query tail stripped by
+    // construction); a bare profile URL returns null (a profile is a SOURCE) and falls
+    // through to `unsupported`. So the permalink is present by the adapter contract —
+    // trust it (AGENTS.md: no handling for impossible cases).
+    const meta = (routed.metadata ?? {}) as { permalink: string };
+    return { kind: "twitter_post", canonicalUrl: meta.permalink };
   }
 
   // 2) Host-classification fallback for kinds without an adapter yet
