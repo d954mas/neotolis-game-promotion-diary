@@ -36,9 +36,47 @@ import { logger } from "$lib/server/logger.js";
 // normalizer reads video.dynamic_cover.url_list / video.cover.url_list, both on
 // `*.tiktokcdn-us.com` (10-SPIKE.md finding (e)); `.tiktokcdn.com` is the base
 // TikTok CDN domain that also serves covers in some regions. Suffix-matched
-// against the stored URL's host — defence-in-depth so a future provider change
-// can never turn this into a general-purpose fetch.
-const ALLOWED_HOST_SUFFIXES = [".tiktokcdn-us.com", ".tiktokcdn.com"];
+// against a URL's host — defence-in-depth so a future provider change can never
+// turn this into a general-purpose fetch. Single source: both the proxy and the
+// write-time byte-fetch (snapshots.ts) host-validate through isTikTokCdnHost.
+export const ALLOWED_HOST_SUFFIXES = [".tiktokcdn-us.com", ".tiktokcdn.com"];
+
+/** True when the URL's host is a known TikTok CDN (suffix-matched, dot-anchored
+ *  so `tiktokcdn.com.evil.com` fails). The SSRF guard shared by the proxy and the
+ *  write-time cover fetch. */
+export function isTikTokCdnHost(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+}
+
+/**
+ * Best-effort server-side fetch of a TikTok CDN cover URL while it is still a
+ * fresh signed URL (poll time). Host-validated (SSRF), redirect:"manual" (a 3xx
+ * would re-open SSRF to the redirect target), timeout-bounded. Returns the image
+ * bytes + content-type, or null on a non-CDN host / non-ok / non-image / network
+ * error. NEVER throws — the caller treats null as "leave the cache empty, the
+ * proxy URL-fallback still applies". This is the only reusable seam IG could
+ * adopt later; it is applied to TikTok only in this PR.
+ */
+export async function fetchCoverBytes(
+  url: string,
+): Promise<{ bytes: Buffer; contentType: string } | null> {
+  if (!isTikTokCdnHost(url)) return null;
+  const res = await fetch(url, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (res === null || !res.ok) return null;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("image/")) return null;
+  const bytes = Buffer.from(await res.arrayBuffer().catch(() => new ArrayBuffer(0)));
+  return bytes.length === 0 ? null : { bytes, contentType };
+}
 
 /**
  * Resolve a post's stored thumbnail URL, host-validated. Returns null when the
@@ -53,13 +91,22 @@ export async function resolveTikTokThumbnailUrl(awemeId: string): Promise<string
     .limit(1);
   const url = row?.url ?? null;
   if (url === null) return null;
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-  return ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix)) ? url : null;
+  return isTikTokCdnHost(url) ? url : null;
+}
+
+/** The post's cached cover bytes (read ONLY here — never on the feed/DTO path,
+ *  which must not load blobs). Null when no row, no cached bytes yet (legacy /
+ *  re-poll pending), or no content-type. */
+async function resolveCachedCoverBytes(
+  awemeId: string,
+): Promise<{ bytes: Buffer; contentType: string } | null> {
+  const [row] = await db
+    .select({ bytes: tiktokPosts.thumbnailBytes, contentType: tiktokPosts.thumbnailContentType })
+    .from(tiktokPosts)
+    .where(eq(tiktokPosts.awemeId, awemeId))
+    .limit(1);
+  if (row?.bytes == null || row.contentType == null) return null;
+  return { bytes: row.bytes, contentType: row.contentType };
 }
 
 export const tiktokThumbnailRoutes = new Hono<{
@@ -67,7 +114,23 @@ export const tiktokThumbnailRoutes = new Hono<{
 }>();
 
 tiktokThumbnailRoutes.get("/tiktok/thumbnail/:postId", async (c) => {
-  const url = await resolveTikTokThumbnailUrl(c.req.param("postId"));
+  const postId = c.req.param("postId");
+
+  // Cached bytes win — expiry-proof, no upstream fetch (fixes the prod 502 from
+  // the signed-URL expiry). Populated at poll time while the URL was fresh.
+  const cached = await resolveCachedCoverBytes(postId);
+  if (cached !== null) {
+    // Blob wraps the bytes as a BodyInit the DOM Response type accepts (a raw
+    // Node Buffer / Uint8Array is valid at runtime but not in the lib.dom types).
+    const body = new Blob([new Uint8Array(cached.bytes)], { type: cached.contentType });
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": cached.contentType, "cache-control": "private, max-age=3600" },
+    });
+  }
+
+  // Legacy rows not yet re-polled (bytes null) → fall back to the URL fetch.
+  const url = await resolveTikTokThumbnailUrl(postId);
   if (url === null) return c.body(null, 404);
 
   // No Referer to the CDN (the original <img> used referrerpolicy=no-referrer).
@@ -98,7 +161,7 @@ tiktokThumbnailRoutes.get("/tiktok/thumbnail/:postId", async (c) => {
     // CDN block / opaque-redirect (3xx) without guessing.
     if (upstream !== null) {
       logger.warn(
-        { postId: c.req.param("postId"), status: upstream.status, hadBody: upstream.body !== null },
+        { postId, status: upstream.status, hadBody: upstream.body !== null },
         "tiktok thumbnail proxy: upstream non-ok",
       );
     }
