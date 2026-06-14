@@ -238,4 +238,55 @@ describe("twitter per-post refresh lane — claimGate pacer (Plan 11 P1)", () =>
       .limit(1);
     expect(done!.status).toBe("done");
   });
+
+  it("budget DEFER (daily cap ≥95%): the claimGate defers BEFORE the pacer — twitter_pacer.next_allowed_at is untouched (no wasted slot)", async () => {
+    const u = await seedUserDirectly({ email: `twrq-budget-${uniq()}@t.io` });
+    const id = tweetId();
+    const permalink = `https://x.com/promo/status/${id}`;
+    await seedCachedPost(id, permalink);
+    const ev = await createEvent(
+      u.id,
+      {
+        kind: "twitter_post",
+        title: "tw",
+        externalId: id,
+        occurredAt: new Date("2026-06-02T00:00:00Z").toISOString(),
+        gameIds: [],
+      },
+      "127.0.0.1",
+    );
+    single.next = singleTweet(id);
+    await enqueue(ev.id, u.id, id);
+
+    // Daily cap at 95% (balance still funded) → the budget gate DEFERS. Make the pacer
+    // slot DUE so that IF the (buggy) order acquired the pacer before the budget check,
+    // it would bump next_allowed_at into the future. The fix runs budget first, so the
+    // pacer row must stay untouched.
+    spend = { creditsUsed: 950, dailyCap: 1000, prepaidBalance: 5000 };
+    await db.execute(
+      sql`UPDATE twitter_pacer SET next_allowed_at = NOW() - interval '1 second' WHERE id = 1`,
+    );
+
+    await twitterRefreshQueueTick();
+
+    // No fetch, no snapshot — the budget deferred the row.
+    expect(single.calls).toHaveLength(0);
+    expect(await snapshotCount(id)).toBe(0);
+    const [row] = await db
+      .select({ status: adapterRefreshQueue.status })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id))
+      .limit(1);
+    expect(row!.status).toBe("pending");
+
+    // The crux: a budget-defer must not have consumed the pacer slot. next_allowed_at
+    // stays in the past (the slot is still DUE), so unrelated twitter traffic is NOT
+    // paced out by a slot interval.
+    const [pacer] = await db
+      .execute<{
+        due: boolean;
+      }>(sql`SELECT next_allowed_at <= NOW() AS due FROM twitter_pacer WHERE id = 1`)
+      .then((r) => (r as unknown as { rows: Array<{ due: boolean }> }).rows);
+    expect(pacer!.due).toBe(true);
+  });
 });

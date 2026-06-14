@@ -125,12 +125,13 @@ const twitterRefreshLane = createSocialRefreshLane({
   maxBatchSize: 1,
   getSocialProvider,
   getSocialSpendToday,
-  // Acquire the global twitter_pacer slot in the claimGate (Plan 11 P1). A denied slot
-  // DEFERS the row (stays pending → retried) instead of letting it reach the seam,
+  // Acquire the global twitter_pacer slot in the claimGate (Plan 11 P1), AFTER the
+  // budget gate and on the claim tx so a rollback rolls the slot back too. A denied
+  // slot DEFERS the row (stays pending → retried) instead of letting it reach the seam,
   // fail rate-limited, and complete `done` — which is how a manual Refresh-Now silently
-  // no-opped under QPS contention. Mirrors Reddit's claimRedditPacerSlot. The permit
-  // then makes the seam skip its own acquire (no double-spend).
-  acquirePacerSlot: () => acquireTwitterPacerSlot(),
+  // no-opped under QPS contention. Mirrors Reddit's acquireRedditPacerSlotWith(ctx.tx).
+  // The permit then makes the seam skip its own acquire (no double-spend).
+  acquirePacerSlot: (tx) => acquireTwitterPacerSlot(tx),
   resolvePermalink,
   resolveUserPostId,
   writeSnapshot: ({ postId: tweetId, permalink, post, status }) =>

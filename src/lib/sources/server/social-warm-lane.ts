@@ -31,7 +31,7 @@
 
 import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
-import { db } from "$lib/server/db/client.js";
+import { db, type Tx } from "$lib/server/db/client.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
@@ -324,13 +324,15 @@ export interface SocialRefreshLaneConfig {
     platform: string,
     provider: string,
   ): Promise<{ creditsUsed: number; dailyCap: number; prepaidBalance: number }>;
-  /** OPTIONAL global QPS pacer acquire, run FIRST in the claimGate (Twitter only).
-   *  A denied slot DEFERS the row (stays pending → retried) instead of letting it
-   *  reach the seam, fail rate-limited, write a snapshot, and complete `done` with no
+  /** OPTIONAL global QPS pacer acquire, run AFTER the budget gate passes (Twitter
+   *  only). A denied slot DEFERS the row (stays pending → retried) instead of letting
+   *  it reach the seam, fail rate-limited, write a snapshot, and complete `done` with no
    *  retry — which is how a manual Refresh-Now silently no-ops under contention. When
    *  acquired, the permit threads `pacerAlreadyAcquired` so the seam does NOT
-   *  re-acquire. IG/TikTok omit this (no pacer) and keep their budget-only gate. */
-  acquirePacerSlot?(): Promise<{ acquired: boolean; waitMs: number }>;
+   *  re-acquire. Runs on the claim `tx` so a claim-tx rollback rolls the slot back too
+   *  (mirrors Reddit's acquireRedditPacerSlotWith(ctx.tx)). IG/TikTok omit this (no
+   *  pacer) and keep their budget-only gate. */
+  acquirePacerSlot?(tx: Tx): Promise<{ acquired: boolean; waitMs: number }>;
   /** Resolve the post's permalink from the public-data posts cache, or null on a
    *  cache miss (e.g. a paste before the first account poll → graceful skip). */
   resolvePermalink(postId: string): Promise<string | null>;
@@ -389,17 +391,32 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
   // That's fine — the real per-pool ceiling is the in-fetch origin-scoped reserve
   // (user_post→user pool, service_post→cron pool); this stays a cheap tick throttle.
   async function claimThrottleSlot(
-    _ctx: AdapterLaneClaimGateContext<SocialRefreshQueueName>,
+    ctx: AdapterLaneClaimGateContext<SocialRefreshQueueName>,
   ): Promise<AdapterLaneClaimGateResult<SocialRefreshPermit>> {
-    // Global QPS pacer (Twitter): acquire FIRST, before the budget gate. A denied
-    // slot DEFERS — the row stays pending and is retried, so a manual Refresh-Now
-    // is never consumed against a busy slot (the fix). Acquiring here (not at the
-    // seam) mirrors Reddit's claimRedditPacerSlot; the permit then tells the seam to
-    // skip its own acquire so the slot isn't double-spent. IG/TikTok pass no
-    // acquirePacerSlot → this branch is skipped and pacerAlreadyAcquired stays false.
+    // Budget gate FIRST — a budget-defer must NOT consume a pacer slot (it would pace
+    // out unrelated twitter traffic by a slot interval without making any fetch). Only
+    // once budget passes do we touch the pacer.
+    const { creditsUsed, dailyCap, prepaidBalance } = await config.getSocialSpendToday(
+      platform,
+      config.provider,
+    );
+    if (prepaidBalance > 0 && dailyCap > 0 && creditsUsed >= Math.floor(dailyCap * 0.95)) {
+      return {
+        action: "defer",
+        retryAfterMs: THROTTLE_DEFER_MS,
+        reason: `${platform} daily cap at 95%`,
+      };
+    }
+
+    // Global QPS pacer (Twitter): acquire AFTER budget passes, on the claim tx so a
+    // claim-tx rollback rolls the slot back too. A denied slot DEFERS — the row stays
+    // pending and is retried, so a manual Refresh-Now is never consumed against a busy
+    // slot. Acquiring here (not at the seam) mirrors Reddit's claimRedditPacerSlot; the
+    // permit then tells the seam to skip its own acquire so the slot isn't double-spent.
+    // IG/TikTok pass no acquirePacerSlot → pacerAlreadyAcquired stays false.
     let pacerAlreadyAcquired = false;
     if (config.acquirePacerSlot !== undefined) {
-      const slot = await config.acquirePacerSlot();
+      const slot = await config.acquirePacerSlot(ctx.tx);
       if (!slot.acquired) {
         return {
           action: "defer",
@@ -410,18 +427,6 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
       pacerAlreadyAcquired = true;
     }
 
-    const { creditsUsed, dailyCap, prepaidBalance } = await config.getSocialSpendToday(
-      platform,
-      config.provider,
-    );
-    if (prepaidBalance <= 0) return { action: "run", permit: { pacerAlreadyAcquired } };
-    if (dailyCap > 0 && creditsUsed >= Math.floor(dailyCap * 0.95)) {
-      return {
-        action: "defer",
-        retryAfterMs: THROTTLE_DEFER_MS,
-        reason: `${platform} daily cap at 95%`,
-      };
-    }
     return { action: "run", permit: { pacerAlreadyAcquired } };
   }
 
@@ -448,6 +453,8 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
       if (postId === null) return; // skip reasons are logged inside the resolvers
       const permalink = await config.resolvePermalink(postId);
       if (permalink === null) {
+        // Accepted wasted slot: the pacer slot was claimed in the claimGate but this
+        // row no-ops on a cache miss. Rare, and a cache-miss row would no-op anyway.
         logger.info({ postId }, `${platform} refresh: post not cached yet — skip`);
         return;
       }
