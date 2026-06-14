@@ -621,20 +621,17 @@ export const twitterAdapter: SourceAdapter & typeof twitterAccountAdapterCore = 
   // scheduledWorker; isEnabled gates it off when the provider is unconfigured
   // (self-host without Twitter) so the lane never ticks/throws.
   //
-  // QPS PACING (the operator's per-account rate-limit requirement, inherited from
-  // Plan 02): intervalMs = TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS (5000ms) + the lane's
-  // maxBatchSize=1 (refresh-queue-tick.ts) serialize twitterapi.io calls to ≤1 every
-  // 5s — the 0.2-QPS floor a never-paid account must respect (the Reddit-lane pacing
-  // pattern: a rate-limited scrape paces via the worker interval). After the
-  // operator's first top-up the ceiling rises to 3 QPS and the constant can be
-  // revisited in ONE home (http.ts).
+  // QPS PACING: intervalMs = TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS (env-tunable, default
+  // 5000ms = 0.2-QPS never-paid floor) + the lane's maxBatchSize=1 serialize twitterapi.io
+  // calls to ≤1 per interval (the Reddit-lane pacing pattern). A paid operator on 3 QPS
+  // lowers the env var (e.g. 400ms ≈ 2.5 QPS).
   workQueue: {
     scheduledWorkers: [
       {
         name: "twitter.refresh",
         intervalMs: TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS,
         replicaPolicy: "parallel",
-        readyMessage: "twitter refresh queue worker ready (5s QPS pacing)",
+        readyMessage: `twitter refresh queue worker ready (${TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS}ms QPS pacing)`,
         disabledMessage: "twitter refresh queue worker disabled (provider unconfigured)",
         laneQueue: {
           strategy: "fixed-slot-round-robin",
