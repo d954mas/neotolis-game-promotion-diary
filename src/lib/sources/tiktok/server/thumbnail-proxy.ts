@@ -92,6 +92,16 @@ tiktokThumbnailRoutes.get("/tiktok/thumbnail/:postId", async (c) => {
     return null;
   });
   if (upstream === null || !upstream.ok || upstream.body === null) {
+    // Diagnostic for the steady prod 502 rate on this route: a network error is
+    // already logged above; this captures the HTTP-level failure so we can tell a
+    // signed-URL expiry (403/404 — the next poll refreshes thumbnail_url) from a
+    // CDN block / opaque-redirect (3xx) without guessing.
+    if (upstream !== null) {
+      logger.warn(
+        { postId: c.req.param("postId"), status: upstream.status, hadBody: upstream.body !== null },
+        "tiktok thumbnail proxy: upstream non-ok",
+      );
+    }
     return c.body(null, 502);
   }
 
