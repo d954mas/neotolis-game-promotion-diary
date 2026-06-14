@@ -42,6 +42,9 @@ const { handleBackfillAccount } =
   await import("../../src/lib/sources/tiktok/server/handlers/backfill-account.js");
 const { getTikTokBackfillState } =
   await import("../../src/lib/sources/tiktok/server/backfill-state.js");
+const { getChannelState } = await import("../../src/lib/server/services/channel-state.js");
+const { tiktokAdapter } = await import("../../src/lib/sources/tiktok/server/index.js");
+const { outbox } = await import("../../src/lib/server/db/schema/outbox.js");
 
 const ACCOUNT = "acct-bound-tk";
 const envMut = env as { SOCIAL_BACKFILL_MAX_POSTS: number };
@@ -153,5 +156,110 @@ describe("tiktok backfill bounding (BACK-01)", () => {
     // Crossing the window completes the feed.
     const st = await getTikTokBackfillState(ACCOUNT);
     expect(st.complete).toBe(true);
+  });
+});
+
+// ── P1-A (twin of the twitter fix): an all-older-than-window first deep page must still
+//    write a NON-null frontier so a later WIDEN can reopen the history.
+describe("tiktok backfill frontier on out-of-window first page (widen reopen)", () => {
+  async function seedSourceFor(account: string): Promise<string> {
+    const user = await seedUserDirectly({
+      email: `frontier-tk-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    const [row] = await db
+      .insert(dataSources)
+      .values({
+        userId: user.id,
+        kind: "tiktok_account",
+        handleUrl: `https://www.tiktok.com/@${account}`,
+        channelId: account,
+        isOwnedByMe: true,
+        autoImport: true,
+        metadata: { handle: account, accountId: account },
+      })
+      .returning({ id: dataSources.id });
+    return row!.id;
+  }
+
+  it("[10-P1A] a deep first page entirely older than the window records a non-null frontier and a widen reopens it", async () => {
+    const account = `acct-frontier-tk-${Math.random().toString(36).slice(2)}`;
+    const sourceId = await seedSourceFor(account);
+
+    // The ONLY page is all-older-than-window AND end-of-feed → zero feed events.
+    provider.pages = [
+      {
+        posts: [post("o1", 30), post("o2", 45), post("o3", 60)],
+        nextCursor: null,
+        endOfFeed: true,
+        creditsUsed: 1,
+        owner: null,
+      },
+    ];
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+    await handleBackfillAccount({
+      data: {
+        kind: "tiktok_account",
+        channelKey: account,
+        depthBoundIso: sevenDaysAgo.toISOString(),
+        flow: "initial",
+        forceDeep: true,
+      },
+    });
+
+    const importedByExt = await db.select().from(events).where(eq(events.kind, "tiktok_post"));
+    expect(
+      importedByExt.filter((e) => ["o1", "o2", "o3"].includes(e.externalId ?? "")).length,
+    ).toBe(0);
+
+    // Frontier = o1 @ 30d: the loop breaks at the FIRST out-of-window post (newest-first),
+    // so o1 is the oldest post fetched-and-snapshotted before the break.
+    const state = await getChannelState("tiktok_account", account);
+    expect(state?.backfillComplete).toBe(true);
+    expect(
+      state?.backfillOldestAt,
+      "frontier must be non-null after an all-older page",
+    ).not.toBeNull();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+    expect(Math.abs(state!.backfillOldestAt!.getTime() - thirtyDaysAgo.getTime())).toBeLessThan(
+      86_400_000,
+    );
+
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000);
+    await db.transaction(async (tx) => {
+      await tiktokAdapter.resetWalkerStateOnWidening!(
+        {
+          id: sourceId,
+          userId: "ignored",
+          kind: "tiktok_account",
+          channelId: account,
+          autoImport: true,
+          isOwnedByMe: true,
+          backfillTargetSince: ninetyDaysAgo,
+          metadata: { accountId: account, handle: account },
+        } as never,
+        {
+          previousTarget: sevenDaysAgo,
+          newTarget: ninetyDaysAgo,
+          triggerUserId: "widen-user",
+          ipAddress: "0.0.0.0",
+          tx,
+        },
+      );
+    });
+
+    const rows = await db
+      .select({ payload: outbox.payload })
+      .from(outbox)
+      .where(eq(outbox.queue, "tiktok.backfill.account"));
+    const reopen = rows.find(
+      (r) =>
+        (r.payload as { channelKey?: string }).channelKey === account &&
+        (r.payload as { forceDeep?: boolean }).forceDeep === true,
+    );
+    expect(
+      reopen,
+      "widen must re-enqueue a forceDeep walk (not early-exit on null frontier)",
+    ).toBeTruthy();
   });
 });

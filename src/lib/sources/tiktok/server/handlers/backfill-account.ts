@@ -222,6 +222,11 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   let oldestFetchedOccurredAt: Date | null = null;
   let pausedByBudget = false;
   let walkedThisTick = false;
+  // The RAW upstream page size (pre-window-filter). The Pitfall-4 not-found heuristic
+  // keys on this, NOT collectedEvents.length — an all-older-than-window first page
+  // fetches posts (a valid populated handle) but collects zero in-window events; only a
+  // genuinely EMPTY upstream page means "no such handle / no posts".
+  let fetchedThisTick = 0;
 
   if (!state.complete && !(branch === "deep" && state.collected >= maxPosts)) {
     walkedThisTick = true;
@@ -264,6 +269,7 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
 
     if (page !== undefined && !pausedByBudget) {
       requestsUsed += page.creditsUsed;
+      fetchedThisTick += page.posts.length;
 
       // Opportunistically refresh the account subject entity (tiktok_accounts)
       // from the FREE feed owner object the page already carries — NO extra
@@ -310,15 +316,21 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
           status: "ok",
         });
 
+        // Frontier = the oldest post this deep walk FETCHED (snapshot written above),
+        // regardless of the window. Recorded BEFORE the out-of-window break so an
+        // all-older first page still writes a non-null frontier (else a later widen
+        // early-exits on null and the older history is stranded). The window check below
+        // only governs whether the post becomes an in-window FEED event.
+        if (oldestFetchedOccurredAt === null || post.publishedAt < oldestFetchedOccurredAt) {
+          oldestFetchedOccurredAt = post.publishedAt;
+        }
+
         if (post.publishedAt.getTime() < dateWindowSince.getTime()) {
           crossedWindow = true;
           break;
         }
         collectedEvents.push(postToRawEvent(post));
         state.collected += 1;
-        if (oldestFetchedOccurredAt === null || post.publishedAt < oldestFetchedOccurredAt) {
-          oldestFetchedOccurredAt = post.publishedAt;
-        }
         // Post-count cap (deep branch): stop collecting the moment we hit it.
         if (branch === "deep" && state.collected >= maxPosts) {
           crossedWindow = true;
@@ -335,13 +347,16 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
   }
 
   // 4. Pitfall 4 — empty first page on a brand-new source = probable bad/private
-  //    handle. No events, a request was made, the feed reports end-of-feed with no
-  //    cursor on the very first poll → not_found, NOT complete.
+  //    handle. An EMPTY UPSTREAM page (fetchedThisTick === 0), a request was made, the
+  //    feed reports end-of-feed with no cursor on the very first poll → not_found, NOT
+  //    complete. Keying on the RAW page size (not collectedEvents.length) avoids a false
+  //    not-found when a valid handle's first page is entirely older than the date window
+  //    (zero in-window events, but the handle clearly exists + has posts).
   if (
     wasNeverPolled &&
     !pausedByBudget &&
     walkedThisTick &&
-    collectedEvents.length === 0 &&
+    fetchedThisTick === 0 &&
     requestsUsed > 0 &&
     state.complete &&
     state.cursor === null

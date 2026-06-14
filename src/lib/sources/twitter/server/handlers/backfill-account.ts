@@ -374,15 +374,21 @@ export async function handleBackfillAccount(job: BackfillAccountJob): Promise<vo
           status: "ok",
         });
 
+        // Frontier = the oldest tweet this deep walk FETCHED (snapshot written above),
+        // regardless of the window. Recorded BEFORE the out-of-window break so an
+        // all-older first page still writes a non-null frontier (else a later widen
+        // early-exits on null and the older history is stranded). The window check below
+        // only governs whether the tweet becomes an in-window FEED event.
+        if (oldestFetchedOccurredAt === null || post.publishedAt < oldestFetchedOccurredAt) {
+          oldestFetchedOccurredAt = post.publishedAt;
+        }
+
         if (post.publishedAt.getTime() < dateWindowSince.getTime()) {
           crossedWindow = true;
           break;
         }
         collectedEvents.push(postToRawEvent(post, handle));
         state.collected += 1;
-        if (oldestFetchedOccurredAt === null || post.publishedAt < oldestFetchedOccurredAt) {
-          oldestFetchedOccurredAt = post.publishedAt;
-        }
         // Post-count cap (deep branch): stop collecting the moment we hit it.
         if (branch === "deep" && state.collected >= maxPosts) {
           crossedWindow = true;

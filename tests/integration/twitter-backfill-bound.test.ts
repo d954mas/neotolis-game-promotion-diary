@@ -46,6 +46,8 @@ const { handleBackfillAccount } =
   await import("../../src/lib/sources/twitter/server/handlers/backfill-account.js");
 const { getTwitterBackfillState } =
   await import("../../src/lib/sources/twitter/server/backfill-state.js");
+const { getChannelState } = await import("../../src/lib/server/services/channel-state.js");
+const { twitterAdapter } = await import("../../src/lib/sources/twitter/server/index.js");
 const { AdapterError } = await import("../../src/lib/sources/errors.js");
 
 const ACCOUNT = "acct-bound-tw";
@@ -351,5 +353,124 @@ describe("twitter backfill QPS-429 resume + pacing", () => {
 
     const cont = await continuationRow(account);
     expect(cont, "operator-issue pause must NOT re-enqueue").toBeNull();
+  });
+});
+
+// ── P1-A: an all-older-than-window first deep page must still write a NON-null frontier
+//    so a later date-range WIDEN can reopen the history (instead of early-exiting on a
+//    null backfillOldestAt and stranding the older archive forever).
+describe("twitter backfill frontier on out-of-window first page (widen reopen)", () => {
+  async function seedSourceFor(account: string): Promise<string> {
+    const user = await seedUserDirectly({
+      email: `frontier-tw-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    const [row] = await db
+      .insert(dataSources)
+      .values({
+        userId: user.id,
+        kind: "twitter_account",
+        handleUrl: `https://x.com/${account}`,
+        channelId: account,
+        isOwnedByMe: true,
+        autoImport: true,
+        metadata: { handle: account, accountId: account },
+      })
+      .returning({ id: dataSources.id });
+    return row!.id;
+  }
+
+  it("[11-P1A] a deep first page entirely older than the window records a non-null frontier and a widen reopens it", async () => {
+    const account = `acct-frontier-${Math.random().toString(36).slice(2)}`;
+    const sourceId = await seedSourceFor(account);
+
+    // The ONLY page is all-older-than-window (every tweet 30/45/60d old) AND end-of-feed.
+    // Window is 7d → every tweet crosses the window on the FIRST tweet, so zero feed
+    // events are collected. Before the fix oldestFetchedOccurredAt stayed null and the
+    // frontier was never written; after the fix the fetched tweets set it.
+    const oldTweets = [tweet("o1", 30), tweet("o2", 45), tweet("o3", 60)];
+    provider.pages = [
+      {
+        page: {
+          posts: oldTweets.map(normalizeTweet),
+          nextCursor: null,
+          endOfFeed: true,
+          creditsUsed: 1,
+          owner: null,
+        },
+        rawTweets: oldTweets,
+      },
+    ];
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+    await handleBackfillAccount({
+      data: {
+        kind: "twitter_account",
+        channelKey: account,
+        // Deep walk toward 7d ago — the page is entirely older, so it all crosses.
+        depthBoundIso: sevenDaysAgo.toISOString(),
+        flow: "initial",
+        forceDeep: true,
+      },
+    });
+
+    // No in-window feed events (all older than the 7d window) for this account's tweets.
+    const importedByExt = await db.select().from(events).where(eq(events.kind, "twitter_post"));
+    expect(
+      importedByExt.filter((e) => ["o1", "o2", "o3"].includes(e.externalId ?? "")).length,
+    ).toBe(0);
+
+    // THE FIX: the deep walk wrote a NON-null frontier and marked the account complete.
+    // The frontier = o1 @ 30d: the loop breaks at the FIRST out-of-window tweet (the page
+    // is newest-first), so o1 is the oldest tweet fetched-and-snapshotted before the
+    // break. Pre-fix the frontier stayed null (update ran AFTER the break).
+    const state = await getChannelState("twitter_account", account);
+    expect(state?.backfillComplete).toBe(true);
+    expect(
+      state?.backfillOldestAt,
+      "frontier must be non-null after an all-older page",
+    ).not.toBeNull();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+    expect(Math.abs(state!.backfillOldestAt!.getTime() - thirtyDaysAgo.getTime())).toBeLessThan(
+      86_400_000,
+    );
+
+    // A subsequent WIDEN to 90d must REOPEN (re-enqueue a forceDeep walk) — the null
+    // frontier early-exit no longer strands the older history.
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000);
+    await db.transaction(async (tx) => {
+      await twitterAdapter.resetWalkerStateOnWidening!(
+        {
+          id: sourceId,
+          userId: "ignored",
+          kind: "twitter_account",
+          channelId: account,
+          autoImport: true,
+          isOwnedByMe: true,
+          backfillTargetSince: ninetyDaysAgo,
+          metadata: { accountId: account, handle: account },
+        } as never,
+        {
+          previousTarget: sevenDaysAgo,
+          newTarget: ninetyDaysAgo,
+          triggerUserId: "widen-user",
+          ipAddress: "0.0.0.0",
+          tx,
+        },
+      );
+    });
+
+    const rows = await db
+      .select({ payload: outbox.payload })
+      .from(outbox)
+      .where(eq(outbox.queue, "twitter.backfill.account"));
+    const reopen = rows.find(
+      (r) =>
+        (r.payload as { channelKey?: string; forceDeep?: boolean }).channelKey === account &&
+        (r.payload as { forceDeep?: boolean }).forceDeep === true,
+    );
+    expect(
+      reopen,
+      "widen must re-enqueue a forceDeep walk (not early-exit on null frontier)",
+    ).toBeTruthy();
   });
 });
