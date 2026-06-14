@@ -16,16 +16,11 @@
 // the per-tree vi.mock works), the twitter_posts permalink lookup, the
 // tenant-scoped user_post event resolve, and the Twitter snapshot write.
 //
-// D-05 DELTA: the writeSnapshot mapping threads BOTH the derived `shares`
-// (post.metrics.shares → twitter_post_snapshots.share_count) AND the raw
-// retweet/quote/bookmark components. The single-tweet NormalizedSinglePost does
-// NOT carry the raw components on the port type — they are re-derived from OUR
-// twitter_posts cache is unnecessary here; the metric-series + shares chart read
-// the derived shareCount, and the raw components are only populated by the WALKER
-// (which has the full Tweet object). For a single-tweet refresh we thread the
-// derived shares (the charted metric); the raw components stay null on this lane's
-// snapshot (the warm lane re-polls metrics, not the static raw split — D-05 raw
-// retention is a walker/backfill concern). null is correct by presence.
+// D-05 DELTA: the single-tweet NormalizedSinglePost carries no raw
+// retweet/quote/bookmark components, so this lane threads only the derived `shares`
+// (the charted metric → twitter_post_snapshots.share_count) and leaves the raw split
+// null — D-05 raw retention is a walker-only concern (only the walker has the full
+// Tweet object).
 //
 // QPS PACING (the operator's per-account rate-limit requirement — inherited from
 // Plan 02): twitterapi.io rate-limits PER ACCOUNT (0.2 QPS = 1 req/5s for a

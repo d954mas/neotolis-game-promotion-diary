@@ -81,7 +81,7 @@ const VIDEO_TWEET: Tweet = {
   },
 };
 
-// A text-only tweet (extendedEntities {} with no media) — thumbnail null, kind "other".
+// A text-only tweet (extendedEntities {} with no media) — thumbnail null, kind "text".
 const TEXT_TWEET: Tweet = {
   id: "1800000000000000000",
   url: "https://x.com/supergiantgames/status/1800000000000000000",
