@@ -76,13 +76,18 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
   let cover: { bytes: Buffer; contentType: string } | null = null;
   const incomingUrl = args.thumbnailUrl ?? null;
   if (incomingUrl !== null) {
+    // Presence-only — never SELECT the bytea itself (the blob stays off this path
+    // too; we only need "is the cache empty?").
     const [prior] = await db
-      .select({ url: tiktokPosts.thumbnailUrl, hasBytes: tiktokPosts.thumbnailBytes })
+      .select({
+        url: tiktokPosts.thumbnailUrl,
+        hasBytes: sql<boolean>`${tiktokPosts.thumbnailBytes} IS NOT NULL`,
+      })
       .from(tiktokPosts)
       .where(eq(tiktokPosts.awemeId, args.awemeId))
       .limit(1);
     const urlChanged = prior === undefined || prior.url !== incomingUrl;
-    const cacheEmpty = prior !== undefined && prior.hasBytes === null;
+    const cacheEmpty = prior !== undefined && !prior.hasBytes;
     if (urlChanged || cacheEmpty) cover = await fetchCoverBytes(incomingUrl);
   }
 
