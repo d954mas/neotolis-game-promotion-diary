@@ -1070,6 +1070,13 @@
     flex-direction: column;
     gap: var(--s-4);
     min-width: 0;
+    /* A promo diary logs 1–2 events/day, so a 3-col grid per date-group left
+     * 2 empty columns per row — the feed read sparse and left-weighted on
+     * desktop. Cap the column to a readable timeline width (matches the
+     * 720px /sources/new + /sources/[id] form convention) and centre it. */
+    max-width: 720px;
+    margin-inline: auto;
+    width: 100%;
   }
 
   /* Optimistic loading state — visual feedback while SvelteKit's loader
@@ -1154,23 +1161,17 @@
    * .feed-grid (lines 836-842): 3 cols wide / 2 cols tablet / 1 col mobile.
    * One feed-grid per date group; FeedDateGroupHeader sits BETWEEN grids
    * (sticky LB-3 math intact via its own component CSS). */
+  /* Single-column timeline. One FeedCard per row reads as a diary, not a
+   * half-empty card wall; the per-date-group sticky header sits above its
+   * column. (Was repeat(3) → repeat(2) → 1; the multi-col grid only ever
+   * filled with the rare high-event day and looked sparse otherwise.) */
   .feed-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--s-3);
     margin: 0;
     padding: 0;
     min-width: 0;
-  }
-  @media (max-width: 1024px) {
-    .feed-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-  @media (max-width: 640px) {
-    .feed-grid {
-      grid-template-columns: 1fr;
-    }
   }
   .sentinel {
     width: 100%;
