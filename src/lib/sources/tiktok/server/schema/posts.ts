@@ -32,8 +32,14 @@
 // deleted. The row IS the historical record for that account's per-post stats;
 // future account-level analytics require the full historical record.
 
-import { pgTable, text, timestamp, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, index, customType } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+// Postgres bytea ↔ Node Buffer. Drizzle has no first-class bytea column type;
+// this is the documented customType bridge (driver returns/accepts Buffer).
+const bytea = customType<{ data: Buffer; default: false }>({
+  dataType: () => "bytea",
+});
 
 export const tiktokPosts = pgTable(
   "tiktok_posts",
@@ -56,6 +62,14 @@ export const tiktokPosts = pgTable(
     // The fresh TikTok CDN thumbnail URL (hotlink). Expires; refreshed on every
     // poll by the snapshot writer.
     thumbnailUrl: text("thumbnail_url"),
+    // Cached cover image bytes, fetched at poll time while thumbnail_url is still
+    // a fresh signed URL. The proxy serves these directly so a load never depends
+    // on the (hours-short) signature — the daily poll signature expiry caused the
+    // steady prod 502 rate on /api/tiktok/thumbnail. NULL on legacy rows not yet
+    // re-polled and when the write-time fetch failed (proxy URL-fallback applies).
+    // Read ONLY by the proxy — never loaded on the feed/DTO read path.
+    thumbnailBytes: bytea("thumbnail_bytes"),
+    thumbnailContentType: text("thumbnail_content_type"),
     // Drives tier classification. NULL on rows freshly inserted by ingest before
     // the account backfill resolves the post's create_time.
     publishedAt: timestamp("published_at", { withTimezone: true }),

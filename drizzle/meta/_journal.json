@@ -484,6 +484,13 @@
       "when": 1781363235555,
       "tag": "0068_perpetual_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1781437055971,
+      "tag": "0069_secret_firestar",
+      "breakpoints": true
     }
   ]
 }
