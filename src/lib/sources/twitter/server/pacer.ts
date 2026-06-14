@@ -15,11 +15,11 @@ import { sql } from "drizzle-orm";
 import { db, type DbOrTx } from "$lib/server/db/client.js";
 import { env } from "$lib/server/config/env.js";
 
-/** The per-account QPS floor twitterapi.io enforces for a NEVER-PAID account: 0.2 QPS
- *  = 1 request every 5000ms. THE single home for the QPS knob — http.ts re-exports it
- *  so the seam + walker lane read ONE constant. After the operator's first top-up the
- *  ceiling rises to 3 QPS (~334ms); a 3-QPS operator can lower this. */
-export const TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS = 5000;
+/** The twitterapi.io QPS pacer floor — min ms between any two calls. THE single home
+ *  for the QPS knob (http.ts re-exports it so the seam + walker lane read ONE value).
+ *  Env-tunable: default 5000 = 0.2 QPS (never-paid floor, safe for free-tier self-host);
+ *  a paid operator on 3 QPS lowers TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS to ~400. */
+export const TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS = env.TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS;
 
 /** Pacer slot interval. Tests disable the slot (0ms) so the atomic UPDATE always
  *  acquires — suites never wait seconds between mocked twitterapi.io calls. */
