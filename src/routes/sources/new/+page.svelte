@@ -135,12 +135,13 @@
     }
   }
 
-  // Reddit chip carries both 🧑 and 🏛 so the user understands that the
-  // single chip handles both subreddits and user profiles — the backend
-  // resolves which by URL shape on submit. aria-hidden because the text
-  // label already carries the meaning.
+  // Reddit chip carries a "u/·r/" mono prefix so the user understands the
+  // single chip handles both user profiles AND subreddits — the backend
+  // resolves which by URL shape on submit. Text (not emoji) matches the
+  // app's reddit handle vocabulary (u/handle, r/sub) and never tofus on a
+  // host without an emoji font. aria-hidden — the chip label carries meaning.
   function chipPrefixFor(value: AddSourceUiKind): string {
-    if (value === "reddit") return "🧑🏛";
+    if (value === "reddit") return "u/·r/";
     return "";
   }
 
@@ -532,9 +533,12 @@
     border-color: var(--accent-strong);
   }
   .chip-prefix {
-    font-size: 1em;
+    font-family: var(--f-mono);
+    font-size: 0.85em;
     line-height: 1;
-    margin-right: 4px;
+    margin-right: 5px;
+    color: var(--text-3);
+    letter-spacing: -0.02em;
   }
   .chip-label {
     line-height: 1;

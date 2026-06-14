@@ -202,7 +202,7 @@
   }
 
   function chipPrefixFor(value: SourceKind): string {
-    if (value === "reddit") return "🧑🏛";
+    if (value === "reddit") return "u/·r/";
     return "";
   }
 
@@ -653,9 +653,12 @@
     border-color: var(--accent-strong);
   }
   .chip-prefix {
-    font-size: 1em;
+    font-family: var(--f-mono);
+    font-size: 0.85em;
     line-height: 1;
-    margin-right: 4px;
+    margin-right: 5px;
+    color: var(--text-3);
+    letter-spacing: -0.02em;
   }
   .chip-label {
     line-height: 1;
