@@ -25,9 +25,10 @@
 // lock while waiting on a multi-hundred-KB provider payload). This service
 // expects the metrics + status as already-resolved inputs.
 
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { tiktokAccounts, tiktokPosts, tiktokPostSnapshots } from "$lib/server/db/schema/index.js";
+import { fetchCoverBytes, coverCacheKey } from "./thumbnail-proxy.js";
 
 export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
 
@@ -65,6 +66,33 @@ export interface WriteSnapshotArgs {
 }
 
 export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
+  // Cache the cover bytes while the signed URL is fresh (poll time) so the proxy
+  // serves them expiry-proof — the daily-poll/hours-short signature mismatch was
+  // the prod 502 cause. A post's cover is immutable, so fetch only when the cover
+  // actually CHANGED — compare the URL PATH (coverCacheKey strips the rotating
+  // x-signature/x-expires query; comparing the full URL would re-fetch every poll
+  // since the signature rotates) — OR the cache is empty. Best-effort + OUTSIDE the
+  // tx: never hold a row lock on a CDN fetch, never block/throw the snapshot write
+  // on a fetch miss (bytes stay null, the proxy URL-fallback still applies).
+  let cover: { bytes: Buffer; contentType: string } | null = null;
+  const incomingUrl = args.thumbnailUrl ?? null;
+  if (incomingUrl !== null) {
+    // Presence-only — never SELECT the bytea itself (the blob stays off this path
+    // too; we only need "is the cache empty?").
+    const [prior] = await db
+      .select({
+        url: tiktokPosts.thumbnailUrl,
+        hasBytes: sql<boolean>`${tiktokPosts.thumbnailBytes} IS NOT NULL`,
+      })
+      .from(tiktokPosts)
+      .where(eq(tiktokPosts.awemeId, args.awemeId))
+      .limit(1);
+    const urlChanged =
+      prior === undefined || coverCacheKey(prior.url) !== coverCacheKey(incomingUrl);
+    const cacheEmpty = prior !== undefined && !prior.hasBytes;
+    if (urlChanged || cacheEmpty) cover = await fetchCoverBytes(incomingUrl);
+  }
+
   await db.transaction(async (tx) => {
     // 1. UPSERT tiktok_posts — public-data, single source of truth for the post
     //    snippet + polling state across all tenants who reference it.
@@ -80,6 +108,8 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         caption: args.caption ?? null,
         permalink: args.permalink ?? null,
         thumbnailUrl: args.thumbnailUrl ?? null,
+        thumbnailBytes: cover?.bytes ?? null,
+        thumbnailContentType: cover?.contentType ?? null,
         publishedAt: args.publishedAt ?? null,
         fetchedAt: now,
         lastPolledAt: now,
@@ -100,6 +130,11 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
           caption: args.caption ?? null,
           permalink: sql`COALESCE(${args.permalink ?? null}, ${tiktokPosts.permalink})`,
           thumbnailUrl: sql`COALESCE(${args.thumbnailUrl ?? null}, ${tiktokPosts.thumbnailUrl})`,
+          // Refresh the cached cover when we fetched fresh bytes; COALESCE-preserve
+          // the prior cache on a fetch miss / non-ok poll (never blank a working
+          // cover — the proxy keeps serving the last good bytes).
+          thumbnailBytes: sql`COALESCE(${cover?.bytes ?? null}, ${tiktokPosts.thumbnailBytes})`,
+          thumbnailContentType: sql`COALESCE(${cover?.contentType ?? null}, ${tiktokPosts.thumbnailContentType})`,
           publishedAt: sql`COALESCE(${args.publishedAt ?? null}, ${tiktokPosts.publishedAt})`,
           lastPolledAt: now,
           lastPollStatus: args.status,
