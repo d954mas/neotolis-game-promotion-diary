@@ -27,6 +27,11 @@ interface ScriptedProvider {
 }
 const provider: ScriptedProvider = { pages: { posts: [], reels: [] } };
 
+// Shared (hoisted) counter so the cap-at-create test can assert resolveAccount is NEVER
+// called when the user is already at the daily cap (the guard short-circuits before the
+// paid canonicalizeOnCreate resolve).
+const spies = vi.hoisted(() => ({ resolveAccountCalls: 0 }));
+
 function emptyPage(): ProviderPage {
   return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1 };
 }
@@ -51,6 +56,7 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
           return next ?? emptyPage();
         },
         async resolveAccount() {
+          spies.resolveAccountCalls += 1;
           return { accountId: "acct-cap", displayName: "Cap" };
         },
       };
@@ -67,6 +73,7 @@ const { enforceAdapterUserQuota, getUserQuotaUsedToday } =
 const { instagramAdapter } = await import("../../src/lib/sources/instagram/server/index.js");
 const { handleBackfillAccount } =
   await import("../../src/lib/sources/instagram/server/handlers/backfill-account.js");
+const { createSource } = await import("../../src/lib/server/services/data-sources.js");
 const { env } = await import("../../src/lib/server/config/env.js");
 
 interface ThrownAppError {
@@ -129,6 +136,7 @@ async function seedSource(userId: string, autoImport = true): Promise<string> {
 
 beforeEach(() => {
   provider.pages = { posts: [], reels: [] };
+  spies.resolveAccountCalls = 0;
 });
 
 describe("social per-user request cap (QUOTA-03)", () => {
@@ -277,5 +285,67 @@ describe("social per-user request cap (QUOTA-03)", () => {
         (r.metadata as { flow?: string }).flow !== undefined,
     );
     expect(refreshRows).toHaveLength(1);
+  });
+});
+
+// ── P1-B: the create-time canonicalizeOnCreate (a PAID provider resolveAccount) must be
+//    gated by the SAME per-user daily request cap as the widen + refresh-content paths.
+//    Pre-fix data-sources.ts only gated adapters with sourceActionsPerWindow (Reddit), so
+//    a social-adapter user already AT their daily cap could burn a create-time resolve.
+describe("social per-user request cap at SOURCE CREATE (P1-B)", () => {
+  interface ThrownCreate {
+    code: string;
+    status: number;
+    metadata: Record<string, unknown>;
+  }
+
+  it("a user already at the daily cap is rejected 429 at create — the paid resolve never runs", async () => {
+    const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
+    const user = await seedUserDirectly({
+      email: `create-cap-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // Park the user AT cap under the IG source-kind keyspace.
+    await seedSocialRequests(user.id, cap);
+    expect((await getUserQuotaUsedToday(user.id, PLATFORM)).requests).toBe(cap);
+
+    try {
+      await createSource(
+        user.id,
+        { kind: "instagram_account", handleUrl: "https://www.instagram.com/atcap/" },
+        "0.0.0.0",
+      );
+      throw new Error("expected createSource to throw at cap");
+    } catch (e) {
+      const err = e as ThrownCreate;
+      expect(err.code).toBe("requests_quota_exhausted");
+      expect(err.status).toBe(429);
+      expect(err.metadata.cap).toBe(cap);
+      expect(err.metadata.used).toBe(cap);
+    }
+
+    // The guard runs BEFORE canonicalizeOnCreate → the paid resolveAccount never fired.
+    expect(spies.resolveAccountCalls).toBe(0);
+    // No phantom source row.
+    const rows = await db.select().from(dataSources).where(eq(dataSources.userId, user.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("a user UNDER the daily cap creates the source normally (resolve runs once)", async () => {
+    const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
+    const user = await seedUserDirectly({
+      email: `create-under-${Math.random().toString(36).slice(2)}@t.io`,
+    });
+    // One below cap → the create is still allowed.
+    await seedSocialRequests(user.id, cap - 1);
+
+    const created = await createSource(
+      user.id,
+      { kind: "instagram_account", handleUrl: "https://www.instagram.com/undercap/" },
+      "0.0.0.0",
+    );
+    expect(created.kind).toBe("instagram_account");
+    expect(created.channelId).toBe(ACCOUNT);
+    // The create-time resolve ran exactly once (canonicalizeOnCreate was reached).
+    expect(spies.resolveAccountCalls).toBe(1);
   });
 });

@@ -35,7 +35,12 @@ import type { SourceAdapter, SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard, enforceAdapterUserQuota } from "./quota.js";
+import {
+  withQuotaGuard,
+  enforceAdapterUserQuota,
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+} from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
@@ -563,6 +568,28 @@ export async function createSource(
     await enforceAdapterUserQuota(db, adapter, userId, ipAddress, "source-action", {
       platform: input.kind,
     });
+  }
+
+  // Per-user daily request cap for the social adapters (twitter/tiktok/instagram —
+  // userQuotaCap.requestsPerDay). A create-time canonicalizeOnCreate issues a PAID
+  // provider resolveAccount; without this gate a user already at their daily social cap
+  // could burn one more resolve through the create path. Mirrors the widen guard
+  // (resetWalkerStateOnWidening) one-for-one. The QUOTA_PLATFORM keyspace is the SOURCE
+  // KIND (input.kind = "twitter_account"/"tiktok_account"/"instagram_account"), the same
+  // key getUserQuotaUsedToday is written against by every social cap-counter audit row.
+  const requestsPerDay = adapter.observability.userQuotaCap?.requestsPerDay;
+  if (willAutoImport && requestsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(userId, input.kind);
+    if (used.requests >= requestsPerDay) {
+      const resetAt = nextPacificMidnight();
+      const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        { cap: requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+      );
+    }
   }
 
   // Adapter-owned I/O-backed canonicalization BEFORE insert. YouTube may
