@@ -32,7 +32,7 @@ export interface EventKindDisplay {
   /** Surfaces the PollingBadge (freshness / operator-paused / refresh-now).
    *  true for the polled kinds (youtube_video / reddit_post / instagram_post /
    *  telegram_post); false for free-form (post/conference/talk/press/other)
-   *  and the not-yet-functional kinds (twitter/discord). */
+   *  and the not-yet-functional discord_drop. */
   pollable: boolean;
   /** Mounts the per-event metric-history chart (and game-chart markers).
    *  Matches the kinds whose adapter implements fetchEventMetricSeries. */
@@ -41,10 +41,10 @@ export interface EventKindDisplay {
    *  (AddEventForm). true for the kinds a user can manually log today —
    *  the polled kinds with a paste flow (youtube_video / reddit_post /
    *  instagram_post / telegram_post) PLUS the free-form kinds (press / post /
-   *  conference / talk / other). false for the not-yet-functional kinds
-   *  (twitter_post / discord_drop), which have no adapter, no paste flow,
-   *  and are filtered out of the /feed KIND axis — letting a user create
-   *  events they can't then filter to would be a footgun.
+   *  conference / talk / other). false for the not-yet-functional discord_drop,
+   *  which has no adapter, no paste flow, and is filtered out of the /feed KIND
+   *  axis — letting a user create events they can't then filter to would be a
+   *  footgun.
    *
    *  This flag (via the `satisfies Record<EventKind, …>` below) is the
    *  COMPILE-TIME guard that a future new kind can't be silently omitted
@@ -56,9 +56,8 @@ export interface EventKindDisplay {
    *  kinds a user can see in their feed and meaningfully filter — the pollable
    *  paste-flow kinds (youtube_video / reddit_post / instagram_post /
    *  telegram_post) PLUS the free-form kinds (press / post / conference / talk
-   *  / other); false for twitter_post / discord_drop, which have no adapter —
-   *  filtering to a kind you can't create is a footgun (same rationale as
-   *  manualCreatable).
+   *  / other); false for discord_drop, which has no adapter — filtering to a
+   *  kind you can't create is a footgun (same rationale as manualCreatable).
    *
    *  Phase 10 D-08: this flag REPLACES the hand-maintained allowlist that used
    *  to live in FiltersSheet.svelte (FUNCTIONAL_KIND_OPTIONS). That hand-list
@@ -69,6 +68,28 @@ export interface EventKindDisplay {
    *  edit, and the `satisfies Record<EventKind, …>` below forces the explicit
    *  yes/no decision for every future kind. */
   feedFilterable: boolean;
+  /** How the manual-create boundary (createEventSchema / updateEventSchema in
+   *  events.ts) validates the `url` field against THIS kind. The SINGLE source
+   *  of truth for kind↔URL consistency — the route reads this instead of
+   *  carrying its own hardcoded {kind→expected} map (which silently omitted the
+   *  social kinds, accepting a twitter_post with a YouTube URL).
+   *
+   *   - "required":         url MUST be present AND parse as this exact kind.
+   *                         The kind's identity IS the URL (youtube_video /
+   *                         reddit_post — no link, no event).
+   *   - "match-if-present": url is OPTIONAL (a manual social log may have no
+   *                         link), but IF present it MUST parse as this kind —
+   *                         a wrong-platform URL is rejected.
+   *   - "freeform":         no kind↔URL check — a link to anything is fine
+   *                         (post / conference / talk / press / other).
+   *
+   *  parseIngestUrl returns the matching kind name for every URL-parseable kind
+   *  (youtube_video / reddit_post / instagram_post / tiktok_post /
+   *  telegram_post / twitter_post), so the expected parsed kind IS the event
+   *  kind — the validator compares `parseIngestUrl(url).kind === kind`. The
+   *  `satisfies Record<EventKind, …>` below compile-forces a mode on every
+   *  future kind, so a new pollable kind can't slip past the boundary unchecked. */
+  urlValidation: "required" | "match-if-present" | "freeform";
 }
 
 export interface SourceKindDisplay {
@@ -81,9 +102,8 @@ export interface SourceKindDisplay {
    *  in the Add-Source auto-import toggle, the source-settings card, and the
    *  BackfillPicker blurb. The string states what THIS kind's crons actually do
    *  (scheduleCronTicks in `<kind>/server/index.ts`) — NOT a global "every 6
-   *  hours" (the stale copy this field replaced). The two free-form not-built
-   *  kinds (twitter / discord) carry a neutral string since they have no
-   *  auto-import cron yet; `satisfies Record<SourceKind, …>` still forces an
+   *  hours" (the stale copy this field replaced). The free-form not-built
+   *  discord kind carries a neutral string since it has no auto-import cron yet; `satisfies Record<SourceKind, …>` still forces an
    *  explicit entry for every future kind, so a new adapter can't ship with a
    *  wrong-but-inherited cadence label. */
   cadence: () => string;
@@ -98,6 +118,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "required",
   },
   reddit_post: {
     label: () => m.event_kind_label_reddit_post(),
@@ -105,6 +126,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "required",
   },
   instagram_post: {
     label: () => m.event_kind_label_instagram_post(),
@@ -112,6 +134,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   tiktok_post: {
     label: () => m.event_kind_label_tiktok_post(),
@@ -119,13 +142,15 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   twitter_post: {
     label: () => m.event_kind_label_twitter_post(),
-    pollable: false,
-    chartable: false,
-    manualCreatable: false,
-    feedFilterable: false,
+    pollable: true,
+    chartable: true,
+    manualCreatable: true,
+    feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   telegram_post: {
     label: () => m.event_kind_label_telegram_post(),
@@ -133,6 +158,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: true,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "match-if-present",
   },
   discord_drop: {
     label: () => m.event_kind_label_discord_drop(),
@@ -140,6 +166,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: false,
     feedFilterable: false,
+    urlValidation: "freeform",
   },
   conference: {
     label: () => m.event_kind_label_conference(),
@@ -147,6 +174,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   talk: {
     label: () => m.event_kind_label_talk(),
@@ -154,6 +182,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   press: {
     label: () => m.event_kind_label_press(),
@@ -161,6 +190,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   post: {
     label: () => m.event_kind_label_post(),
@@ -168,6 +198,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
   other: {
     label: () => m.event_kind_label_other(),
@@ -175,6 +206,7 @@ export const EVENT_KIND_DISPLAY = {
     chartable: false,
     manualCreatable: true,
     feedFilterable: true,
+    urlValidation: "freeform",
   },
 } satisfies Record<EventKind, EventKindDisplay>;
 
@@ -192,7 +224,10 @@ export const EVENT_KIND_DISPLAY = {
 //   - telegram_channel: active listing "0 */6 * * *" (every 6h) + warm lane
 //                        "0 * * * *" (hourly, 12h staleness gate → view counts
 //                        refresh ~twice/day).
-//   - twitter / discord: no adapter, no auto-import cron yet → neutral string.
+//   - twitter_account : active poll "0 6 * * *" (daily) + warm per-post lane
+//                        "0 * * * *" (hourly, >26h staleness gate → ~1 paid
+//                        stats refresh/day per recent tweet) — mirrors IG/TikTok.
+//   - discord         : no adapter, no auto-import cron yet → neutral string.
 export const SOURCE_KIND_DISPLAY = {
   youtube_channel: {
     label: () => m.source_kind_label_youtube_channel(),
@@ -221,8 +256,8 @@ export const SOURCE_KIND_DISPLAY = {
   },
   twitter_account: {
     label: () => m.source_kind_label_twitter_account(),
-    platformGroup: { key: "twitter", label: "Twitter", order: 3 },
-    cadence: () => m.source_cadence_default(),
+    platformGroup: { key: "twitter", label: "Twitter / X", order: 7 },
+    cadence: () => m.source_cadence_twitter(),
   },
   telegram_channel: {
     label: () => m.source_kind_label_telegram_channel(),
@@ -282,6 +317,7 @@ export const FEED_KIND_FILTER_KINDS = [
   "instagram_post",
   "telegram_post",
   "tiktok_post",
+  "twitter_post",
   "press",
   "post",
   "conference",
@@ -302,15 +338,17 @@ export const FEED_KIND_FILTER_KINDS = [
  *  instagram_post sits right after reddit_post (Phase 08 — Instagram joins the
  *  paste-flow kinds); telegram_post sits right after instagram_post (Phase 09 —
  *  Telegram joins the paste-flow kinds); tiktok_post sits right after
- *  telegram_post (Phase 10 — TikTok joins the paste-flow kinds). twitter_post /
- *  discord_drop remain excluded (manualCreatable:false) — no adapter, no paste
- *  flow, filtered from /feed. */
+ *  telegram_post (Phase 10 — TikTok joins the paste-flow kinds); twitter_post
+ *  sits right after tiktok_post (Phase 11 — Twitter/X joins the paste-flow
+ *  kinds, paid twitterapi.io). discord_drop remains excluded
+ *  (manualCreatable:false) — no adapter, no paste flow, filtered from /feed. */
 export const MANUAL_EVENT_KINDS = [
   "youtube_video",
   "reddit_post",
   "instagram_post",
   "telegram_post",
   "tiktok_post",
+  "twitter_post",
   "press",
   "post",
   "conference",

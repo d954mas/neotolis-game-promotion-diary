@@ -36,7 +36,11 @@
         url: payload.url,
         notes: payload.notes,
         authorIsMe: payload.authorIsMe,
+        metadata: payload.metadata,
         externalId: payload.externalId,
+        // Author @handle snapshot from the preview — fallback display label for
+        // a source-less manual social paste (mirrors the /feed AddEvent path).
+        authorHandle: payload.authorHandle,
       }),
     });
     if (res.ok) {

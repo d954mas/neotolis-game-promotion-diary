@@ -350,6 +350,41 @@ const RawSchema = z.object({
   TIKTOK_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
   TIKTOK_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
   TIKTOK_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
+
+  // Twitter/X provider selection (Phase 11). Mirrors TIKTOK_PROVIDER exactly,
+  // EXCEPT the vendor: empty default => Twitter/X is NOT configured (the
+  // add-source Twitter chip renders disabled, SOC-05 graceful degrade, no scraper
+  // credits spent). Boot succeeds with this unset (self-host parity — "not
+  // configured" is the empty-env state, not an APP_MODE branch). Twitter/X uses a
+  // NEW, SECOND vendor twitterapi.io (D-01) — NOT ScrapeCreators — so it has its
+  // own TWITTERAPIIO_API_KEY (below) and its own per-provider prepaid balance row
+  // (D-02; the social_provider_balance per-provider re-key from Plan 10-01 gives
+  // it one automatically). It REUSES the same SOCIAL_PROVIDER_* / SOCIAL_BACKFILL_*
+  // budget/cap envelope — NO new budget vars. The operator flips this to
+  // `twitterapi.io` after deploy to enable.
+  TWITTER_PROVIDER: z.enum(["twitterapi.io"]).or(z.literal("")).default(""),
+
+  // twitterapi.io's own prepaid-credit API key (Phase 11, D-01). A SEPARATE
+  // secret from SCRAPECREATORS_API_KEY — twitterapi.io is a different vendor with
+  // a different prepaid balance. Same shape as SCRAPECREATORS_API_KEY: a plain
+  // string, empty default => provider not configured (graceful degrade). The key
+  // rides ONLY in the X-API-Key header (Plan 02's http.ts), never logged as a
+  // field. Pino redacts it (dedicated REDACT_PATHS entry — the env singleton field
+  // name does not match the transitive *.apiKey path, same trap as the
+  // ScrapeCreators / YouTube keys) and scrubKekFromEnv strips it from process.env
+  // after parse (see SECRET_KEYS below).
+  TWITTERAPIIO_API_KEY: z.string().default(""),
+
+  // Twitter/X warm per-post auto-refresh (Phase 11). Same shape + defaults as the
+  // Instagram / TikTok warm lane (7d window / 26h staleness / 5 failures): a tweet
+  // is "warm" (gets a PAID single-tweet refresh) while it is YOUNGER than this
+  // many days AND has gone stale (not refreshed within TWITTER_WARM_STALENESS_
+  // HOURS). twitterapi.io is a PAID scraper like IG/TikTok, so the 26h staleness
+  // must stay just over the 24h free account-poll interval to avoid double-paying
+  // page-1 tweets (same reasoning as the IG/TikTok warm gate).
+  TWITTER_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(7),
+  TWITTER_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
+  TWITTER_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -418,6 +453,7 @@ export function scrubKekFromEnv(): void {
     "OAUTH_CLIENT_SECRET",
     "SERVICE_YOUTUBE_API_KEYS",
     "SCRAPECREATORS_API_KEY", // operator's prepaid scraper key (D-03)
+    "TWITTERAPIIO_API_KEY", // operator's prepaid twitterapi.io key (Phase 11, D-01)
     "DATABASE_URL", // contains the postgres password
   ];
   for (const k of SECRET_KEYS) delete process.env[k];
@@ -486,6 +522,11 @@ export const env = {
   TIKTOK_WARM_WINDOW_DAYS: raw.TIKTOK_WARM_WINDOW_DAYS,
   TIKTOK_WARM_STALENESS_HOURS: raw.TIKTOK_WARM_STALENESS_HOURS,
   TIKTOK_WARM_MAX_FAILURES: raw.TIKTOK_WARM_MAX_FAILURES,
+  TWITTER_PROVIDER: raw.TWITTER_PROVIDER,
+  TWITTERAPIIO_API_KEY: raw.TWITTERAPIIO_API_KEY,
+  TWITTER_WARM_WINDOW_DAYS: raw.TWITTER_WARM_WINDOW_DAYS,
+  TWITTER_WARM_STALENESS_HOURS: raw.TWITTER_WARM_STALENESS_HOURS,
+  TWITTER_WARM_MAX_FAILURES: raw.TWITTER_WARM_MAX_FAILURES,
 } as const;
 
 export type Env = typeof env;

@@ -19,6 +19,7 @@ import { env } from "../../src/lib/server/config/env.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
+import { toEventDto, loadGameIdsForEvent } from "../../src/lib/server/dto.js";
 
 /**
  * Unified events service tests.
@@ -646,6 +647,50 @@ describe("event soft-delete recovery routes", () => {
     expect(body.title).toBe("A TikTok post event");
     // DTO discipline: userId MUST NOT cross the wire.
     expect(body).not.toHaveProperty("userId");
+  });
+
+  it("authenticated POST /api/events normalizes authorHandle at the route boundary (trim + strip leading @)", async () => {
+    // The card renders `@${authorHandle}`, so a raw " @foo " would render as
+    // `@@foo` / `@   foo`. The route schema trims + strips leading @(s) once at
+    // the boundary; a whitespace-/@-only input collapses to null.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev-authorhandle-norm@test.local" });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        title: "A pasted tweet event",
+        authorHandle: " @foo ",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.authorHandle).toBe("foo");
+
+    // An @-only input collapses to null (nothing to store).
+    const empty = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        title: "A pasted tweet with a junk handle",
+        authorHandle: "  @ ",
+      }),
+    });
+    expect(empty.status).toBe(201);
+    const emptyBody = (await empty.json()) as Record<string, unknown>;
+    expect(emptyBody.authorHandle).toBeNull();
   });
 
   it("authenticated GET /api/events/deleted returns {rows: EventDto[]} scoped to RETENTION_DAYS", async () => {
@@ -1280,6 +1325,151 @@ describe("createEventSchema + preview-url", () => {
         kind: "post",
         url: null,
         title: "Bluesky launch",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /api/events kind=post + arbitrary url → 201 (freeform kind: no kind↔URL check)", async () => {
+    // A free-form kind may link to anything — urlValidation:"freeform".
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t4b-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "post",
+        url: "https://bsky.app/profile/me/post/abc",
+        title: "Bluesky launch",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /api/events kind=reddit_post + url=null → 422 field='url' (required)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t6-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit_post",
+        url: null,
+        title: "x",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      details: Array<{ path: string[] }>;
+    };
+    expect(body.error).toBe("validation_failed");
+    expect(body.details.map((d) => d.path?.[0])).toContain("url");
+  });
+
+  it("POST /api/events kind=twitter_post + url=null → 201 (match-if-present: url optional for social log)", async () => {
+    // A manual social-log entry may have no link. urlValidation:"match-if-present"
+    // accepts a URL-less twitter/tiktok/instagram/telegram event.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t7-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        url: null,
+        title: "Reply thread on the trailer",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /api/events kind=tiktok_post + url=null → 201 (match-if-present: url optional)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t8-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "tiktok_post",
+        url: null,
+        title: "Behind the scenes clip",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("POST /api/events kind=twitter_post + YouTube url → 422 (wrong-platform URL rejected — the gap being closed)", async () => {
+    // Previously SILENTLY ACCEPTED: twitter_post was absent from the hardcoded
+    // URL_REQUIRED_KINDS map, so a wrong-domain URL slipped through with no
+    // kind↔URL check. Now match-if-present rejects it (parseIngestUrl(url).kind
+    // !== "twitter_post").
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t9-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        url: "https://www.youtube.com/watch?v=ABCDEFGHIJK",
+        title: "x",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      details: Array<{ path: string[] }>;
+    };
+    expect(body.error).toBe("validation_failed");
+    expect(body.details.map((d) => d.path?.[0])).toContain("url");
+  });
+
+  it("POST /api/events kind=twitter_post + valid x.com tweet url → 201 (normal paste flow passes)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t10-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "twitter_post",
+        url: "https://x.com/neotolis/status/1234567890123456789",
+        title: "Trailer drop",
         occurredAt: "2026-04-28T12:00:00.000Z",
       }),
     });
@@ -2543,5 +2733,63 @@ describe("PATCH /api/events/:id youtube invariant (merged-state validator)", () 
     expect(bodyText).not.toContain("forbidden");
     expect(bodyText).not.toContain("permission");
     expect(bodyText).not.toContain("kind_url_inconsistent");
+  });
+});
+
+/**
+ * author_handle snapshot — fallback display label for source-less manual
+ * social pastes. The paste/enrich flow threads the EnrichmentResult's
+ * authorName into createEvent's authorHandle; a hand-typed manual event with no
+ * preview leaves it null. The column is fallback-only (see events schema header
+ * for the no-denorm justification) and PUBLIC display data (projected on the
+ * DTO, never redacted).
+ */
+describe("createEvent author_handle snapshot", () => {
+  it("persists author_handle from a paste and projects it on the DTO", async () => {
+    const u = await seedUserDirectly({ email: "authorhandle-paste@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "twitter_post",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Pasted tweet from an unregistered account",
+        url: "https://x.com/neonicle_dev/status/123",
+        // The paste flow forwards the EnrichmentResult's authorName here.
+        authorHandle: "neonicle_dev",
+      },
+      "127.0.0.1",
+    );
+    // No linked source — the snapshot is the only author signal.
+    expect(ev.sourceId).toBeNull();
+    expect(ev.authorHandle).toBe("neonicle_dev");
+
+    // The column round-trips from the DB row, not just the in-memory return.
+    const [persisted] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect(persisted!.authorHandle).toBe("neonicle_dev");
+
+    // PUBLIC display data — projected on the DTO (not stripped/redacted).
+    const dto = toEventDto(persisted!, await loadGameIdsForEvent(u.id, ev.id));
+    expect(dto.authorHandle).toBe("neonicle_dev");
+  });
+
+  it("leaves author_handle null for a hand-typed manual event (no paste/preview)", async () => {
+    const u = await seedUserDirectly({ email: "authorhandle-manual@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "post",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Hand-typed manual post",
+      },
+      "127.0.0.1",
+    );
+    expect(ev.authorHandle).toBeNull();
+    const dto = toEventDto(ev, []);
+    expect(dto.authorHandle).toBeNull();
   });
 });

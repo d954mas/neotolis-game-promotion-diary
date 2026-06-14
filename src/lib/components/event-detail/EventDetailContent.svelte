@@ -36,13 +36,17 @@
   import EventDetailGames from "./EventDetailGames.svelte";
   import EventHistoryChart from "$lib/components/charts/EventHistoryChart.svelte";
   import MediaTypePill from "$lib/components/feed/parts/MediaTypePill.svelte";
-  import { deriveMediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
+  import {
+    deriveMediaTypeOverlay,
+    type MediaTypeOverlayEvent,
+  } from "$lib/components/feed/parts/media-type-overlay.js";
   import type { EventKind, EventMetricSeries } from "$lib/sources/adapter.js";
   import { CHARTABLE_EVENT_KINDS } from "$lib/sources/kind-display.js";
   import { m } from "$lib/paraglide/messages.js";
   import {
     deriveThumbnailUrl,
     isMediaShape as deriveIsMediaShape,
+    resolveSourceLabel,
     type CardEventLite,
   } from "$lib/components/feed/parts/derive-card-data.js";
   import type { EventDto, GameDto, DataSourceDto } from "$lib/server/dto.js";
@@ -101,8 +105,8 @@
   // redundant fetch when the route already knows the series is empty).
   //
   // CHARTABLE_EVENT_KINDS = the kinds an adapter implements
-  // fetchEventMetricSeries for (youtube_video, reddit_post, instagram_post) —
-  // derived from the central kind-display config so it can't drift. Mounting
+  // fetchEventMetricSeries for — derived from the central kind-display config (not
+  // hardcoded) so it can't drift. Mounting
   // EventHistoryChart for these kinds — even with 0 snapshots — makes the D-07
   // low-data caption reachable (the empty/sparse case the chart already handles).
   const isChartable = $derived(CHARTABLE_EVENT_KINDS.has(event.kind as EventKind));
@@ -173,8 +177,13 @@
     event.sourceId ? sources.find((s) => s.id === event.sourceId) : undefined,
   );
 
+  // Live source name wins; for a source-less manual paste (sourceId null) fall
+  // back to the author @handle snapshot — same rule as the feed card byline.
   const sourceLabel = $derived(
-    sourceRow?.channelTitle ?? sourceRow?.displayName ?? sourceRow?.handleUrl ?? "",
+    resolveSourceLabel(
+      sourceRow?.channelTitle ?? sourceRow?.displayName ?? sourceRow?.handleUrl ?? "",
+      event,
+    ),
   );
 
   // Compact "Mon, May 12" date format — mirrors prototype dateGroup.
@@ -301,13 +310,10 @@
   // null → no pill. Rendered only over a present thumbnail <img> so it sits on
   // the picture, never on the empty KindIcon placeholder.
   const detailMediaOverlay = $derived.by(() =>
-    deriveMediaTypeOverlay(
-      event as {
-        kind: string;
-        instagramEnrichment?: { mediaType?: string | null } | null;
-        youtubeEnrichment?: { mediaType?: string | null } | null;
-      },
-    ),
+    // Cast to the shared overlay interface (all five *Enrichment seams), not an ad-hoc
+    // subset — twitter/tiktok/telegram overlays resolve at runtime regardless, but the
+    // narrow cast misled readers into thinking only IG/YouTube were handled.
+    deriveMediaTypeOverlay(event as MediaTypeOverlayEvent),
   );
   // YouTube click-to-play facade — flips to embedded iframe on user
   // click. Reset whenever the event changes (modal pagination).
@@ -649,9 +655,9 @@
     <!-- VIZ-01 per-event snapshot-history chart (D-14, adapter-driven).
          One mount here covers BOTH the modal and the /events/[id] route
          (this is the shared dual-render body). Gated on `isChartable`, NOT
-         on series length, so a chartable event (youtube_video / reddit_post /
-         instagram_post) with 0 snapshots still mounts EventHistoryChart and shows the D-07
-         low-data caption. `chartSeries` is the SSR prop (when threaded, e.g.
+         on series length, so a chartable event with 0 snapshots still mounts
+         EventHistoryChart and shows the D-07 low-data caption (chartable kinds are
+         derived from the config, not hardcoded). `chartSeries` is the SSR prop (when threaded, e.g.
          /events/[id]) or the modal-path client fetch (Plan 04-24). -->
     {#if isChartable}
       <EventHistoryChart series={chartSeries} kind={event.kind} />

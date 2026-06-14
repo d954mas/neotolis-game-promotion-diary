@@ -177,6 +177,20 @@ describe("eventMediaCategory — cross-source media classification", () => {
     ).toBe("other");
   });
 
+  it("classifies twitter_post by its enrichment media kind (video / image→other / text→other)", () => {
+    // Twitter vocabulary is 'video' | 'image' | 'text' (NO 'short' — a tweet is
+    // not a short-form vertical clip). 'video' → video; 'image' / 'text' → other.
+    expect(
+      eventMediaCategory(ev({ kind: "twitter_post", twitterEnrichment: { mediaType: "video" } })),
+    ).toBe("video");
+    expect(
+      eventMediaCategory(ev({ kind: "twitter_post", twitterEnrichment: { mediaType: "image" } })),
+    ).toBe("other");
+    expect(
+      eventMediaCategory(ev({ kind: "twitter_post", twitterEnrichment: { mediaType: "text" } })),
+    ).toBe("other");
+  });
+
   it("a per-post event with a MISSING / null cache row → other (no event vanishes)", () => {
     // Mirrors the server's NOT EXISTS arm: a social event whose cache row is
     // absent still classifies, into "other".
@@ -186,6 +200,11 @@ describe("eventMediaCategory — cross-source media classification", () => {
     );
     expect(
       eventMediaCategory(ev({ kind: "instagram_post", instagramEnrichment: { mediaType: null } })),
+    ).toBe("other");
+    // twitter_post with no/NULL cache row → other (mirrors the server NOT EXISTS).
+    expect(eventMediaCategory(ev({ kind: "twitter_post" }))).toBe("other");
+    expect(
+      eventMediaCategory(ev({ kind: "twitter_post", twitterEnrichment: { mediaType: null } })),
     ).toBe("other");
   });
 });

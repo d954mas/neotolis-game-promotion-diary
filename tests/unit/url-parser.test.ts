@@ -5,8 +5,8 @@ import { parseIngestUrl } from "../../src/lib/server/services/url-parser.js";
  * URL parser unit tests.
  *
  * The parser is pure (no I/O, no env, no DB) — these tests confirm the
- * host-routing rules and the x.com → twitter.com canonicalization that
- * downstream services rely on.
+ * host-routing rules and the canonicalization (Twitter unifies on the
+ * x.com host via the adapter parser) that downstream services rely on.
  */
 describe("URL parser canonicalization", () => {
   it("parseIngestUrl handles youtube.com/watch?v=ID", () => {
@@ -38,26 +38,55 @@ describe("URL parser canonicalization", () => {
     }
   });
 
-  it("parseIngestUrl canonicalizes x.com → twitter.com", () => {
+  it("parseIngestUrl canonicalizes twitter status URLs to the x.com permalink", () => {
+    // Twitter now routes through the adapter (twitterParseUrl) — the single
+    // source of truth — which canonicalizes EVERY in-set host to the x.com
+    // permalink. twitter.com / mobile.* are accepted but normalize to x.com.
     const r = parseIngestUrl("https://x.com/AnnaIndie/status/12345");
     expect(r.kind).toBe("twitter_post");
     if (r.kind === "twitter_post") {
-      expect(r.canonicalUrl).toBe("https://twitter.com/AnnaIndie/status/12345");
+      expect(r.canonicalUrl).toBe("https://x.com/AnnaIndie/status/12345");
     }
 
-    // mobile.twitter.com also canonicalizes to twitter.com.
-    const m = parseIngestUrl("https://mobile.twitter.com/AnnaIndie/status/12345");
-    expect(m.kind).toBe("twitter_post");
-    if (m.kind === "twitter_post") {
-      expect(m.canonicalUrl).toBe("https://twitter.com/AnnaIndie/status/12345");
-    }
-
-    // Already-canonical twitter.com is left unchanged.
+    // twitter.com / mobile.twitter.com canonicalize to the x.com permalink.
     const t = parseIngestUrl("https://twitter.com/AnnaIndie/status/12345");
     expect(t.kind).toBe("twitter_post");
     if (t.kind === "twitter_post") {
-      expect(t.canonicalUrl).toContain("twitter.com/AnnaIndie/status/12345");
+      expect(t.canonicalUrl).toBe("https://x.com/AnnaIndie/status/12345");
     }
+
+    const m = parseIngestUrl("https://mobile.twitter.com/AnnaIndie/status/12345");
+    expect(m.kind).toBe("twitter_post");
+    if (m.kind === "twitter_post") {
+      expect(m.canonicalUrl).toBe("https://x.com/AnnaIndie/status/12345");
+    }
+
+    // The adapter accepts a WIDER host set than the old manual fallback did:
+    // www.x.com / mobile.x.com / scheme-less all parse now (previously rejected).
+    for (const input of [
+      "https://www.x.com/AnnaIndie/status/12345",
+      "https://mobile.x.com/AnnaIndie/status/12345",
+      "x.com/AnnaIndie/status/12345",
+    ]) {
+      const w = parseIngestUrl(input);
+      expect(w.kind).toBe("twitter_post");
+      if (w.kind === "twitter_post") {
+        expect(w.canonicalUrl).toBe("https://x.com/AnnaIndie/status/12345");
+      }
+    }
+
+    // D-07: the ?s=/?t= share-tracker tail is STRIPPED — the adapter reads only
+    // the pathname, so the query never reaches the canonical permalink.
+    const tailed = parseIngestUrl("https://x.com/AnnaIndie/status/12345?s=20&t=abc");
+    expect(tailed.kind).toBe("twitter_post");
+    if (tailed.kind === "twitter_post") {
+      expect(tailed.canonicalUrl).toBe("https://x.com/AnnaIndie/status/12345");
+    }
+
+    // A bare PROFILE url is a SOURCE, not a post — the adapter returns null so
+    // it falls through to `unsupported` (more correct than the old fallback,
+    // which would have created a bogus twitter_post for a profile paste).
+    expect(parseIngestUrl("https://x.com/AnnaIndie").kind).toBe("unsupported");
   });
 
   it("parseIngestUrl returns reddit_post for reddit POST URLs (Phase 03.1 plan 09)", () => {

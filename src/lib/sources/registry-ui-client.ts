@@ -23,6 +23,7 @@ import * as redditUiClient from "./reddit/ui/index.js";
 import * as instagramUiClient from "./instagram/ui/index.js";
 import * as telegramUiClient from "./telegram/ui/index.js";
 import * as tiktokUiClient from "./tiktok/ui/index.js";
+import * as twitterUiClient from "./twitter/ui/index.js";
 
 /** Card-component contract — adapters that override /feed rendering must
  *  ship a Svelte component with the same props as the universal FeedCard.
@@ -61,6 +62,7 @@ const uiClientRegistry = new Map<SourceKind, AdapterUiClient>([
   ["instagram_account", instagramUiClient as unknown as AdapterUiClient],
   ["telegram_channel", telegramUiClient as unknown as AdapterUiClient],
   ["tiktok_account", tiktokUiClient as unknown as AdapterUiClient],
+  ["twitter_account", twitterUiClient as unknown as AdapterUiClient],
 ]);
 
 /**

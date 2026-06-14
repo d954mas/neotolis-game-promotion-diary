@@ -16,13 +16,15 @@ import { redditAdapter } from "./reddit/server/index.js";
 import { instagramAdapter } from "./instagram/server/index.js";
 import { telegramAdapter } from "./telegram/server/index.js";
 import { tiktokAdapter } from "./tiktok/server/index.js";
+import { twitterAdapter } from "./twitter/server/index.js";
 
 // Registration ORDER is load-bearing for the first-match-wins parseAnyUrl
 // iterator. YouTube first → wins on youtube.com / youtu.be host claims;
 // Reddit after → wins on reddit.com / redd.it host claims; Instagram after →
 // wins on instagram.com host claims; Telegram after → wins on t.me host
-// claims; TikTok after → wins on tiktok.com / vm.tiktok.com host claims.
-// There's no host overlap between any of the five adapters today, so order
+// claims; TikTok after → wins on tiktok.com / vm.tiktok.com host claims;
+// Twitter after → wins on x.com / twitter.com / mobile.* host claims.
+// There's no host overlap between any of the six adapters today, so order
 // between them is symbolic but stable.
 const registry = new Map<SourceKind, SourceAdapter>([
   ["youtube_channel", youtubeAdapter],
@@ -31,6 +33,7 @@ const registry = new Map<SourceKind, SourceAdapter>([
   ["instagram_account", instagramAdapter],
   ["telegram_channel", telegramAdapter],
   ["tiktok_account", tiktokAdapter],
+  ["twitter_account", twitterAdapter],
 ]);
 
 export function getAdapter(kind: SourceKind): SourceAdapter {

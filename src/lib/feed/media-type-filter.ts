@@ -96,10 +96,17 @@ export const EVENT_KIND_MEDIA_CATEGORY = {
   instagram_post: "per-post",
   tiktok_post: "per-post",
   youtube_video: "per-post",
+  // twitter_post: media type lives on twitter_posts.media_type ('video' |
+  //   'image' | 'text'). A native-video tweet → "video"; an image/text tweet →
+  //   "other" (image+text both classify to "other" via postMediaKindToCategory).
+  //   A MISSING / NULL cache row → "other" (the NOT EXISTS arm in the server
+  //   filter). The vocabulary is 'video' | 'image' | 'text' — NO 'short' (a
+  //   tweet is not a short-form vertical clip), so the short bucket has no
+  //   twitter arm and the three categories still partition cleanly.
+  twitter_post: "per-post",
   // Kind-level defaults.
   reddit_post: "other",
   telegram_post: "other",
-  twitter_post: "other",
   discord_drop: "other",
   conference: "other",
   talk: "other",

@@ -154,9 +154,15 @@ describe("kind-display config — per-platform auto-import cadence labels", () =
     expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("daily");
     expect(sourceCadenceLabel("tiktok_account").toLowerCase()).toContain("once a day");
     expect(sourceCadenceLabel("tiktok_account").toLowerCase()).not.toContain("hourly");
-    // The two paid daily-pollers must NOT inherit the YouTube 6h cadence.
+    // Phase 11 — twitter_account mirrors the IG/TikTok paid daily-poll + warm-lane
+    // cadence (daily new tweets; recent tweets' stats refresh ~once a day).
+    expect(sourceCadenceLabel("twitter_account").toLowerCase()).toContain("daily");
+    expect(sourceCadenceLabel("twitter_account").toLowerCase()).toContain("once a day");
+    expect(sourceCadenceLabel("twitter_account").toLowerCase()).not.toContain("hourly");
+    // The paid daily-pollers must NOT inherit the YouTube 6h cadence.
     expect(sourceCadenceLabel("instagram_account")).not.toContain("6 hours");
     expect(sourceCadenceLabel("tiktok_account")).not.toContain("6 hours");
+    expect(sourceCadenceLabel("twitter_account")).not.toContain("6 hours");
     // reddit_account + reddit_subreddit share one cadence (same enqueue crons).
     expect(sourceCadenceLabel("reddit_subreddit")).toBe(sourceCadenceLabel("reddit_account"));
   });
@@ -183,9 +189,11 @@ describe("kind-display config — per-platform auto-import cadence labels", () =
 
   it("addSourceUiCadenceLabel falls back to the neutral default for an unknown widened string", () => {
     // The BackfillPicker prop is `kind?: string`; an unrecognized value must
-    // not crash the lookup (returns the neutral default instead).
+    // not crash the lookup (returns the neutral default instead). discord_server
+    // still carries the neutral source_cadence_default (no auto-import cron yet),
+    // so its cadence string IS the fallback the unknown-kind path returns.
     expect(addSourceUiCadenceLabel("not_a_real_kind" as AddSourceUiKind)).toBe(
-      SOURCE_KIND_DISPLAY.twitter_account.cadence(),
+      SOURCE_KIND_DISPLAY.discord_server.cadence(),
     );
   });
 });
@@ -202,8 +210,9 @@ describe("kind-display config — derived helper sets stay in lockstep", () => {
     expect(POLLABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
     expect(POLLABLE_EVENT_KINDS.has("post")).toBe(false);
     expect(POLLABLE_EVENT_KINDS.has("conference")).toBe(false);
-    // Still-deferred kinds stay out.
-    expect(POLLABLE_EVENT_KINDS.has("twitter_post")).toBe(false);
+    // Phase 11 — twitter_post is now polled (twitterapi.io feed walker + warm lane).
+    expect(POLLABLE_EVENT_KINDS.has("twitter_post")).toBe(true);
+    // Still-deferred kind stays out.
     expect(POLLABLE_EVENT_KINDS.has("discord_drop")).toBe(false);
   });
 
@@ -213,6 +222,8 @@ describe("kind-display config — derived helper sets stay in lockstep", () => {
     expect(CHARTABLE_EVENT_KINDS.has("instagram_post")).toBe(true);
     // Phase 09 — telegram_post charts its view_count series.
     expect(CHARTABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
+    // Phase 11 — twitter_post charts views/likes/comments + the DERIVED shares series.
+    expect(CHARTABLE_EVENT_KINDS.has("twitter_post")).toBe(true);
     expect(CHARTABLE_EVENT_KINDS.has("other")).toBe(false);
   });
 
@@ -226,12 +237,13 @@ describe("kind-display config — derived helper sets stay in lockstep", () => {
     expect(FEED_FILTERABLE_EVENT_KINDS.has("reddit_post")).toBe(true);
     expect(FEED_FILTERABLE_EVENT_KINDS.has("instagram_post")).toBe(true);
     expect(FEED_FILTERABLE_EVENT_KINDS.has("telegram_post")).toBe(true);
+    // Phase 11 — twitter_post joins the /feed KIND axis (twitterapi.io adapter).
+    expect(FEED_FILTERABLE_EVENT_KINDS.has("twitter_post")).toBe(true);
     // Free-form kinds stay filterable (they were never the regression).
     expect(FEED_FILTERABLE_EVENT_KINDS.has("post")).toBe(true);
     expect(FEED_FILTERABLE_EVENT_KINDS.has("other")).toBe(true);
-    // No-adapter kinds stay OUT — filtering to a kind you can't create is a
-    // footgun (same rationale as manualCreatable:false).
-    expect(FEED_FILTERABLE_EVENT_KINDS.has("twitter_post")).toBe(false);
+    // The remaining no-adapter kind stays OUT — filtering to a kind you can't
+    // create is a footgun (same rationale as manualCreatable:false).
     expect(FEED_FILTERABLE_EVENT_KINDS.has("discord_drop")).toBe(false);
   });
 });
@@ -262,28 +274,31 @@ describe("kind-display config — Add Event manual picker is config-driven + in 
     }
   });
 
-  it("includes instagram_post (Phase 08) + telegram_post (Phase 09) + tiktok_post (Phase 10) and excludes the still-deferred kinds", () => {
+  it("includes instagram_post (Phase 08) + telegram_post (Phase 09) + tiktok_post (Phase 10) + twitter_post (Phase 11) and excludes the still-deferred kind", () => {
     const set = new Set<string>(MANUAL_EVENT_KINDS);
     expect(set.has("instagram_post")).toBe(true);
     // Phase 09 — telegram_post joins the paste-flow kinds (free t.me/s).
     expect(set.has("telegram_post")).toBe(true);
     // Phase 10 — tiktok_post joins the paste-flow kinds (paid ScrapeCreators).
     expect(set.has("tiktok_post")).toBe(true);
-    // The deferred kinds (no adapter, no paste flow, filtered from /feed) must
-    // NOT be manually creatable — letting a user create un-filterable events
-    // is the footgun manualCreatable:false prevents.
-    expect(set.has("twitter_post")).toBe(false);
+    // Phase 11 — twitter_post joins the paste-flow kinds (paid twitterapi.io).
+    expect(set.has("twitter_post")).toBe(true);
+    // The remaining deferred kind (no adapter, no paste flow, filtered from
+    // /feed) must NOT be manually creatable — letting a user create
+    // un-filterable events is the footgun manualCreatable:false prevents.
     expect(set.has("discord_drop")).toBe(false);
   });
 
-  it("preserves the picker order (instagram after reddit, telegram after instagram, tiktok after telegram)", () => {
+  it("preserves the picker order (instagram after reddit, telegram after instagram, tiktok after telegram, twitter after tiktok)", () => {
     const ri = MANUAL_EVENT_KINDS.indexOf("reddit_post");
     const ii = MANUAL_EVENT_KINDS.indexOf("instagram_post");
     const ti = MANUAL_EVENT_KINDS.indexOf("telegram_post");
     const tk = MANUAL_EVENT_KINDS.indexOf("tiktok_post");
+    const tw = MANUAL_EVENT_KINDS.indexOf("twitter_post");
     expect(ri).toBeGreaterThanOrEqual(0);
     expect(ii).toBe(ri + 1);
     expect(ti).toBe(ii + 1);
     expect(tk).toBe(ti + 1);
+    expect(tw).toBe(tk + 1);
   });
 });

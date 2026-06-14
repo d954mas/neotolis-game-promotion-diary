@@ -11,7 +11,7 @@ import type { SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
 import { eventGames } from "../db/schema/event-games.js";
-import { instagramPosts, tiktokPosts, youtubeVideos } from "../db/schema/index.js";
+import { instagramPosts, tiktokPosts, twitterPosts, youtubeVideos } from "../db/schema/index.js";
 import { env } from "../config/env.js";
 import { NotFoundError } from "./errors.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
@@ -148,7 +148,7 @@ function buildMediaTypeClause(categories: readonly MediaTypeCategory[] | undefin
       );
     }
 
-    // (b) Per-post arms (instagram_post + tiktok_post).
+    // (b) Per-post arms (instagram_post + tiktok_post + twitter_post).
     //   - short / video: an EXISTS subquery whose cache-row media_type EQUALS
     //     the category. (short ← 'short', video ← 'video'.)
     //   - other: a NOT EXISTS for a short/video cache row — i.e. the per-post
@@ -162,6 +162,13 @@ function buildMediaTypeClause(categories: readonly MediaTypeCategory[] | undefin
       );
       orParts.push(
         sql`(${events.kind} = 'tiktok_post' AND NOT EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} IN ('short', 'video')))` as SQL,
+      );
+      // twitter_post: media_type vocabulary is 'video' | 'image' | 'text' (NO
+      // 'short'). "other" iff it does NOT have a 'video' cache row — covers
+      // media_type IN {image, text}, NULL media_type, AND a missing cache row,
+      // so no twitter event vanishes from all three categories.
+      orParts.push(
+        sql`(${events.kind} = 'twitter_post' AND NOT EXISTS (SELECT 1 FROM ${twitterPosts} WHERE ${twitterPosts.tweetId} = ${events.externalId} AND ${twitterPosts.mediaType} IN ('video')))` as SQL,
       );
       // youtube_video is NEVER "other" — no arm. It always lands in short or
       // video (the video arm catches NULL/unclassified rows), so the three
@@ -192,6 +199,13 @@ function buildMediaTypeClause(categories: readonly MediaTypeCategory[] | undefin
       // arm such a row would vanish from all three categories.
       orParts.push(
         sql`(${events.kind} = 'tiktok_post' AND EXISTS (SELECT 1 FROM ${tiktokPosts} WHERE ${tiktokPosts.awemeId} = ${events.externalId} AND ${tiktokPosts.mediaType} = 'video'))` as SQL,
+      );
+      // twitter_post: a native-video tweet has media_type='video' (NULL/image/
+      // text → "other" via the NOT EXISTS arm above). Exact-match EXISTS — a
+      // missing/NULL row does NOT default to video (unlike youtube_video), so
+      // the video arm stays exclusive and the categories partition.
+      orParts.push(
+        sql`(${events.kind} = 'twitter_post' AND EXISTS (SELECT 1 FROM ${twitterPosts} WHERE ${twitterPosts.tweetId} = ${events.externalId} AND ${twitterPosts.mediaType} = 'video'))` as SQL,
       );
       orParts.push(
         sql`(${events.kind} = 'youtube_video' AND NOT EXISTS (SELECT 1 FROM ${youtubeVideos} WHERE ${youtubeVideos.videoId} = ${events.externalId} AND ${youtubeVideos.mediaType} = 'short'))` as SQL,

@@ -74,6 +74,16 @@ export const REDACT_PATHS = [
   // uppercase snake + singleton lowerCamel), mirroring the YouTube entries.
   "*.SCRAPECREATORS_API_KEY",
   "*.scrapecreatorsApiKey",
+  // Operator's prepaid twitterapi.io API key (Phase 11). Same env-singleton
+  // lifetime trap as the ScrapeCreators key above: scrubKekFromEnv() wipes
+  // TWITTERAPIIO_API_KEY from process.env after boot (see SECRET_KEYS in env.ts),
+  // but the env singleton retains it for the process lifetime — a stray
+  // logger.info({ env }) would leak it. The transitive *.apiKey / *.api_key paths
+  // do NOT match the singleton field name, so the key gets its own dedicated
+  // paths (env-key uppercase snake + singleton lowerCamel). The key otherwise
+  // rides ONLY in the X-API-Key request header (never logged as a field).
+  "*.TWITTERAPIIO_API_KEY",
+  "*.twitterapiioApiKey",
   // Phase 03.1 — Reddit response/request opsec (DV-RDT-7).
   // Reddit doesn't use OAuth under DV-RDT-7 (public-`.json` adapter only),
   // but the redact list treats these field names as redacted regardless:

@@ -11,31 +11,26 @@
 // Internally:
 //
 //   1. `parseAnyUrl(input)` (src/lib/sources/url.ts) iterates the
-//      adapter registry first-match-wins. YouTube + Reddit are
-//      registered: `youtube.com` / `youtu.be` route through
-//      `youtubeAdapter.parseUrl`, `reddit.com` / `redd.it` through
-//      `redditAdapter.parseUrl` (returning `{kind: "reddit_post",
-//      externalId, metadata: {subreddit}}`). `{kind: "unsupported"}`
-//      when no adapter matches.
+//      adapter registry first-match-wins. YouTube, Reddit, Instagram,
+//      TikTok, and Twitter are registered and route through their own
+//      `adapter.parseUrl` (e.g. `reddit.com` / `redd.it` →
+//      `{kind: "reddit_post", externalId, metadata: {subreddit}}`;
+//      `x.com` / `twitter.com` / `mobile.*` →
+//      `{kind: "twitter_post", externalId, metadata: {permalink}}`).
+//      `{kind: "unsupported"}` when no adapter matches.
 //
-//   2. Twitter (`twitter.com` / `x.com` / `mobile.twitter.com`) and
-//      Telegram (`t.me`) URL handling stays at the orchestrator layer
-//      ("parser of last resort" for kinds without an adapter yet). When
-//      Twitter / Telegram adapters land, those host branches move
-//      INSIDE the adapter and this file shrinks correspondingly.
+//   2. Telegram (`t.me`) URL handling stays at the orchestrator layer
+//      ("parser of last resort") because there is no registry parseUrl
+//      for the Telegram post canonical here. TikTok vm./vt. SHORT links
+//      also stay here (they carry no id in the path). When Telegram
+//      lands a post parseUrl, that branch moves INSIDE the adapter and
+//      this file shrinks correspondingly.
 //
 //   3. `detectFutureKind(input)` (src/lib/sources/future-kinds.ts) maps
 //      remaining deferred-adapter hosts to friendly
 //      `{kind: "<x>_deferred"}` shapes. The future-kinds map is empty
-//      today (Reddit moved to the registry; Twitter/Telegram have host
-//      branches above); the branch stays as a seam for future deferred
-//      adapters that need an inline banner before their adapter ships.
-//
-// x.com is canonicalized to twitter.com because
-// publish.twitter.com/oembed only accepts the twitter.com host. The
-// canonicalization happens here once so every downstream call (oEmbed,
-// DB row, audit metadata) uses the same string. mobile.twitter.com is
-// also canonicalized to twitter.com for the same reason.
+//      today; the branch stays as a seam for future deferred adapters
+//      that need an inline banner before their adapter ships.
 
 import { parseAnyUrl } from "$lib/sources/url.js";
 import { detectFutureKind } from "$lib/sources/future-kinds.js";
@@ -68,7 +63,6 @@ export type ParsedUrl =
   | { kind: "telegram_post"; canonicalUrl: string }
   | { kind: "unsupported" };
 
-const X_HOSTS = new Set(["twitter.com", "x.com", "mobile.twitter.com"]);
 const TG_HOSTS = new Set(["t.me"]);
 // vm./vt. short-link hosts. The pure TikTok parser deliberately rejects these
 // (they carry no aweme id in the path); the orchestrator recognizes them here and
@@ -172,9 +166,18 @@ export function parseIngestUrl(input: string): ParsedUrl {
       canonicalUrl,
     };
   }
+  if (routed.kind === "twitter_post") {
+    // The Twitter adapter's parseUrl ALWAYS sets metadata.permalink for a routed
+    // twitter_post (`https://x.com/<handle>/status/<id>` — query tail stripped by
+    // construction); a bare profile URL returns null (a profile is a SOURCE) and falls
+    // through to `unsupported`. So the permalink is present by the adapter contract —
+    // trust it (AGENTS.md: no handling for impossible cases).
+    const meta = (routed.metadata ?? {}) as { permalink: string };
+    return { kind: "twitter_post", canonicalUrl: meta.permalink };
+  }
 
   // 2) Host-classification fallback for kinds without an adapter yet
-  //    (Twitter / Telegram).
+  //    (Telegram).
   let url: URL;
   try {
     url = new URL(input.trim());
@@ -182,16 +185,6 @@ export function parseIngestUrl(input: string): ParsedUrl {
     return { kind: "unsupported" };
   }
   const host = url.hostname.toLowerCase();
-  if (X_HOSTS.has(host)) {
-    // Canonicalize x.com / mobile.twitter.com → twitter.com so
-    // publish.twitter.com/oembed accepts the URL. The canonical form is
-    // what gets stored in events.url and audit metadata.
-    const canonical =
-      host === "x.com" || host === "mobile.twitter.com"
-        ? `https://twitter.com${url.pathname}${url.search}`
-        : url.toString();
-    return { kind: "twitter_post", canonicalUrl: canonical };
-  }
   if (TG_HOSTS.has(host)) {
     return { kind: "telegram_post", canonicalUrl: url.toString() };
   }

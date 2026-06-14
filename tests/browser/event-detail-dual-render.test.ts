@@ -34,6 +34,7 @@ const baseEvent = {
   title: "Dual render test event",
   url: "https://example.com/watch",
   externalId: "abc123",
+  authorHandle: null,
   notes: "Some notes for this event",
   metadata: null,
   publishedAt: new Date("2026-05-14T08:00:00Z"),

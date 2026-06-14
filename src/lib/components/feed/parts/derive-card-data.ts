@@ -52,6 +52,12 @@ export interface CardEventLite {
   notes: string | null;
   url: string | null;
   sourceId: string | null;
+  /** Author @handle SNAPSHOT for source-less manual social pastes (NULL
+   *  otherwise). FALLBACK-only: the shared card uses it ONLY when the event has
+   *  no linked source (sourceId null) AND no source-resolved label — a live
+   *  data_sources name always wins. NOT a no-denorm violation: a source-less
+   *  paste has no owning row for the author (see events schema header). */
+  authorHandle?: string | null;
   publishedAt?: Date | string | null;
   lastPolledAt: Date | string | null;
   lastPollStatus: string | null;
@@ -133,6 +139,26 @@ export interface CardEventLite {
    *  is the raw TikTok CDN hotlink (D-07, signed + expiring — onerror fallback in
    *  the card); mediaType ("short" | "carousel") drives the media-type overlay. */
   tiktokEnrichment?: {
+    stats: {
+      viewCount: number | null;
+      likeCount: number | null;
+      commentCount: number | null;
+      shareCount: number | null;
+      polledAt: Date | string;
+    } | null;
+    thumbnailUrl: string | null;
+    mediaType: string | null;
+  };
+  /** Twitter/X public-data decoration attached by
+   *  sources/twitter/server/feed-enrichment.ts (mirrors tiktokEnrichment — the
+   *  same FOUR metrics incl shares). Each stat is INDEPENDENTLY nullable —
+   *  metrics-by-presence (D-05): a protected/limited tweet may hide impressions
+   *  (null), NEVER coerced to 0; shareCount is the DERIVED retweet+quote sum.
+   *  thumbnailUrl is the RAW pbs.twimg.com cover HOTLINKED directly (11-SPIKE.md
+   *  Q6 — NO proxy, unlike TikTok/IG; onerror fallback in the card); mediaType
+   *  ("video" | "image" | "text") drives the adaptive media-vs-text card layout
+   *  (null/"text" = text-only tweet) + the media-type overlay. */
+  twitterEnrichment?: {
     stats: {
       viewCount: number | null;
       likeCount: number | null;
@@ -243,6 +269,30 @@ export function telegramChannelLabel(metadata: unknown): string {
   return typeof md.channel === "string" && md.channel.length > 0 ? md.channel : "";
 }
 
+/** Resolve the .src account label rendered in the card meta row.
+ *
+ *  The per-platform wrapper already computed `sourceLabel` from its
+ *  source-of-truth read path (the LIVE data_sources name via the `source`
+ *  prop). When that resolves to a non-empty value it ALWAYS wins — a linked
+ *  source's live name is never overridden.
+ *
+ *  Only when the wrapper produced an EMPTY label AND the event has no linked
+ *  source (sourceId null — a manually-pasted social post from an account that
+ *  isn't a registered source) do we fall back to the author @handle SNAPSHOT
+ *  persisted on the event at paste time. This is NOT a no-denorm violation: a
+ *  source-less paste has no owning row for the author, so the snapshot is a
+ *  free-standing value like the event's own title/url, and it is never read
+ *  when a source IS linked (the live name takes the branch above). The handle
+ *  is stored bare (e.g. "neonicle_dev") and rendered "@neonicle_dev". */
+export function resolveSourceLabel(
+  sourceLabel: string,
+  event: Pick<CardEventLite, "sourceId" | "authorHandle">,
+): string {
+  if (sourceLabel.length > 0) return sourceLabel;
+  if (event.sourceId === null && event.authorHandle) return `@${event.authorHandle}`;
+  return sourceLabel;
+}
+
 /** Image-URL predicate — accepts Reddit's CDN hosts + common image
  *  extensions. The card thumbnail only renders for Reddit posts when
  *  this returns true to avoid embedding non-image URLs as <img>. */
@@ -282,8 +332,16 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     if (link && isImageLikeUrl(link)) return link;
     return readMediaUrlFromMetadata(event.metadata);
   }
-  if (event.kind === "twitter_post" || event.kind === "telegram_post") {
-    return readMediaUrlFromMetadata(event.metadata);
+  if (event.kind === "twitter_post") {
+    // Twitter HOTLINKS the raw pbs.twimg.com cover (no proxy — unlike TikTok's ORB-
+    // blocked CDN). Read the enrichment thumbnail (the source-of-truth the chart marker
+    // + feed card read), NOT event.metadata — else the event-detail modal renders blank.
+    return event.twitterEnrichment?.thumbnailUrl ?? null;
+  }
+  if (event.kind === "telegram_post") {
+    // Same as twitter: the cover lives on the enrichment object (the t.me hotlink),
+    // not event.metadata. Reading metadata blanked the detail-modal thumbnail.
+    return event.telegramEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "instagram_post") {
     // IG's CDN serves thumbnails with Cross-Origin-Resource-Policy: same-origin,

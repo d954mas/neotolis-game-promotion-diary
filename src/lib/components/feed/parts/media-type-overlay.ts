@@ -80,6 +80,7 @@ export interface MediaTypeOverlayEvent {
   instagramEnrichment?: { mediaType?: string | null } | null;
   telegramEnrichment?: { mediaKind?: string | null } | null;
   tiktokEnrichment?: { mediaType?: string | null } | null;
+  twitterEnrichment?: { mediaType?: string | null } | null;
   youtubeEnrichment?: { mediaType?: string | null } | null;
 }
 
@@ -102,6 +103,11 @@ export interface MediaTypeOverlayEvent {
  *     "Carousel"; anything else / missing → null. (Supersedes the original
  *     CONTEXT D-03 {video, carousel} vocabulary — user re-decided 2026-06-12
  *     during UAT that TikTok videos are Shorts.)
+ *   - twitter_post   → the tweet's media_type (D-06): a native-video tweet
+ *     (media_type "video") → "Video" pill; a photo / animated_gif ("image") or a
+ *     text-only tweet ("text") → null (a photo/text needs no marker — the same
+ *     "other" treatment Telegram photos get). A tweet is NOT a short-form vertical
+ *     clip, so NEVER "Short".
  *   - any other kind → null (no pill).
  * Pure; the caller renders <MediaTypePill> only when this is non-null (and a
  * thumbnail image is actually shown).
@@ -131,6 +137,11 @@ export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPil
     if (mediaType === "carousel") return mediaTypeOverlay("carousel");
     if (mediaType === "short") return mediaTypeOverlay("short");
     return null;
+  }
+  if (event.kind === "twitter_post") {
+    // A native-video tweet → "Video"; a photo / animated_gif ("image") or a
+    // text-only tweet ("text") → no pill (a photo/text needs no marker).
+    return event.twitterEnrichment?.mediaType === "video" ? mediaTypeOverlay("video") : null;
   }
   return null;
 }

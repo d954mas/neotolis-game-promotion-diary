@@ -31,7 +31,7 @@
 
 import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
-import { db } from "$lib/server/db/client.js";
+import { db, type Tx } from "$lib/server/db/client.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
@@ -41,6 +41,7 @@ import {
   type AdapterBatchLaneWorkerTickResult,
   type AdapterLaneClaimGateContext,
   type AdapterLaneClaimGateResult,
+  type AdapterLaneDispatchContext,
   type AdapterLaneWorkerRow,
 } from "$lib/server/services/adapter-lane-worker.js";
 import { AdapterError, categoryToSnapshotStatus } from "$lib/sources/errors.js";
@@ -285,13 +286,24 @@ const STALE_PROCESSING_MS = 5 * 60_000;
 const STALE_RECOVERY_INTERVAL_MS = 60_000;
 const THROTTLE_DEFER_MS = 5 * 60_000;
 
-/** The minimal provider seam the lane needs — the single-post by-URL fetch. */
+/** The minimal provider seam the lane needs — the single-post by-URL fetch.
+ *  `pacerAlreadyAcquired` is threaded ONLY by platforms whose claimGate acquires a
+ *  global QPS pacer (Twitter): it tells the HTTP seam the lane already holds the slot
+ *  for this tick, so the seam must NOT double-acquire. IG/TikTok have no pacer and
+ *  leave it undefined — their seams ignore it. */
 interface RefreshProvider {
   fetchPostByUrl(
     platform: string,
     url: string,
-    opts: { origin: "cron" | "user" },
+    opts: { origin: "cron" | "user"; pacerAlreadyAcquired?: boolean },
   ): Promise<NormalizedSinglePost | null>;
+}
+
+/** The claimGate permit shape (mirrors Reddit's `{ pacer: "already-acquired" }`):
+ *  `pacerAlreadyAcquired` is true iff the lane acquired the global pacer slot in the
+ *  claimGate this tick, so the per-row HTTP seam skips its own acquire. */
+interface SocialRefreshPermit {
+  pacerAlreadyAcquired: boolean;
 }
 
 export interface SocialRefreshLaneConfig {
@@ -312,6 +324,15 @@ export interface SocialRefreshLaneConfig {
     platform: string,
     provider: string,
   ): Promise<{ creditsUsed: number; dailyCap: number; prepaidBalance: number }>;
+  /** OPTIONAL global QPS pacer acquire, run AFTER the budget gate passes (Twitter
+   *  only). A denied slot DEFERS the row (stays pending → retried) instead of letting
+   *  it reach the seam, fail rate-limited, write a snapshot, and complete `done` with no
+   *  retry — which is how a manual Refresh-Now silently no-ops under contention. When
+   *  acquired, the permit threads `pacerAlreadyAcquired` so the seam does NOT
+   *  re-acquire. Runs on the claim `tx` so a claim-tx rollback rolls the slot back too
+   *  (mirrors Reddit's acquireRedditPacerSlotWith(ctx.tx)). IG/TikTok omit this (no
+   *  pacer) and keep their budget-only gate. */
+  acquirePacerSlot?(tx: Tx): Promise<{ acquired: boolean; waitMs: number }>;
   /** Resolve the post's permalink from the public-data posts cache, or null on a
    *  cache miss (e.g. a paste before the first account poll → graceful skip). */
   resolvePermalink(postId: string): Promise<string | null>;
@@ -370,31 +391,60 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
   // That's fine — the real per-pool ceiling is the in-fetch origin-scoped reserve
   // (user_post→user pool, service_post→cron pool); this stays a cheap tick throttle.
   async function claimThrottleSlot(
-    _ctx: AdapterLaneClaimGateContext<SocialRefreshQueueName>,
-  ): Promise<AdapterLaneClaimGateResult> {
+    ctx: AdapterLaneClaimGateContext<SocialRefreshQueueName>,
+  ): Promise<AdapterLaneClaimGateResult<SocialRefreshPermit>> {
+    // Budget gate FIRST — a budget-defer must NOT consume a pacer slot (it would pace
+    // out unrelated twitter traffic by a slot interval without making any fetch). Only
+    // once budget passes do we touch the pacer.
     const { creditsUsed, dailyCap, prepaidBalance } = await config.getSocialSpendToday(
       platform,
       config.provider,
     );
-    if (prepaidBalance <= 0) return { action: "run" };
-    if (dailyCap > 0 && creditsUsed >= Math.floor(dailyCap * 0.95)) {
+    if (prepaidBalance > 0 && dailyCap > 0 && creditsUsed >= Math.floor(dailyCap * 0.95)) {
       return {
         action: "defer",
         retryAfterMs: THROTTLE_DEFER_MS,
         reason: `${platform} daily cap at 95%`,
       };
     }
-    return { action: "run" };
+
+    // Global QPS pacer (Twitter): acquire AFTER budget passes, on the claim tx so a
+    // claim-tx rollback rolls the slot back too. A denied slot DEFERS — the row stays
+    // pending and is retried, so a manual Refresh-Now is never consumed against a busy
+    // slot. Acquiring here (not at the seam) mirrors Reddit's claimRedditPacerSlot; the
+    // permit then tells the seam to skip its own acquire so the slot isn't double-spent.
+    // IG/TikTok pass no acquirePacerSlot → pacerAlreadyAcquired stays false.
+    let pacerAlreadyAcquired = false;
+    if (config.acquirePacerSlot !== undefined) {
+      const slot = await config.acquirePacerSlot(ctx.tx);
+      if (!slot.acquired) {
+        return {
+          action: "defer",
+          retryAfterMs: slot.waitMs,
+          reason: `${platform} QPS pacer busy`,
+        };
+      }
+      pacerAlreadyAcquired = true;
+    }
+
+    return { action: "run", permit: { pacerAlreadyAcquired } };
   }
 
   // allSettled + per-row snapshot + NEVER throw → the lane worker marks every
   // claimed row `done` (independent posts; a per-row failure must not re-fetch the
   // successes via a batch-wide throw-to-retry).
-  async function dispatchRefreshBatch(rows: AdapterLaneWorkerRow[]): Promise<void> {
-    await Promise.allSettled(rows.map((row) => processOne(row)));
+  async function dispatchRefreshBatch(
+    rows: AdapterLaneWorkerRow[],
+    ctx: AdapterLaneDispatchContext<SocialRefreshPermit>,
+  ): Promise<void> {
+    const pacerAlreadyAcquired = ctx.permit?.pacerAlreadyAcquired ?? false;
+    await Promise.allSettled(rows.map((row) => processOne(row, pacerAlreadyAcquired)));
   }
 
-  async function processOne(row: AdapterLaneWorkerRow): Promise<void> {
+  async function processOne(
+    row: AdapterLaneWorkerRow,
+    pacerAlreadyAcquired: boolean,
+  ): Promise<void> {
     try {
       const postId =
         row.queueName === "service_post"
@@ -403,13 +453,15 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
       if (postId === null) return; // skip reasons are logged inside the resolvers
       const permalink = await config.resolvePermalink(postId);
       if (permalink === null) {
+        // Accepted wasted slot: the pacer slot was claimed in the claimGate but this
+        // row no-ops on a cache miss. Rare, and a cache-miss row would no-op anyway.
         logger.info({ postId }, `${platform} refresh: post not cached yet — skip`);
         return;
       }
       // user_post → user pool (the clicking user pays); service_post → cron pool
       // (operator-funded warm auto-refresh, like YouTube service_video).
       const origin = row.queueName === "service_post" ? "cron" : "user";
-      await refreshPost(postId, permalink, origin);
+      await refreshPost(postId, permalink, origin, pacerAlreadyAcquired);
     } catch (err) {
       // #70 P1: a failure must NEVER vanish silently into allSettled. A resolution
       // failure (a DB select threw) has no postId yet → it can't write a snapshot,
@@ -440,13 +492,18 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
     postId: string,
     permalink: string,
     origin: "cron" | "user",
+    pacerAlreadyAcquired: boolean,
   ): Promise<void> {
     const provider = config.getSocialProvider(platform);
     if (provider === null) return; // unconfigured — isEnabled gates the lane; defensive.
 
     try {
       // fetchPostByUrl reserves one prepaid credit internally from the `origin` pool.
-      const post = await provider.fetchPostByUrl(platform, permalink, { origin });
+      // pacerAlreadyAcquired tells the seam the claimGate already holds the QPS slot.
+      const post = await provider.fetchPostByUrl(platform, permalink, {
+        origin,
+        pacerAlreadyAcquired,
+      });
       if (post === null) {
         // Deleted / private — the envelope carried no media object.
         await config.writeSnapshot({ postId, permalink, post: null, status: "not_found" });
@@ -475,7 +532,10 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
     }
   }
 
-  const worker: AdapterBatchLaneWorker = createAdapterBatchLaneWorker({
+  const worker: AdapterBatchLaneWorker = createAdapterBatchLaneWorker<
+    SocialRefreshQueueName,
+    SocialRefreshPermit
+  >({
     adapterKind: config.adapterKind,
     slots: REFRESH_SLOTS,
     fallthrough: REFRESH_SLOTS,

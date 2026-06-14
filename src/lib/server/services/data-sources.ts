@@ -35,13 +35,19 @@ import type { SourceAdapter, SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard, enforceAdapterUserQuota } from "./quota.js";
+import {
+  withQuotaGuard,
+  enforceAdapterUserQuota,
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+} from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
 import { ensureChannelState } from "./channel-state.js";
 import { isInstagramConfigured } from "$lib/sources/instagram/server/provider/registry.js";
 import { isTikTokConfigured } from "$lib/sources/tiktok/server/provider/registry.js";
+import { isTwitterConfigured } from "$lib/sources/twitter/server/provider/registry.js";
 
 // Initial-backfill window presets accepted by createSource for
 // kind=youtube_channel + autoImport. The worker handler reads
@@ -83,6 +89,12 @@ export const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
   // provider). The gate lives in SOURCE_KINDS_NEEDING_PROVIDER below; unconfigured
   // → clean 422 kind_not_configured (SOC-05), never a 500.
   "tiktok_account",
+  // twitter_account is functional (Plan 11-04) and, like instagram/tiktok, its
+  // create path is gated on TWITTER_PROVIDER + TWITTERAPIIO_API_KEY (a PAID
+  // provider — the SECOND vendor, twitterapi.io, D-01). The gate lives in
+  // SOURCE_KINDS_NEEDING_PROVIDER below; unconfigured → clean 422
+  // kind_not_configured (SOC-05), never a 500.
+  "twitter_account",
 ]);
 
 // SourceKinds whose create path requires the operator to have wired a (paid)
@@ -95,6 +107,7 @@ export const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
 const SOURCE_KINDS_NEEDING_PROVIDER: ReadonlyMap<SourceKind, () => boolean> = new Map([
   ["instagram_account", isInstagramConfigured],
   ["tiktok_account", isTikTokConfigured],
+  ["twitter_account", isTwitterConfigured],
 ]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata.
@@ -109,7 +122,7 @@ export const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   youtube_channel: "available",
   reddit_account: "available",
   reddit_subreddit: "available",
-  twitter_account: "out of scope - Twitter API is paid",
+  twitter_account: "not configured by operator",
   telegram_channel: "available",
   discord_server: "coming soon",
   instagram_account: "not configured by operator",
@@ -555,6 +568,28 @@ export async function createSource(
     await enforceAdapterUserQuota(db, adapter, userId, ipAddress, "source-action", {
       platform: input.kind,
     });
+  }
+
+  // Per-user daily request cap for the social adapters (twitter/tiktok/instagram —
+  // userQuotaCap.requestsPerDay). A create-time canonicalizeOnCreate issues a PAID
+  // provider resolveAccount; without this gate a user already at their daily social cap
+  // could burn one more resolve through the create path. Mirrors the widen guard
+  // (resetWalkerStateOnWidening) one-for-one. The QUOTA_PLATFORM keyspace is the SOURCE
+  // KIND (input.kind = "twitter_account"/"tiktok_account"/"instagram_account"), the same
+  // key getUserQuotaUsedToday is written against by every social cap-counter audit row.
+  const requestsPerDay = adapter.observability.userQuotaCap?.requestsPerDay;
+  if (willAutoImport && requestsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(userId, input.kind);
+    if (used.requests >= requestsPerDay) {
+      const resetAt = nextPacificMidnight();
+      const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        { cap: requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+      );
+    }
   }
 
   // Adapter-owned I/O-backed canonicalization BEFORE insert. YouTube may

@@ -6,6 +6,7 @@ import { events } from "../../src/lib/server/db/schema/events.js";
 import {
   instagramPosts,
   tiktokPosts,
+  twitterPosts,
   youtubeVideos,
 } from "../../src/lib/server/db/schema/index.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
@@ -32,7 +33,13 @@ import { seedUserDirectly } from "./helpers.js";
 // youtube_videos) have no userId column.
 
 interface SeedOpts {
-  kind: "tiktok_post" | "instagram_post" | "youtube_video" | "telegram_post" | "conference";
+  kind:
+    | "tiktok_post"
+    | "instagram_post"
+    | "twitter_post"
+    | "youtube_video"
+    | "telegram_post"
+    | "conference";
   externalId?: string | null;
   /** When set + kind is a per-post kind (IG/TikTok/YouTube), a cache row is
    *  inserted with this media_type. Omit to simulate a MISSING cache row.
@@ -63,6 +70,12 @@ async function seedEvent(userId: string, opts: SeedOpts): Promise<string> {
     } else if (opts.kind === "tiktok_post") {
       await db.insert(tiktokPosts).values({
         awemeId: externalId,
+        mediaType: opts.cacheMediaType,
+      });
+    } else if (opts.kind === "twitter_post") {
+      // twitter_posts.media_type vocabulary is 'video' | 'image' | 'text'.
+      await db.insert(twitterPosts).values({
+        tweetId: externalId,
         mediaType: opts.cacheMediaType,
       });
     } else if (opts.kind === "youtube_video") {
@@ -147,6 +160,14 @@ async function seedSpread(userId: string): Promise<{
     occurredAt: new Date("2026-06-04T10:00:00Z"),
     title: "ig video",
   });
+  // Twitter native-video tweet (twitter_posts.media_type='video') → video.
+  const twVideo = await seedEvent(userId, {
+    kind: "twitter_post",
+    externalId: `tw_video_${uniq}`,
+    cacheMediaType: "video",
+    occurredAt: new Date("2026-06-04T11:00:00Z"),
+    title: "tw video",
+  });
   // OTHER: IG carousel + Telegram post (kind-level) + manual conference
   // (kind-level) + a social event with NO cache row (the partition guard).
   const igCarousel = await seedEvent(userId, {
@@ -176,10 +197,34 @@ async function seedSpread(userId: string): Promise<{
     occurredAt: new Date("2026-06-08T10:00:00Z"),
     title: "tk missing cache",
   });
+  // Twitter image tweet (media_type='image') → other; text tweet
+  // (media_type='text') → other; missing cache row → other (the partition
+  // guard — a twitter event must never vanish from all three).
+  const twImage = await seedEvent(userId, {
+    kind: "twitter_post",
+    externalId: `tw_image_${uniq}`,
+    cacheMediaType: "image",
+    occurredAt: new Date("2026-06-08T11:00:00Z"),
+    title: "tw image",
+  });
+  const twText = await seedEvent(userId, {
+    kind: "twitter_post",
+    externalId: `tw_text_${uniq}`,
+    cacheMediaType: "text",
+    occurredAt: new Date("2026-06-08T12:00:00Z"),
+    title: "tw text",
+  });
+  const twMissing = await seedEvent(userId, {
+    kind: "twitter_post",
+    externalId: `tw_missing_${uniq}`,
+    // cacheMediaType omitted → no cache row inserted → other.
+    occurredAt: new Date("2026-06-08T13:00:00Z"),
+    title: "tw missing cache",
+  });
 
   const short = new Set([tkShort, igShort, ytShort]);
-  const video = new Set([ytVideo, ytNull, ytNoRow, igVideo]);
-  const other = new Set([igCarousel, tg, conf, tkMissing]);
+  const video = new Set([ytVideo, ytNull, ytNoRow, igVideo, twVideo]);
+  const other = new Set([igCarousel, tg, conf, tkMissing, twImage, twText, twMissing]);
   const all = new Set([...short, ...video, ...other]);
   return { short, video, other, all };
 }
@@ -304,6 +349,58 @@ describe("MEDIA-TYPE feed filter (Short / Video / Other) — server SQL", () => 
       expect(videoIds.has(id), `${id} → video`).toBe(true);
       expect(shortIds.has(id), `${id} not short`).toBe(false);
       expect(otherIds.has(id), `${id} never other`).toBe(false);
+    }
+  });
+
+  it("twitter_post classifies per-post: 'video' → video; 'image' / 'text' / no-row → other", async () => {
+    const u = await seedUserDirectly({ email: `mtf-tw-${Math.random()}@t.io` });
+    const uniq = Math.random().toString(36).slice(2, 12);
+    const twVideo = await seedEvent(u.id, {
+      kind: "twitter_post",
+      externalId: `tw_v_${uniq}`,
+      cacheMediaType: "video",
+      occurredAt: new Date("2026-06-11T10:00:00Z"),
+      title: "tw video",
+    });
+    const twImage = await seedEvent(u.id, {
+      kind: "twitter_post",
+      externalId: `tw_i_${uniq}`,
+      cacheMediaType: "image",
+      occurredAt: new Date("2026-06-11T11:00:00Z"),
+      title: "tw image",
+    });
+    const twText = await seedEvent(u.id, {
+      kind: "twitter_post",
+      externalId: `tw_t_${uniq}`,
+      cacheMediaType: "text",
+      occurredAt: new Date("2026-06-11T12:00:00Z"),
+      title: "tw text",
+    });
+    const twNoRow = await seedEvent(u.id, {
+      kind: "twitter_post",
+      externalId: `tw_x_${uniq}`,
+      // no cache row at all → other (NOT video — twitter exact-matches 'video').
+      occurredAt: new Date("2026-06-11T13:00:00Z"),
+      title: "tw no row",
+    });
+
+    const short = await listFeedPage(u.id, { mediaType: ["short"] }, null);
+    const video = await listFeedPage(u.id, { mediaType: ["video"] }, null);
+    const other = await listFeedPage(u.id, { mediaType: ["other"] }, null);
+    const shortIds = new Set(short.rows.map((r) => r.id));
+    const videoIds = new Set(video.rows.map((r) => r.id));
+    const otherIds = new Set(other.rows.map((r) => r.id));
+
+    // The native-video tweet lands ONLY in video.
+    expect(videoIds.has(twVideo)).toBe(true);
+    expect(otherIds.has(twVideo)).toBe(false);
+    expect(shortIds.has(twVideo)).toBe(false);
+    // image, text, and no-cache-row ALL land in other, never video, never short
+    // (a tweet is never a short-form vertical clip — no twitter 'short' arm).
+    for (const id of [twImage, twText, twNoRow]) {
+      expect(otherIds.has(id), `${id} → other`).toBe(true);
+      expect(videoIds.has(id), `${id} not video`).toBe(false);
+      expect(shortIds.has(id), `${id} not short`).toBe(false);
     }
   });
 

@@ -57,6 +57,11 @@
     // snapshot/enrichment caches use. Load-bearing for Instagram: its URL
     // carries only the shortcode, NOT the media-id cache key (issue #69).
     externalId?: string | null;
+    // Author @handle resolved by the URL-preview (twitter/tiktok/instagram
+    // return the @handle; telegram returns null). Forwarded on save as the
+    // fallback display label for a source-less manual social paste; null for a
+    // hand-typed event with no preview.
+    authorHandle?: string | null;
   };
 
   let {
@@ -116,6 +121,11 @@
   // load-bearing for Instagram, whose URL is only a shortcode (issue #69).
   // Null until a successful fetch; cleared on Reset / URL edit.
   let fetchedExternalId = $state<string | null>(null);
+  // The author @handle the preview resolved (twitter/tiktok/instagram return
+  // the username; telegram returns null). Forwarded on save as the fallback
+  // display label for a source-less manual social paste. Null until a
+  // successful fetch; cleared on Reset / URL edit.
+  let fetchedAuthorHandle = $state<string | null>(null);
 
   // After a successful fetch, the URL + kind are AUTHORITATIVE — the
   // adapter parsed them from the live URL. Lock both inputs so the user
@@ -125,6 +135,7 @@
     fetched = false;
     fetchedSrc = "";
     fetchedExternalId = null;
+    fetchedAuthorHandle = null;
     // Clear fetched metadata too (#70 ultrareview P3): otherwise a fetch of URL A
     // (e.g. Reddit subreddit) survives a Reset/edit and gets forwarded on submit
     // for the new URL B — stale denormalized metadata on the saved event.
@@ -142,12 +153,12 @@
   // silently omitted from this picker (the exact gap this replaces).
   //
   // The set today: the paste-flow kinds (youtube_video / reddit_post /
-  // instagram_post) + the free-form kinds (press / post / conference /
-  // talk / other). Twitter / Telegram / Discord are declared in the DB
-  // enum (forward-compat) but have no adapter or manual entry, are filtered
-  // out of the /feed KIND axis, and so carry manualCreatable:false — keeping
-  // the picker aligned with the filter axis avoids the awkward state where a
-  // user can create events that don't show up in their own filter list.
+  // instagram_post / tiktok_post / telegram_post / twitter_post) + the
+  // free-form kinds (press / post / conference / talk / other). Only
+  // discord_drop carries manualCreatable:false (no adapter, no manual entry,
+  // filtered out of the /feed KIND axis) — keeping the picker aligned with the
+  // filter axis avoids the awkward state where a user can create events that
+  // don't show up in their own filter list.
   const KIND_FLOW: readonly EventKind[] = MANUAL_EVENT_KINDS;
 
   function kindShort(k: EventKind): string {
@@ -306,6 +317,11 @@
       // snapshot/enrichment cache id (issue #69). Null for kinds/URLs the
       // adapter couldn't resolve a stable id for.
       fetchedExternalId = data.externalId ?? null;
+      // Author @handle from the preview — forwarded on save as the fallback
+      // display label for a source-less manual social paste. Empty/whitespace
+      // (telegram, or an unresolved preview) normalizes to null so the card
+      // fallback stays blank rather than showing a bare "@".
+      fetchedAuthorHandle = data.authorName?.trim() ? data.authorName.trim() : null;
       // Adopt the adapter's canonical permalink (IG: query/tracking stripped;
       // YouTube: keeps ?v, drops ?t) so the saved link is clean + identical for
       // the same post. The URL field locks on `fetched` below, so the user sees
@@ -413,6 +429,7 @@
         occurredAt: new Date(occurredAt).toISOString(),
         metadata: Object.keys(fetchedMetadata).length > 0 ? fetchedMetadata : undefined,
         externalId: fetchedExternalId,
+        authorHandle: fetchedAuthorHandle,
       });
     } catch {
       errorText = m.error_server_generic();
@@ -515,6 +532,7 @@
         oninput={() => {
           fetched = false;
           fetchedExternalId = null;
+          fetchedAuthorHandle = null;
           fetchedMetadata = {};
           urlError = null;
         }}

@@ -64,8 +64,12 @@ describe("parseAnyUrl — first-match-wins iterate-registry", () => {
     expect(r.kind).toBe("youtube_video");
   });
 
-  it("twitter.com URL → kind: 'unsupported' (no Twitter adapter registered)", () => {
-    expect(parseAnyUrl("https://twitter.com/x/status/123").kind).toBe("unsupported");
+  it("twitter.com /<handle>/status/<id> → kind: 'twitter_post' via twitterAdapter (Phase 11)", () => {
+    // Phase 11 registered twitterAdapter; a status permalink now resolves to a
+    // twitter_post event with the URL-intrinsic numeric tweet id (?s=/?t= stripped).
+    const r = parseAnyUrl("https://twitter.com/ConcernedApe/status/123");
+    expect(r.kind).toBe("twitter_post");
+    expect((r as { externalId: string }).externalId).toBe("123");
   });
 
   it("reddit.com /r/X/comments/<id> POST URL → kind: 'reddit_post' via redditAdapter (Phase 03.1)", () => {

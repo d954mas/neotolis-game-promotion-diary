@@ -263,6 +263,10 @@ export async function createEvent(
           notes: input.notes ?? null,
           metadata: input.metadata ?? {},
           externalId: derivedExternalId,
+          // Author @handle snapshot — fallback display label for source-less
+          // social pastes. The paste/enrich path threads the EnrichmentResult's
+          // authorName here; a hand-typed manual event leaves it null.
+          authorHandle: input.authorHandle ?? null,
         })
         .returning();
       if (!parent) throw new Error("createEvent: INSERT returned no row");
@@ -473,7 +477,9 @@ export interface EnrichmentResult {
  *   - telegram_post any failure      → soft-degrade to recognition-only (no 422
  *                                       dead-end; mirrors the IG branch — free
  *                                       source, manual entry always preserved)
- *   - twitter_post                   → AppError 'kind_not_yet_functional' 422
+ *   - twitter_post any failure       → soft-degrade to recognition-only (no 422
+ *                                       dead-end; mirrors the IG/TikTok branch —
+ *                                       paid source, manual entry always preserved)
  *   - oEmbed 5xx/network             → AppError 'youtube_oembed_unreachable' 502
  *   - oEmbed 401 (private)           → AppError 'youtube_unavailable' 422
  *   - oEmbed 404 (unavailable)       → AppError 'youtube_unavailable' 422
@@ -635,13 +641,82 @@ export async function enrichFromUrl(
     };
   }
 
+  // Twitter/X branch — adapter-driven, mirrors the TikTok branch (twitter is the
+  // parameterized clone): dispatch to twitterAdapter.fetchEventPreviewMetadata,
+  // which issues ONE by-URL provider request (1 credit), cap-gated against the
+  // per-user social cap + the operator prepaid budget, and UPSERTs the
+  // twitter_posts cache + a snapshot (incl the derived shares) so the saved event
+  // renders fully in /feed. Every non-ok path soft-degrades to recognition-only so
+  // manual entry never dead-ends (provider unconfigured, network, cap/budget, a
+  // deleted/protected tweet).
   if (parsed.kind === "twitter_post") {
-    throw new AppError(
-      `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
-      "kind_not_yet_functional",
-      422,
-      { kind: parsed.kind },
-    );
+    // Recognition-only carries no tweet id from a live fetch, so this result sets
+    // externalId=null — but for twitter the saved event is STILL keyed by tweet id:
+    // the tweet id IS the /status/<id> URL slug, and resolveCachedExternalId at the
+    // create boundary recovers it from the URL on a cache miss (its `parsed.externalId`
+    // fallback). So unlike TikTok's vm./vt. short link (no id in the URL → genuinely
+    // null), a recognition-only twitter paste enriches the same event when re-pasted.
+    const recognitionOnly: EnrichmentResult = {
+      kind: "twitter_post",
+      externalId: null,
+      title: "",
+      occurredAt: null,
+      thumbnailUrl: null,
+      authorName: null,
+      authorUrl: null,
+      canonicalUrl: parsed.canonicalUrl,
+      sourceMatch: null,
+    };
+    const adapter = getAdapter("twitter_account");
+    if (adapter.fetchEventPreviewMetadata === undefined) return recognitionOnly;
+
+    let preview;
+    try {
+      preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+        userId,
+        ipAddress,
+      });
+    } catch (err) {
+      // Cap-exhaustion (AppError 429) → soft-degrade rather than dead-end the form.
+      if (err instanceof AppError && err.code === "requests_quota_exhausted") {
+        logger.info(
+          { userId, url: parsed.canonicalUrl },
+          "twitter preview: per-user cap exhausted — degrading to recognition-only",
+        );
+        return recognitionOnly;
+      }
+      // EXPECTED failures (AdapterError, any typed AppError) soft-degrade; an
+      // UNEXPECTED throw (programmer bug) is re-thrown so it surfaces as a 500
+      // rather than hiding behind a benign WARN. Mirrors the TikTok/IG branches.
+      const { AdapterError } = await import("$lib/sources/errors.js");
+      if (!(err instanceof AppError) && !(err instanceof AdapterError)) throw err;
+      logger.warn(
+        { userId, url: parsed.canonicalUrl, err: String((err as Error)?.message ?? err) },
+        "twitter preview threw; degrading to recognition-only manual entry",
+      );
+      return recognitionOnly;
+    }
+
+    if (preview.kind !== "ok") return recognitionOnly;
+
+    return {
+      kind: "twitter_post",
+      // The tweet id (preview.externalId = post.id). The by-URL fetch UPSERTed
+      // twitter_posts + a snapshot keyed by it; saving the event with a different
+      // id would orphan it from the cache so feed-enrichment / metric-series /
+      // poll-state / refresh-now never match. Falls back to null (never a guess).
+      externalId: preview.externalId ?? null,
+      title: preview.title,
+      occurredAt: preview.occurredAt ?? null,
+      thumbnailUrl: preview.thumbnailUrl ?? null,
+      authorName: preview.authorName || null,
+      authorUrl: preview.authorUrl || null,
+      canonicalUrl: parsed.canonicalUrl,
+      // author_is_me for a twitter_post is inherited from the owned data_sources
+      // row at source-create time (mirrors Telegram/TikTok); the paste flow matches
+      // on the source, not per-post. No sourceMatch precompute.
+      sourceMatch: null,
+    };
   }
 
   // Instagram — LIVE single-post preview (issue #65). Mirrors the Reddit

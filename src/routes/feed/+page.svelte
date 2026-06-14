@@ -387,6 +387,7 @@
         authorIsMe: payload.authorIsMe,
         metadata: payload.metadata,
         externalId: payload.externalId,
+        authorHandle: payload.authorHandle,
       }),
     });
     if (res.ok) {
@@ -624,6 +625,10 @@
         .instagramEnrichment,
       tiktokEnrichment: (e as { tiktokEnrichment?: { mediaType?: string | null } | null })
         .tiktokEnrichment,
+      // twitter_post classifies per-post (media_type 'video' → video; 'image' /
+      // 'text' / missing → other). Mirrors the server SQL twitter arm.
+      twitterEnrichment: (e as { twitterEnrichment?: { mediaType?: string | null } | null })
+        .twitterEnrichment,
       // youtube_video classifies per-post too (media_type 'short' → short, else
       // video). NULL/missing → video (the filter-math youtube arm's default).
       youtubeEnrichment: (e as { youtubeEnrichment?: { mediaType?: string | null } | null })

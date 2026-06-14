@@ -424,6 +424,12 @@ export interface EventDto {
   notes: string | null;
   metadata: unknown;
   externalId: string | null;
+  // Author @handle snapshot — fallback display label for source-less manual
+  // social pastes (NULL otherwise). PUBLIC display data (not ciphertext), safe
+  // to project; never added to any redaction/strip list. The feed card uses it
+  // ONLY when the event has no linked source — a live data_sources name always
+  // wins (see events schema header for the no-denorm justification).
+  authorHandle: string | null;
   // Polling state lives on `youtube_videos` (per-video, not per-event).
   // The DTO field names stay for UI compatibility (PollingBadge and
   // FeedCard read these names); the loader sources them via JOIN on
@@ -490,6 +496,7 @@ export function toEventDto(
     notes: r.notes,
     metadata: r.metadata,
     externalId: r.externalId,
+    authorHandle: r.authorHandle,
     publishedAt: videoData?.publishedAt ?? null,
     lastPolledAt: videoData?.lastPolledAt ?? null,
     lastPollStatus: videoData?.lastPollStatus ?? null,
