@@ -968,6 +968,17 @@
       {:else}
         <h2 class="feed-empty-heading">{m.empty_feed_heading()}</h2>
         <p class="feed-empty-body">{m.empty_feed_body()}</p>
+        <!-- First-run: give the empty feed an action in context. The page-head
+             "Add event" CTA is up in the chrome; a first-timer reading the empty
+             body needs the next step right here (log an event, or connect a
+             source so auto-import fills the feed). -->
+        <div class="feed-empty-actions">
+          <button type="button" class="feed-empty-cta" onclick={() => (addEventModalOpen = true)}>
+            <span class="feed-empty-cta-plus" aria-hidden="true">+</span>
+            {m.feed_cta_add_event()}
+          </button>
+          <a class="feed-empty-link" href="/sources/new">{m.sources_cta_new_source()}</a>
+        </div>
       {/if}
     </div>
   {:else}
@@ -1215,5 +1226,55 @@
     color: var(--text-2);
     font-size: var(--t-14);
     line-height: var(--lh-body);
+  }
+  .feed-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-3);
+    margin-top: var(--s-2);
+  }
+  /* Mirrors the elevated PageHead "Add event" CTA so the empty-state action
+   * reads as the same primary affordance. */
+  .feed-empty-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-4);
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .feed-empty-cta:hover {
+    background: color-mix(in oklab, var(--accent) 22%, var(--surface));
+    border-color: var(--accent);
+  }
+  .feed-empty-cta-plus {
+    font-size: 18px;
+    line-height: 1;
+    font-weight: var(--w-sb);
+  }
+  .feed-empty-link {
+    color: var(--text-2);
+    font-size: var(--t-14);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .feed-empty-link:hover {
+    color: var(--text);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .feed-empty-cta {
+      transition: none;
+    }
   }
 </style>
