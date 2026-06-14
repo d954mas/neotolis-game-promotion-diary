@@ -54,6 +54,21 @@ export function isTikTokCdnHost(url: string): boolean {
   return ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
 }
 
+/** Stable identity of a cover URL = origin + path, WITHOUT the query. tiktokcdn
+ *  rotates the `x-signature`/`x-expires` query every poll while the cover (an
+ *  immutable per-post image) keeps the same path — so writeSnapshot compares this
+ *  key to re-fetch bytes only on a real cover change, not on every poll. Null in →
+ *  null; unparseable → the raw string (so two bad URLs still compare by value). */
+export function coverCacheKey(url: string | null): string | null {
+  if (url === null) return null;
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
 /**
  * Best-effort server-side fetch of a TikTok CDN cover URL while it is still a
  * fresh signed URL (poll time). Host-validated (SSRF), redirect:"manual" (a 3xx
@@ -125,7 +140,13 @@ tiktokThumbnailRoutes.get("/tiktok/thumbnail/:postId", async (c) => {
     const body = new Blob([new Uint8Array(cached.bytes)], { type: cached.contentType });
     return new Response(body, {
       status: 200,
-      headers: { "content-type": cached.contentType, "cache-control": "private, max-age=3600" },
+      headers: {
+        "content-type": cached.contentType,
+        "cache-control": "private, max-age=3600",
+        // nosniff: the content-type is provider-derived; never let the browser
+        // sniff a stored blob into an executable type (e.g. svg navigated directly).
+        "x-content-type-options": "nosniff",
+      },
     });
   }
 
@@ -179,6 +200,7 @@ tiktokThumbnailRoutes.get("/tiktok/thumbnail/:postId", async (c) => {
     headers: {
       "content-type": upstream.headers.get("content-type") ?? "image/webp",
       "cache-control": "private, max-age=3600",
+      "x-content-type-options": "nosniff",
     },
   });
 });

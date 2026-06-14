@@ -28,7 +28,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { tiktokAccounts, tiktokPosts, tiktokPostSnapshots } from "$lib/server/db/schema/index.js";
-import { fetchCoverBytes } from "./thumbnail-proxy.js";
+import { fetchCoverBytes, coverCacheKey } from "./thumbnail-proxy.js";
 
 export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
 
@@ -68,11 +68,12 @@ export interface WriteSnapshotArgs {
 export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
   // Cache the cover bytes while the signed URL is fresh (poll time) so the proxy
   // serves them expiry-proof — the daily-poll/hours-short signature mismatch was
-  // the prod 502 cause. Only fetch when the incoming URL differs from the stored
-  // one OR the cache is empty (skip an unchanged cover every poll → no needless
-  // re-download). Best-effort + OUTSIDE the tx: never hold a row lock on a CDN
-  // fetch, never block/throw the snapshot write on a fetch miss (bytes stay null,
-  // the proxy URL-fallback still applies, exactly as before this cache existed).
+  // the prod 502 cause. A post's cover is immutable, so fetch only when the cover
+  // actually CHANGED — compare the URL PATH (coverCacheKey strips the rotating
+  // x-signature/x-expires query; comparing the full URL would re-fetch every poll
+  // since the signature rotates) — OR the cache is empty. Best-effort + OUTSIDE the
+  // tx: never hold a row lock on a CDN fetch, never block/throw the snapshot write
+  // on a fetch miss (bytes stay null, the proxy URL-fallback still applies).
   let cover: { bytes: Buffer; contentType: string } | null = null;
   const incomingUrl = args.thumbnailUrl ?? null;
   if (incomingUrl !== null) {
@@ -86,7 +87,8 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
       .from(tiktokPosts)
       .where(eq(tiktokPosts.awemeId, args.awemeId))
       .limit(1);
-    const urlChanged = prior === undefined || prior.url !== incomingUrl;
+    const urlChanged =
+      prior === undefined || coverCacheKey(prior.url) !== coverCacheKey(incomingUrl);
     const cacheEmpty = prior !== undefined && !prior.hasBytes;
     if (urlChanged || cacheEmpty) cover = await fetchCoverBytes(incomingUrl);
   }

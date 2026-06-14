@@ -107,6 +107,31 @@ describe("tiktok cover byte-cache (writeSnapshot)", () => {
     expect(row!.thumbnailContentType).toBe("image/jpeg");
   });
 
+  it("does NOT re-fetch when only the signed query rotates (same cover path)", async () => {
+    // Prod reality: tiktokcdn rotates x-signature/x-expires every poll while the
+    // cover PATH is unchanged. coverCacheKey strips the query, so an immutable
+    // cover is fetched once, not re-downloaded on every poll.
+    const awemeId = `tk-cache-rotate-${uniq()}`;
+    const base = "https://p16-sign-va.tiktokcdn-us.com/obj/rotate.awebp";
+    scriptedCover = { bytes: Buffer.from([9]), contentType: "image/webp" };
+    await writeSnapshot({
+      awemeId,
+      thumbnailUrl: `${base}?x-expires=1&x-signature=AAA`,
+      status: "ok",
+      metrics: okMetrics,
+    });
+    expect(fetchCoverBytesMock).toHaveBeenCalledTimes(1);
+
+    fetchCoverBytesMock.mockClear();
+    await writeSnapshot({
+      awemeId,
+      thumbnailUrl: `${base}?x-expires=2&x-signature=BBB`,
+      status: "ok",
+      metrics: okMetrics,
+    });
+    expect(fetchCoverBytesMock).not.toHaveBeenCalled();
+  });
+
   it("leaves bytes null + keeps the URL when the cover fetch fails", async () => {
     const awemeId = `tk-cache-miss-${uniq()}`;
     scriptedCover = null; // fetch miss (non-ok / network / non-image)
