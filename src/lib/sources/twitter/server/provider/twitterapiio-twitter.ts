@@ -70,7 +70,7 @@ export const twitterapiioTwitterProvider: SocialProvider = {
   async fetchPostByUrl(
     platform: SocialPlatform,
     url: string,
-    opts: { origin?: ProviderOrigin },
+    opts: { origin?: ProviderOrigin; pacerAlreadyAcquired?: boolean },
   ): Promise<NormalizedSinglePost | null> {
     // Extract the URL-intrinsic numeric status id (the /tweets endpoint keys on the id,
     // not the permalink). A non-status URL → null (no preview).
@@ -87,6 +87,9 @@ export const twitterapiioTwitterProvider: SocialProvider = {
       // Reserve one prepaid credit BEFORE the request (BUDGET-02). The paste-preview is
       // user-initiated → the "user" pool.
       origin: opts.origin,
+      // The refresh lane's claimGate already holds the pacer slot — skip the seam's
+      // re-acquire (Plan 11 P1). The paste path leaves it undefined → seam acquires.
+      pacerAlreadyAcquired: opts.pacerAlreadyAcquired,
     });
     const json: unknown = await resp.json();
     // Single-tweet endpoint nests at TOP-LEVEL tweets[] (NOT data.tweets — 11-SPIKE.md

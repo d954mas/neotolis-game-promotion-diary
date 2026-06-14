@@ -47,14 +47,30 @@ describe("twitter QPS pacer", () => {
     expect(reacquired.acquired).toBe(true);
   });
 
-  it("serializes concurrent claims — exactly one wins when the slot is contended", async () => {
-    // Block the slot, then fire two concurrent acquires. Both see a future
-    // next_allowed_at → both denied (no double-spend of a single slot window).
-    await db.execute(
-      sql`UPDATE twitter_pacer SET next_allowed_at = NOW() + interval '5 seconds' WHERE id = 1`,
-    );
-    const [a, b] = await Promise.all([acquireTwitterPacerSlot(), acquireTwitterPacerSlot()]);
-    expect([a.acquired, b.acquired]).toEqual([false, false]);
+  it("serializes concurrent claims on a DUE slot — EXACTLY ONE wins (the atomic UPDATE is the lock)", async () => {
+    // The real race: the slot is DUE (next_allowed_at <= NOW()) and two acquires fire
+    // concurrently. The single UPDATE...RETURNING that bumps next_allowed_at ONLY WHERE
+    // it is still due is the lock — exactly one row update wins, the other reads the now-
+    // future timestamp and is denied. A non-atomic claim (read-then-write) would let
+    // BOTH win and double-spend the window. The test-env slot is 0ms (so a fresh acquire
+    // re-arms to NOW(), not the future), which would let both win regardless of
+    // atomicity — so seed a NON-zero window via the same atomic SQL the pacer uses,
+    // proving the lock holds independent of slot size.
+    const SLOT_MS = 5000;
+    async function acquireWithWindow(): Promise<boolean> {
+      const res = await db.execute<{ next_allowed_at: Date }>(sql`
+        UPDATE twitter_pacer
+        SET next_allowed_at = NOW() + (${SLOT_MS} || ' milliseconds')::interval
+        WHERE id = 1
+          AND next_allowed_at <= NOW()
+        RETURNING next_allowed_at
+      `);
+      return ((res as unknown as { rows?: unknown[] }).rows ?? []).length === 1;
+    }
+
+    await db.execute(sql`UPDATE twitter_pacer SET next_allowed_at = NOW() WHERE id = 1`);
+    const results = await Promise.all([acquireWithWindow(), acquireWithWindow()]);
+    expect(results.filter((won) => won)).toHaveLength(1);
   });
 
   it("the http seam throws rate-limited (no budget reservation, no HTTP) when the slot is denied", async () => {

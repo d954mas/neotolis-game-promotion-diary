@@ -124,6 +124,13 @@ export interface TwitterFetchContext {
    * pauses + persists its cursor.
    */
   origin?: SocialQuotaPool;
+  /**
+   * Set true when the caller already holds the twitter_pacer slot for this tick (the
+   * refresh-lane claimGate acquires it — Plan 11 P1). The seam then SKIPS its own
+   * acquireTwitterPacerSlot so the slot isn't double-spent. The backfill pg-boss path
+   * has no claimGate → leaves this undefined and acquires at the seam as before.
+   */
+  pacerAlreadyAcquired?: boolean;
 }
 
 /** Bucket an HTTP status (or a non-HTTP failure) into the `status` OBS label. */
@@ -147,22 +154,28 @@ export async function twitterFetch(url: URL, ctx: TwitterFetchContext): Promise<
   // so a denied slot consumes NO prepaid credit and makes NO HTTP call. A miss throws
   // rate-limited with the exact wait; the backfill self-resumes and the lane defers,
   // unified with the 429 handling below. In tests the slot is 0ms so this always passes.
-  const slot = await acquireTwitterPacerSlot();
-  if (!slot.acquired) {
-    logger.debug(
-      {
-        waitMs: slot.waitMs,
-        platform: reservePlatform,
-        provider: reserveProvider,
-        logTag: ctx.logTag,
-      },
-      `${ctx.logTag}: pacer slot denied -> AdapterError(rate-limited, proactive QPS gate)`,
-    );
-    throw new AdapterError("twitterapi.io paced (per-key QPS slot not yet available)", {
-      category: "rate-limited",
-      retryAfterMs: slot.waitMs,
-      context: { platform: reservePlatform, provider: reserveProvider, logTag: ctx.logTag },
-    });
+  //
+  // EXCEPTION (Plan 11 P1): the refresh lane's claimGate already acquired the slot for
+  // this tick and threads pacerAlreadyAcquired=true — re-acquiring here would double-
+  // spend the slot (a spurious deny on the second of the pair). Skip in that case.
+  if (ctx.pacerAlreadyAcquired !== true) {
+    const slot = await acquireTwitterPacerSlot();
+    if (!slot.acquired) {
+      logger.debug(
+        {
+          waitMs: slot.waitMs,
+          platform: reservePlatform,
+          provider: reserveProvider,
+          logTag: ctx.logTag,
+        },
+        `${ctx.logTag}: pacer slot denied -> AdapterError(rate-limited, proactive QPS gate)`,
+      );
+      throw new AdapterError("twitterapi.io paced (per-key QPS slot not yet available)", {
+        category: "rate-limited",
+        retryAfterMs: slot.waitMs,
+        context: { platform: reservePlatform, provider: reserveProvider, logTag: ctx.logTag },
+      });
+    }
   }
 
   if (ctx.origin !== undefined) {

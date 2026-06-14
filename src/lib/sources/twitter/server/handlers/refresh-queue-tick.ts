@@ -51,6 +51,7 @@ import { getSocialProvider } from "../provider/registry.js";
 import { getSocialSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
 import { twitterParseUrl } from "../url.js";
+import { acquireTwitterPacerSlot } from "../pacer.js";
 
 export const TWITTER_REFRESH_SLOTS = REFRESH_SLOTS;
 export type TwitterRefreshQueueName = SocialRefreshQueueName;
@@ -124,6 +125,12 @@ const twitterRefreshLane = createSocialRefreshLane({
   maxBatchSize: 1,
   getSocialProvider,
   getSocialSpendToday,
+  // Acquire the global twitter_pacer slot in the claimGate (Plan 11 P1). A denied slot
+  // DEFERS the row (stays pending → retried) instead of letting it reach the seam,
+  // fail rate-limited, and complete `done` — which is how a manual Refresh-Now silently
+  // no-opped under QPS contention. Mirrors Reddit's claimRedditPacerSlot. The permit
+  // then makes the seam skip its own acquire (no double-spend).
+  acquirePacerSlot: () => acquireTwitterPacerSlot(),
   resolvePermalink,
   resolveUserPostId,
   writeSnapshot: ({ postId: tweetId, permalink, post, status }) =>
