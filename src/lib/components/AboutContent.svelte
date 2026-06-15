@@ -166,11 +166,11 @@
       </div>
       <div class="hero-shot">
         <img
-          src="/landing/wishlist-chart.png"
+          src="/landing/wishlist-chart.webp"
           alt="Wishlist growth chart with promo events pinned along the curve"
           loading="eager"
-          width="1280"
-          height="918"
+          width="1200"
+          height="861"
         />
       </div>
     </div>
@@ -229,11 +229,11 @@
     <div class="split">
       <div class="feed-shot">
         <img
-          src="/landing/feed.png"
+          src="/landing/feed.webp"
           alt="Chronological feed of promo events, each with its per-post stats"
           loading="lazy"
-          width="1280"
-          height="900"
+          width="1000"
+          height="780"
         />
       </div>
       <div class="split-copy">
