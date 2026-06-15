@@ -60,6 +60,9 @@
   .hero {
     margin-top: var(--s-6);
     aspect-ratio: 16 / 9;
+    /* Cap the banner so a short news item isn't dominated by a full-viewport
+       cover (the 16/9 ratio still applies until it hits this ceiling). */
+    max-height: 320px;
     overflow: hidden;
     border-radius: var(--r-md);
     border: 1px solid var(--border-hairline);
@@ -113,7 +116,7 @@
   }
   .prose :global(ul.platforms li) {
     margin: 0;
-    padding: 4px 12px;
+    padding: var(--s-1) var(--s-3);
     border: 1px solid var(--border-hairline);
     border-radius: var(--r-pill);
     background: var(--surface);

@@ -91,7 +91,10 @@ function parsePost(path: string, raw: string): NewsPost {
   };
 }
 
-// Parsed + newest-first once at module load.
+// Parsed + sorted newest-first ONCE at module load. A malformed post (missing
+// frontmatter envelope, unparseable date) throws here at import time, so it
+// fails fast across every page that lists news (/, /about, /news) — acceptable
+// for trusted, build-time-committed content, and caught immediately in dev/CI.
 const POSTS: readonly NewsPost[] = Object.entries(FILES)
   .map(([path, raw]) => parsePost(path, raw))
   .sort((a, b) => b.date.localeCompare(a.date));

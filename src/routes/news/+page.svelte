@@ -82,7 +82,7 @@
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform var(--m-med, 0.2s) var(--m-ease, ease);
+    transition: transform var(--m-base) var(--m-ease);
   }
   .item-thumb:hover img {
     transform: scale(1.03);

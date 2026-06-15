@@ -816,7 +816,7 @@
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform var(--m-med, 0.25s) var(--m-ease, ease);
+    transition: transform var(--m-base) var(--m-ease);
   }
   .nt-tile:hover .nt-cover img {
     transform: scale(1.03);
