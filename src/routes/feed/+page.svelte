@@ -1241,9 +1241,9 @@
     gap: 6px;
     min-height: var(--hit-lg);
     padding: 0 var(--s-4);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-family: var(--f-sans);
     font-size: var(--t-14);
@@ -1254,13 +1254,14 @@
       border-color var(--m-fast) var(--m-ease);
   }
   .feed-empty-cta:hover {
-    background: color-mix(in oklab, var(--accent) 22%, var(--surface));
+    background: var(--surface-3);
     border-color: var(--accent);
   }
   .feed-empty-cta-plus {
     font-size: 18px;
     line-height: 1;
     font-weight: var(--w-sb);
+    color: var(--accent);
   }
   .feed-empty-link {
     color: var(--text-2);
