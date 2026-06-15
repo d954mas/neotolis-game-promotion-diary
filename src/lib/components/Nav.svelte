@@ -8,8 +8,8 @@
   // the active tab is scrolled into view (auto-fall-back when the user
   // has prefers-reduced-motion set).
   //
-  // Visible items: Feed · Sources · Games · Settings · About. ActiveKey
-  // also includes "events" and "audit" as type-only members — they're
+  // Visible items: Feed · Sources · Games · Settings · About · News.
+  // ActiveKey also includes "events" and "audit" as type-only members — they're
   // highlightable from /events and /audit routes but intentionally NOT
   // in `items[]` (deep-link only, folded under Settings sub-nav).
   //
@@ -18,7 +18,15 @@
   // strings. A future i18n pass adds nav_* keys; the pattern stays the
   // same.
 
-  type ActiveKey = "feed" | "sources" | "games" | "events" | "audit" | "settings" | "about";
+  type ActiveKey =
+    | "feed"
+    | "sources"
+    | "games"
+    | "events"
+    | "audit"
+    | "settings"
+    | "about"
+    | "news";
 
   let { active }: { active: ActiveKey } = $props();
 
@@ -28,6 +36,7 @@
     { key: "games", href: "/games", label: "Games" },
     { key: "settings", href: "/settings", label: "Settings" },
     { key: "about", href: "/about", label: "About" },
+    { key: "news", href: "/news", label: "News" },
   ];
 
   let activeEl: HTMLAnchorElement | null = $state(null);
@@ -142,6 +151,20 @@
                 stroke="none"
               /></svg
             >
+          {:else if item.key === "news"}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M4 5h12v14H6a2 2 0 0 1-2-2z" /><path
+                d="M16 8h3a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2"
+              /><path d="M8 9h4" /><path d="M8 12h4" /><path d="M8 15h3" /></svg
+            >
           {/if}
         </span>
         <span class="tab-label">{item.label}</span>
@@ -227,6 +250,20 @@
                 fill="currentColor"
                 stroke="none"
               /></svg
+            >
+          {:else if item.key === "news"}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M4 5h12v14H6a2 2 0 0 1-2-2z" /><path
+                d="M16 8h3a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2"
+              /><path d="M8 9h4" /><path d="M8 12h4" /><path d="M8 15h3" /></svg
             >
           {/if}
         </span>

@@ -933,11 +933,17 @@
       border-color: var(--border-2);
     }
   }
+  /* Paused (auto-import off) rows are de-emphasised, but the dim must not
+   * crush the footer (events · range · synced) below WCAG AA — that mono
+   * line is a paused source's only accumulated-data signal. opacity:0.6
+   * dropped --text-3 there to ~3.6:1; 0.80 is the dimmest that still keeps it
+   * ≥4.5:1 while reading as "more off" than 0.85 (operator review 2026-06-15).
+   * The explicit dashed "Paused" status pill carries the state regardless. */
   .source-row[data-active="0"] {
-    opacity: 0.6;
+    opacity: 0.8;
   }
   .source-row[data-active="0"]:hover {
-    opacity: 0.85;
+    opacity: 1;
   }
 
   /* ⋯ overflow — absolute top-right corner. Quieter than feed-card's

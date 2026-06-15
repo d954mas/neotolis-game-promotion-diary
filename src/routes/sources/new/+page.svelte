@@ -24,11 +24,13 @@
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
+  import SourceKindIcon from "$lib/components/SourceKindIcon.svelte";
   import {
     inferSourceKindFromUrl,
     normalizeHandleUrl,
   } from "$lib/components/sources/infer-source-kind.js";
   import { addSourceUiCadenceLabel } from "$lib/sources/kind-display.js";
+  import type { SourceKind } from "$lib/sources/adapter.js";
   import type {
     AddSourceUiKind,
     KindLabelKey,
@@ -135,13 +137,13 @@
     }
   }
 
-  // Reddit chip carries both 🧑 and 🏛 so the user understands that the
-  // single chip handles both subreddits and user profiles — the backend
-  // resolves which by URL shape on submit. aria-hidden because the text
-  // label already carries the meaning.
-  function chipPrefixFor(value: AddSourceUiKind): string {
-    if (value === "reddit") return "🧑🏛";
-    return "";
+  // Legend chips show the same SourceKindIcon SVG glyph as the /sources list so
+  // the two surfaces read consistently. AddSourceUiKind is 1:1 with SourceKind
+  // except the synthetic "reddit" (rendered as the Snoo); reddit is split into
+  // two plates (u/ author + r/ subreddit) in the template so the user sees both
+  // shapes are supported.
+  function iconKindFor(value: AddSourceUiKind): SourceKind {
+    return value === "reddit" ? "reddit_subreddit" : value;
   }
 
   function statusFor(key: KindStatusKey | null): string | null {
@@ -354,19 +356,37 @@
       <span class="legend-label">{m.add_source_supported_legend()}</span>
       <ul class="kind-legend">
         {#each visibleKinds as entry (entry.value)}
-          {@const prefix = chipPrefixFor(entry.value)}
           {@const isMatch = inferredKind === entry.value}
-          <li
-            class="chip"
-            class:active={isMatch && !entry.disabled}
-            class:muted={entry.disabled}
-            class:matched={isMatch}
-            title={entry.disabled ? disabledTooltip(entry) : undefined}
-          >
-            {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
-            <span class="chip-label">{labelFor(entry.labelKey)}</span>
-            {#if entry.disabled}<small class="status">{statusFor(entry.statusKey)}</small>{/if}
-          </li>
+          {#if entry.value === "reddit"}
+            <!-- Reddit resolves u/ (author) and r/ (subreddit) by URL shape on
+                 submit; show both as separate plates so the support is explicit. -->
+            {#each ["u/", "r/"] as suffix (suffix)}
+              <li
+                class="chip"
+                class:active={isMatch && !entry.disabled}
+                class:muted={entry.disabled}
+                class:matched={isMatch}
+                title={entry.disabled ? disabledTooltip(entry) : undefined}
+              >
+                <span class="chip-icon"><SourceKindIcon kind="reddit_subreddit" /></span>
+                <span class="chip-label">{labelFor(entry.labelKey)}</span>
+                <span class="chip-suffix" aria-hidden="true">{suffix}</span>
+                {#if entry.disabled}<small class="status">{statusFor(entry.statusKey)}</small>{/if}
+              </li>
+            {/each}
+          {:else}
+            <li
+              class="chip"
+              class:active={isMatch && !entry.disabled}
+              class:muted={entry.disabled}
+              class:matched={isMatch}
+              title={entry.disabled ? disabledTooltip(entry) : undefined}
+            >
+              <span class="chip-icon"><SourceKindIcon kind={iconKindFor(entry.value)} /></span>
+              <span class="chip-label">{labelFor(entry.labelKey)}</span>
+              {#if entry.disabled}<small class="status">{statusFor(entry.statusKey)}</small>{/if}
+            </li>
+          {/if}
         {/each}
       </ul>
     </div>
@@ -497,28 +517,50 @@
     flex-wrap: wrap;
     gap: var(--s-1);
   }
+  /* Informational legend chips — NOT selectors. Light tag/pill styling (not
+     filled buttons) + the same SourceKindIcon glyph as the /sources list, so
+     the two surfaces read consistently. */
   .chip {
     display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-2);
-    background: var(--surface-3);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    background: transparent;
+    color: var(--text-2);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--r-pill);
     font-family: var(--f-sans);
     font-size: var(--t-13);
     transition:
       background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .chip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  .chip-suffix {
+    font-family: var(--f-mono);
+    font-size: 0.85em;
+    color: var(--text-3);
+    letter-spacing: -0.02em;
   }
   /* The matched-from-URL kind, when usable. */
   .chip.active {
     background: var(--accent-soft);
-    color: var(--accent);
-    border-color: var(--accent-strong);
-    font-weight: var(--w-sb);
+    color: var(--accent-strong);
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+  }
+  .chip.active .chip-icon,
+  .chip.active .chip-suffix {
+    color: var(--accent-strong);
   }
   /* not-configured kinds (Reddit / Instagram without operator keys): visible
      but greyed, so the user sees they exist but need setup. */
@@ -529,12 +571,7 @@
      "this is what you pasted, but it isn't configured yet". */
   .chip.muted.matched {
     opacity: 0.85;
-    border-color: var(--accent-strong);
-  }
-  .chip-prefix {
-    font-size: 1em;
-    line-height: 1;
-    margin-right: 4px;
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
   }
   .chip-label {
     line-height: 1;

@@ -57,6 +57,25 @@ test.describe("/login disclaimer + auth-gated noindex", () => {
     await expect(noindexMeta).toHaveCount(0);
   });
 
+  test("public pages do NOT emit the noindex meta — /news", async ({ page }) => {
+    await page.goto("/news");
+    const noindexMeta = page.locator('meta[name="robots"][content*="noindex"]');
+    await expect(noindexMeta).toHaveCount(0);
+  });
+
+  test("public pages do NOT emit the noindex meta — /news/<article>", async ({ page }) => {
+    await page.goto("/news/the-diary-is-live");
+    // Positive assertion FIRST: prove the article template actually rendered
+    // (the .news-article <h1> only exists on a real post, never on the 404
+    // error page). Without this, a future slug rename would 404 and the noindex
+    // check below would vacuously pass.
+    const h1 = page.locator(".news-article h1");
+    await expect(h1).toBeVisible();
+    await expect(h1).not.toBeEmpty();
+    const noindexMeta = page.locator('meta[name="robots"][content*="noindex"]');
+    await expect(noindexMeta).toHaveCount(0);
+  });
+
   test("public pages do NOT emit the noindex meta — / (dashboard public surface)", async ({
     page,
   }) => {

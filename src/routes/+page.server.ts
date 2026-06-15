@@ -1,6 +1,7 @@
 import type { PageServerLoad } from "./$types.js";
 import { redirect } from "@sveltejs/kit";
 import { env } from "$lib/server/config/env.js";
+import { listNews } from "$lib/server/news.js";
 
 /**
  * Root `/` server loader.
@@ -25,5 +26,6 @@ export const load: PageServerLoad = async ({ locals, parent }) => {
     supportEmail: env.SUPPORT_EMAIL,
     domain: env.DOMAIN,
     user: parentData.user,
+    latestNews: listNews().slice(0, 3),
   };
 };

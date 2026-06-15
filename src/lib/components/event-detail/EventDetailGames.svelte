@@ -52,7 +52,7 @@
       <span class="game-chip" style="--card-accent: {gameColor(g.id)};">{g.title}</span>
     {/each}
     {#if isOffTopic}
-      <span class="off-topic-chip">Off topic</span>
+      <span class="off-topic-chip">{m.add_event_modal_off_topic()}</span>
     {/if}
   </div>
 </div>

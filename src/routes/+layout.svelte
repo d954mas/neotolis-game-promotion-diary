@@ -46,7 +46,7 @@
   // ("/") has no Nav entry — we still render <Nav> for layout
   // continuity but no item is "active". For unmapped paths we default to
   // "feed" (the default-landing target).
-  type NavKey = "feed" | "sources" | "games" | "events" | "audit" | "settings" | "about";
+  type NavKey = "feed" | "sources" | "games" | "events" | "audit" | "settings" | "about" | "news";
   const navActive = $derived.by((): NavKey => {
     const p = page.url.pathname;
     if (p.startsWith("/feed")) return "feed";
@@ -56,6 +56,7 @@
     if (p.startsWith("/audit")) return "audit";
     if (p.startsWith("/settings")) return "settings";
     if (p.startsWith("/about")) return "about";
+    if (p.startsWith("/news")) return "news";
     return "feed";
   });
 
@@ -66,6 +67,9 @@
   const isPublicIndexable = $derived.by((): boolean => {
     const p = page.url.pathname;
     if (p === "/") return true;
+    // /news and every /news/<slug> article are public marketing content —
+    // indexable by prefix (the exact-match Set can't enumerate dynamic slugs).
+    if (p === "/news" || p.startsWith("/news/")) return true;
     return PUBLIC_INDEXABLE_PATHS.has(p);
   });
 

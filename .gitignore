@@ -50,6 +50,12 @@ scripts/.grafana-session/
 # is single-machine. See AGENTS.md.
 .planning/
 
+# Issue #83 — impeccable UI-design skill is local dev tooling (installed under
+# .claude/skills/, already covered by .claude/*). Its project config + critique
+# output live in .impeccable/. Local-only, not product code. updateCheck:false
+# in config.json disables the skill's version-ping (nothing leaves the machine).
+.impeccable/
+
 # Developer-personal dev helpers — each developer ships their own local
 # .dev-*.ts/.mjs scripts (e.g. .dev-worker.ts to run the worker handler
 # bypassing migrate-at-boot; .dev-oauth-mock.mjs to spin up the OAuth

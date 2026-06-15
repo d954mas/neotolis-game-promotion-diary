@@ -287,7 +287,7 @@
             void onRestore?.(event.id);
           }}
         >
-          Restore
+          {m.common_restore()}
         </button>
         <button
           type="button"
@@ -298,7 +298,7 @@
             void onDeleteForever?.(event.id);
           }}
         >
-          Delete forever
+          {m.sources_trash_delete_forever()}
         </button>
       {:else}
         <button
@@ -440,7 +440,7 @@
           <span class="game-chip" style="--card-accent: {gameColor(ag.id)};">{ag.title}</span>
         {/each}
         {#if standalone}
-          <span class="off-topic-chip">Off topic</span>
+          <span class="off-topic-chip">{m.add_event_modal_off_topic()}</span>
         {/if}
       </div>
     </div>
