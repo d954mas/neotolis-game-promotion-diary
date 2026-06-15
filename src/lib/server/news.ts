@@ -61,7 +61,10 @@ const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
 });
 
 function slugFromPath(path: string): string {
-  const base = path.split("/").pop()!.replace(/\.html$/, "");
+  const base = path
+    .split("/")
+    .pop()!
+    .replace(/\.html$/, "");
   return base.replace(/^\d{4}-\d{2}-\d{2}-/, "");
 }
 
