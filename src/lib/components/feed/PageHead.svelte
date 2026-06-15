@@ -251,12 +251,9 @@
     height: 40px;
     min-height: 40px;
     padding: 0 var(--s-4);
-    /* Primary action must lead. Was a surface-2 ghost identical in weight to
-     * the secondary Filters toggle beside it; tinted accent fill + accent
-     * border so "+ Add event" reads as THE action without a loud solid fill. */
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-family: var(--f-sans);
     font-size: var(--t-14);
@@ -280,7 +277,7 @@
     font-weight: var(--w-sb);
   }
   .cta-primary:hover {
-    background: color-mix(in oklab, var(--accent) 22%, var(--surface));
+    background: var(--surface-3, var(--surface-2));
     border-color: var(--accent);
   }
   .cta-primary:hover .cta-plus {
