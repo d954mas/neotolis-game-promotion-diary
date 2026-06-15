@@ -55,7 +55,7 @@
     <a class="btn ghost" href={GITHUB} target="_blank" rel="noopener">
       <svg viewBox="0 0 24 24" aria-hidden="true"
         ><path d="M12 3v12" /><path d="M7 11l5 4 5-4" /><path d="M4 20h16" /></svg
-      >Self-host on GitHub</a
+      >Self-host it</a
     >
   </div>
 {/snippet}
@@ -234,7 +234,7 @@
           alt="Chronological feed of promo events, each with its per-post stats"
           loading="lazy"
           width="1000"
-          height="881"
+          height="877"
         />
       </div>
       <div class="split-copy">
