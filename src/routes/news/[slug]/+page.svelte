@@ -15,6 +15,15 @@
     <a class="back" href="/news">← News</a>
     <time datetime={data.post.date}>{data.post.dateDisplay}</time>
     <h1>{data.post.title}</h1>
+    {#if data.post.cover}
+      <div class="hero">
+        <img
+          src={data.post.cover}
+          alt={data.post.coverAlt || data.post.title}
+          fetchpriority="high"
+        />
+      </div>
+    {/if}
     <!-- Safe {@html} sink: the body is author/AI-written HTML committed to the
          repo (src/content/news/*.html), never user input, and never crosses a
          tenant boundary — it is identical for every visitor. See
@@ -47,6 +56,19 @@
     letter-spacing: -0.02em;
     line-height: 1.2;
     text-wrap: balance;
+  }
+  .hero {
+    margin-top: var(--s-6);
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border-hairline);
+  }
+  .hero img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   /* Prose — styles the rendered article HTML. Uses :global because the markup

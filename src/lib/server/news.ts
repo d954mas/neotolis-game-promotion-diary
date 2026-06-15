@@ -35,6 +35,10 @@ export type NewsMeta = {
   dateDisplay: string;
   title: string;
   summary: string;
+  /** Absolute URL of the cover image (e.g. /news-media/<slug>/cover.webp), or
+   *  null when the post has no `cover:` frontmatter. */
+  cover: string | null;
+  coverAlt: string;
 };
 
 export type NewsPost = NewsMeta & { body: string };
@@ -74,12 +78,15 @@ function parsePost(path: string, raw: string): NewsPost {
   }
 
   const date = meta.date ?? "";
+  const cover = meta.cover && meta.cover.length > 0 ? meta.cover : null;
   return {
     slug: slugFromPath(path),
     date,
     dateDisplay: date ? DATE_FORMAT.format(new Date(`${date}T00:00:00Z`)) : "",
     title: meta.title ?? "(untitled)",
     summary: meta.summary ?? "",
+    cover,
+    coverAlt: meta.coverAlt ?? "",
     body: body.trim(),
   };
 }

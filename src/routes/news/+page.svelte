@@ -25,9 +25,16 @@
     <ul class="news-list">
       {#each data.posts as post (post.slug)}
         <li class="news-item">
-          <time datetime={post.date}>{post.dateDisplay}</time>
-          <h2><a href="/news/{post.slug}">{post.title}</a></h2>
-          {#if post.summary}<p>{post.summary}</p>{/if}
+          {#if post.cover}
+            <a class="item-thumb" href="/news/{post.slug}" tabindex="-1" aria-hidden="true">
+              <img src={post.cover} alt="" loading="lazy" />
+            </a>
+          {/if}
+          <div class="item-body">
+            <time datetime={post.date}>{post.dateDisplay}</time>
+            <h2><a href="/news/{post.slug}">{post.title}</a></h2>
+            {#if post.summary}<p>{post.summary}</p>{/if}
+          </div>
         </li>
       {/each}
     </ul>
@@ -53,12 +60,55 @@
     padding: 0;
   }
   .news-item {
+    display: flex;
+    gap: var(--s-4);
     padding: var(--s-6) 0;
     border-top: 1px solid var(--border-hairline);
   }
   .news-item:first-child {
     border-top: none;
     padding-top: var(--s-2);
+  }
+  .item-thumb {
+    flex: 0 0 200px;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border-hairline);
+    display: block;
+  }
+  .item-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform var(--m-med, 0.2s) var(--m-ease, ease);
+  }
+  .item-thumb:hover img {
+    transform: scale(1.03);
+  }
+  .item-body {
+    flex: 1;
+    min-width: 0;
+  }
+  @media (max-width: 560px) {
+    .news-item {
+      flex-direction: column;
+      gap: var(--s-3);
+    }
+    .item-thumb {
+      flex: none;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .item-thumb img {
+      transition: none;
+    }
+    .item-thumb:hover img {
+      transform: none;
+    }
   }
   .news-item time {
     display: block;

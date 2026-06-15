@@ -36,7 +36,16 @@ describe("news service", () => {
     for (const post of posts) {
       expect(post.slug).not.toMatch(/^\d{4}-\d{2}-\d{2}/);
     }
-    expect(getNewsPost("v0-1-is-live")).not.toBeNull();
+    expect(getNewsPost("the-diary-is-live")).not.toBeNull();
+  });
+
+  it("exposes cover metadata (nullable url + alt string)", () => {
+    for (const post of posts) {
+      expect(post.cover === null || typeof post.cover === "string").toBe(true);
+      expect(typeof post.coverAlt).toBe("string");
+    }
+    // At least one committed post ships a cover image.
+    expect(posts.some((p) => p.cover !== null)).toBe(true);
   });
 
   it("returns a full post with a non-empty body by slug", () => {
