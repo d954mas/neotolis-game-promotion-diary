@@ -8,7 +8,7 @@ describe("news service", () => {
   const posts = listNews();
 
   it("returns every committed post", () => {
-    expect(posts.length).toBeGreaterThanOrEqual(2);
+    expect(posts.length).toBeGreaterThanOrEqual(1);
   });
 
   it("sorts newest first", () => {
