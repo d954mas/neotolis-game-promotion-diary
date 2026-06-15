@@ -1,5 +1,6 @@
 import type { PageServerLoad } from "./$types";
 import { env } from "$lib/server/config/env.js";
+import { listNews } from "$lib/server/news.js";
 
 // Public /about route.
 //
@@ -15,5 +16,6 @@ export const load: PageServerLoad = async ({ parent }) => {
     supportEmail: env.SUPPORT_EMAIL,
     domain: env.DOMAIN,
     user: parentData.user,
+    latestNews: listNews().slice(0, 3),
   };
 };

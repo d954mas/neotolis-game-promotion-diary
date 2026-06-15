@@ -16,10 +16,20 @@
   import { m } from "$lib/paraglide/messages.js";
   import { signIn } from "$lib/auth-client";
 
+  type NewsTeaser = {
+    slug: string;
+    date: string;
+    dateDisplay: string;
+    title: string;
+    summary: string;
+    cover: string | null;
+    coverAlt: string;
+  };
   type AboutData = {
     supportEmail: string;
     domain: string;
     user: { id: string; email: string; name: string | null } | null;
+    latestNews: NewsTeaser[];
   };
 
   let { data }: { data: AboutData } = $props();
@@ -290,6 +300,27 @@
       </div>
     </div>
   </section>
+
+  {#if data.latestNews.length > 0}
+    <!-- WHAT'S NEW -->
+    <section class="news-teaser">
+      <div class="nt-head">
+        <h2>What's new</h2>
+        <a class="nt-all" href="/news">All updates &rarr;</a>
+      </div>
+      <div class="nt-grid">
+        {#each data.latestNews as post (post.slug)}
+          <a class="nt-tile" href="/news/{post.slug}">
+            {#if post.cover}
+              <div class="nt-cover"><img src={post.cover} alt="" loading="lazy" /></div>
+            {/if}
+            <time datetime={post.date}>{post.dateDisplay}</time>
+            <h3>{post.title}</h3>
+          </a>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <!-- FINAL CTA -->
   <section class="band">
@@ -734,10 +765,86 @@
     }
   }
 
+  /* WHAT'S NEW teaser */
+  .news-teaser {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: var(--s-8) var(--s-5);
+  }
+  .nt-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s-4);
+    margin-bottom: var(--s-6);
+  }
+  .nt-head h2 {
+    margin: 0;
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    letter-spacing: -0.01em;
+  }
+  .nt-all {
+    font-size: var(--t-14);
+    color: var(--text-2);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .nt-all:hover {
+    color: var(--text);
+  }
+  .nt-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--s-5);
+  }
+  .nt-tile {
+    display: block;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .nt-cover {
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border-hairline);
+    margin-bottom: var(--s-3);
+  }
+  .nt-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform var(--m-med, 0.25s) var(--m-ease, ease);
+  }
+  .nt-tile:hover .nt-cover img {
+    transform: scale(1.03);
+  }
+  .nt-tile time {
+    display: block;
+    color: var(--text-3);
+    font-size: var(--t-13);
+  }
+  .nt-tile h3 {
+    margin: var(--s-1) 0 0;
+    font-size: var(--t-17);
+    font-weight: var(--w-sb);
+    line-height: 1.3;
+  }
+  .nt-tile:hover h3 {
+    color: var(--accent);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .btn.primary,
     .btn.ghost {
       transition: none;
+    }
+    .nt-cover img {
+      transition: none;
+    }
+    .nt-tile:hover .nt-cover img {
+      transform: none;
     }
   }
 </style>
