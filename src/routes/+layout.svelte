@@ -66,6 +66,9 @@
   const isPublicIndexable = $derived.by((): boolean => {
     const p = page.url.pathname;
     if (p === "/") return true;
+    // /news and every /news/<slug> article are public marketing content —
+    // indexable by prefix (the exact-match Set can't enumerate dynamic slugs).
+    if (p === "/news" || p.startsWith("/news/")) return true;
     return PUBLIC_INDEXABLE_PATHS.has(p);
   });
 

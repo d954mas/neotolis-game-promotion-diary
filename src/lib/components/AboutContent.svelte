@@ -304,6 +304,7 @@
   <footer class="foot">
     <span>&#169; 2026 Neotolis, Promotion diary</span>
     <nav>
+      <a href="/news">News</a>
       <a href="/privacy">{m.about_links_privacy()}</a>
       <a href="/terms">{m.about_links_terms()}</a>
       <a href={GITHUB} target="_blank" rel="noopener">GitHub</a>

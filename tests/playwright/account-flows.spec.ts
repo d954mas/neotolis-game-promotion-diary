@@ -57,6 +57,18 @@ test.describe("/login disclaimer + auth-gated noindex", () => {
     await expect(noindexMeta).toHaveCount(0);
   });
 
+  test("public pages do NOT emit the noindex meta — /news", async ({ page }) => {
+    await page.goto("/news");
+    const noindexMeta = page.locator('meta[name="robots"][content*="noindex"]');
+    await expect(noindexMeta).toHaveCount(0);
+  });
+
+  test("public pages do NOT emit the noindex meta — /news/<article>", async ({ page }) => {
+    await page.goto("/news/v0-1-is-live");
+    const noindexMeta = page.locator('meta[name="robots"][content*="noindex"]');
+    await expect(noindexMeta).toHaveCount(0);
+  });
+
   test("public pages do NOT emit the noindex meta — / (dashboard public surface)", async ({
     page,
   }) => {
