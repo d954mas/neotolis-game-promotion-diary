@@ -169,6 +169,7 @@
           src="/landing/wishlist-chart.webp"
           alt="Wishlist growth chart with promo events pinned along the curve"
           loading="eager"
+          fetchpriority="high"
           width="1200"
           height="861"
         />
@@ -233,7 +234,7 @@
           alt="Chronological feed of promo events, each with its per-post stats"
           loading="lazy"
           width="1000"
-          height="780"
+          height="881"
         />
       </div>
       <div class="split-copy">
@@ -308,7 +309,7 @@
       <a href={GITHUB} target="_blank" rel="noopener">GitHub</a>
       {#if data.domain}<a href="https://{data.domain}">{m.about_canonical_instance_label()}</a>{/if}
     </nav>
-    <span class="contact">{m.about_footer_contact(footerCtx)}</span>
+    {#if data.supportEmail}<span class="contact">{m.about_footer_contact(footerCtx)}</span>{/if}
   </footer>
 </main>
 
@@ -413,7 +414,7 @@
   }
   .hero-inner {
     display: grid;
-    grid-template-columns: 0.92fr 1.08fr;
+    grid-template-columns: 1fr 0.9fr;
     gap: 48px;
     align-items: center;
     padding: 26px 0 44px;
@@ -429,7 +430,7 @@
   }
   .hero h1 {
     margin: 0 0 20px;
-    font-size: clamp(38px, 5vw, 54px);
+    font-size: clamp(34px, 4.2vw, 48px);
     line-height: 1;
     letter-spacing: -0.03em;
     font-weight: 780;
@@ -459,10 +460,6 @@
     width: 100%;
     height: auto;
   }
-  .feed-shot {
-    max-height: 520px;
-  }
-
   /* works-with strip */
   .works {
     display: flex;
@@ -610,20 +607,19 @@
     color: var(--text-2);
   }
   .feats .ck {
-    color: var(--success);
+    color: var(--accent);
     flex: 0 0 auto;
   }
 
-  /* trust strip (vertical hairlines, not cards) */
+  /* trust strip — icon + title + text, generously gapped (no column dividers,
+     so it reads differently from the numbered step-flow above). */
   .trust {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
   }
   .tc {
-    padding: 0 28px;
-  }
-  .tc:not(:first-child) {
-    border-left: 1px solid var(--hair);
+    padding: 0;
   }
   .tc h3 {
     margin: 0 0 9px;
@@ -723,10 +719,8 @@
     .tc {
       padding: 0;
     }
-    .fstep:not(:last-child)::after,
-    .tc:not(:first-child) {
+    .fstep:not(:last-child)::after {
       display: none;
-      border-left: 0;
     }
     .split .feed-shot {
       order: 2;
