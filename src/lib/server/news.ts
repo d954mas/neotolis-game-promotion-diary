@@ -20,6 +20,12 @@
 // The date prefix on the filename is for human ordering only; the authoritative
 // date is the frontmatter `date`. The slug (the URL) is the filename minus that
 // prefix and the extension.
+//
+// Images / media: drop the asset under static/ and reference it by absolute URL
+// in the body, e.g. `<img src="/news-media/<slug>/cover.webp" width=.. height=..>`
+// (mirrors static/landing/*.webp). Use static/news-media/, NOT static/news/ —
+// the latter would shadow the /news/<slug> route. The article .prose styles
+// (src/routes/news/[slug]/+page.svelte) handle <img>/<figure>/<figcaption>.
 
 export type NewsMeta = {
   slug: string;

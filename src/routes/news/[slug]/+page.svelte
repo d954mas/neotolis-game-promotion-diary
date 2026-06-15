@@ -111,4 +111,27 @@
   .prose :global(blockquote p:last-child) {
     margin-bottom: 0;
   }
+  /* Images live in static/ (e.g. /news-media/<slug>/cover.webp) and are
+     referenced by absolute URL in the post HTML. Give them width/height
+     attributes in the markup to reserve space (no CLS). */
+  .prose :global(img) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: var(--s-6) 0;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border-hairline);
+  }
+  .prose :global(figure) {
+    margin: var(--s-6) 0;
+  }
+  .prose :global(figure img) {
+    margin: 0;
+  }
+  .prose :global(figcaption) {
+    margin-top: var(--s-2);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    text-align: center;
+  }
 </style>
