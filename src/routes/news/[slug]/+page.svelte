@@ -101,6 +101,25 @@
   .prose :global(li)::marker {
     color: var(--text-3);
   }
+  /* Platform chips — a compact, scannable list (e.g. supported platforms).
+     Add class="platforms" to a <ul> in the post HTML. */
+  .prose :global(ul.platforms) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-2);
+    margin: 0 0 var(--s-4);
+    padding: 0;
+    list-style: none;
+  }
+  .prose :global(ul.platforms li) {
+    margin: 0;
+    padding: 4px 12px;
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    font-size: var(--t-14);
+    color: var(--text-2);
+  }
   .prose :global(a) {
     color: var(--accent);
     text-decoration: underline;
