@@ -48,8 +48,10 @@ Default URL: `https://neotolis-diary.dev/grafana`. The browser opens for the use
 
 ### Loki
 - Auto-discovers available labels and their values (no hardcoded selectors)
-- Error logs count (level >= 50) over 24h
+- Error logs count (level >= 50, parse-error lines excluded via `__error__=""`) over 24h
+- `escapedHeadersSent24h` — raw `ERR_HTTP_HEADERS_SENT` lines (the known deferred bug prints raw, bypassing Pino, so `level >= 50` never sees it)
 - Total log volume over 1h
+- Retention is ~7 days — anything older is gone regardless of query window
 
 ### Alerts
 - Current firing/pending alert state from Grafana Alertmanager API
@@ -59,9 +61,9 @@ Default URL: `https://neotolis-diary.dev/grafana`. The browser opens for the use
 After the script finishes, read `scripts/grafana-audit-output/report.json` and the screenshots. Look for:
 
 ### Red flags (act now)
-- **5xx errors present** (`error_rate_5m` non-empty) — check `errors_by_route` for which routes
+- **5xx errors present** (`error_rate_5m` value > 0 — a zero-valued series just means a 5xx happened at some point since process start) — check `errors_by_route` for which routes
 - **Alerts firing** — check `alerts` array, look at `status.state` and `labels.alertname`
-- **Loki error logs** (`errorLogs24h.totalLines > 0`) — investigate via Grafana Explore
+- **Loki error logs** (`errorLogs24h > 0`, a matched-line count via `count_over_time`) — investigate via Grafana Explore
 - **Queue depth > 0 in `active`** for extended periods — jobs stuck
 
 ### Yellow flags (monitor)
@@ -71,7 +73,7 @@ After the script finishes, read `scripts/grafana-audit-output/report.json` and t
 - **Loki 0 lines** — Promtail may not be shipping logs; check `docker logs diary-promtail-1`
 
 ### Green (healthy)
-- `error_rate_5m` empty (no 5xx)
+- `error_rate_5m` zero (no current 5xx)
 - `latency_p95` < 200ms
 - All queues at 0
 - Memory trend < +10% per 24h
