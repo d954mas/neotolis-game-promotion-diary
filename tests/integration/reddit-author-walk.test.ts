@@ -116,10 +116,11 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
   it("[12-05] the backfill audit tags metadata.platform = reddit_account (QUOTA_PLATFORM, NOT reddit)", async () => {
     const handle = `d954mas_${Math.random().toString(36).slice(2, 7)}`;
     const sourceId = await seedAccountSource(handle);
-    const [{ userId }] = await db
+    const ownerRows = await db
       .select({ userId: dataSources.userId })
       .from(dataSources)
       .where(eq(dataSources.id, sourceId));
+    const userId = ownerRows[0]!.userId;
     provider.pages = normalizedFixturePages();
 
     // triggerUserId set → the trigger user pays the per-user cap (audit written).

@@ -167,7 +167,9 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       updatedAt: new Date(),
     });
     const savedAllowlist = env.ADMIN_EMAIL_ALLOWLIST;
-    (env as { ADMIN_EMAIL_ALLOWLIST: string[] }).ADMIN_EMAIL_ALLOWLIST = [operatorEmail.toLowerCase()];
+    (env as { ADMIN_EMAIL_ALLOWLIST: Set<string> }).ADMIN_EMAIL_ALLOWLIST = new Set([
+      operatorEmail.toLowerCase(),
+    ]);
     await resetSocialDailyCap(); // clear the cached operator id so the seeded operator resolves
 
     try {
@@ -214,7 +216,7 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
         .where(and(eq(auditLog.userId, operatorId), eq(auditLog.action, "reddit.deletion_propagated")));
       expect(Number(auditAfter[0]!.n)).toBe(before);
     } finally {
-      (env as { ADMIN_EMAIL_ALLOWLIST: string[] }).ADMIN_EMAIL_ALLOWLIST = savedAllowlist;
+      (env as { ADMIN_EMAIL_ALLOWLIST: Set<string> }).ADMIN_EMAIL_ALLOWLIST = savedAllowlist;
       await resetSocialDailyCap();
     }
   });
