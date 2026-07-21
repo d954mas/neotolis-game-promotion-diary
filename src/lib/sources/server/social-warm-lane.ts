@@ -73,6 +73,14 @@ export interface WarmEligibilityConfig {
    *  being warm-refreshed (spending credit re-polling a dead post is pure waste).
    *  IG/TikTok/Twitter omit it — they have no deletion-detect column. */
   extraWhere?: SQL;
+  /** OPTIONAL per-subject warm cap. When set (with `subjectColumn`), the eligible set
+   *  is trimmed to the N newest posts per subject via a ROW_NUMBER window, so a single
+   *  firehose subject (e.g. a busy subreddit added by mistake) can't fan its off-walk
+   *  posts into an unbounded per-tick warm batch and dominate the shared prepaid budget.
+   *  Reddit binds `subredditSlug` + 5; IG/TikTok/Twitter omit it → the plain path runs. */
+  perSubjectCap?: number;
+  /** The column to PARTITION BY for `perSubjectCap` (Reddit: reddit_posts.subredditSlug). */
+  subjectColumn?: PgColumn;
 }
 
 /**
@@ -100,30 +108,60 @@ export function createWarmEligibilitySelector(
     const windowStart = new Date(now.getTime() - config.windowDays() * DAY_MS);
     const staleBefore = new Date(now.getTime() - config.stalenessHours() * HOUR_MS);
 
+    const eligibilityWhere = and(
+      sql`${events.kind} = ${config.eventKind}`,
+      isNotNull(events.externalId),
+      isNull(events.deletedAt),
+      // Young: within the warm window. NULL published_at (pre-backfill 'pending') is
+      // excluded — we don't know the age yet; the account poll fills it.
+      gt(config.publishedAtColumn, windowStart),
+      // Stale: never polled, or last poll older than the staleness gate.
+      or(isNull(config.lastPolledAtColumn), lt(config.lastPolledAtColumn, staleBefore)),
+      // Terminal exclusion — own (not_found/private only). See header (#70 P1-A).
+      sql`(${config.lastPollStatusColumn} IS NULL OR ${config.lastPollStatusColumn} NOT IN ('not_found','private'))`,
+      // Bounded-failure exclusion — stop churning credits on a persistent failure.
+      lt(config.pollFailureCountColumn, config.maxFailures()),
+      // Optional per-platform extra predicate (Reddit: skip deletion-detected posts).
+      config.extraWhere,
+    );
+
+    // Per-subject cap path (Reddit): keep only the N newest eligible posts per subject so
+    // a firehose subreddit's off-walk posts can't fan into an unbounded warm batch. A
+    // window function can't live in WHERE, so rank in a subquery then filter the outer.
+    if (config.perSubjectCap !== undefined && config.subjectColumn !== undefined) {
+      // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out is service-wide by design; the posts table is public-data (justification threaded per platform via config).
+      const base = db
+        .selectDistinct({
+          id: config.idColumn,
+          subject: config.subjectColumn,
+          pub: config.publishedAtColumn,
+        })
+        .from(events)
+        .innerJoin(config.postsTable, eq(events.externalId, config.idColumn))
+        .where(eligibilityWhere)
+        .as("warm_base");
+      const ranked = db
+        .select({
+          id: base.id,
+          rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${base.subject} ORDER BY ${base.pub} DESC NULLS LAST)`.as(
+            "rn",
+          ),
+        })
+        .from(base)
+        .as("warm_ranked");
+      const capped = await db
+        .select({ id: ranked.id })
+        .from(ranked)
+        .where(sql`${ranked.rn} <= ${config.perSubjectCap}`);
+      return capped.map((r) => r.id as string);
+    }
+
     // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out is service-wide by design; one warm tick batches eligible posts across ALL tenants. The posts table is public-data; the per-post writeSnapshot downstream is public-data; tenant scope does not apply (justification threaded per platform via config).
     const rows = await db
       .selectDistinct({ id: config.idColumn })
       .from(events)
       .innerJoin(config.postsTable, eq(events.externalId, config.idColumn))
-      .where(
-        and(
-          sql`${events.kind} = ${config.eventKind}`,
-          isNotNull(events.externalId),
-          isNull(events.deletedAt),
-          // Young: within the warm window. NULL published_at (pre-backfill
-          // 'pending') is excluded — we don't know the age yet; the account poll
-          // fills it.
-          gt(config.publishedAtColumn, windowStart),
-          // Stale: never polled, or last poll older than the staleness gate.
-          or(isNull(config.lastPolledAtColumn), lt(config.lastPolledAtColumn, staleBefore)),
-          // Terminal exclusion — own (not_found/private only). See header (#70 P1-A).
-          sql`(${config.lastPollStatusColumn} IS NULL OR ${config.lastPollStatusColumn} NOT IN ('not_found','private'))`,
-          // Bounded-failure exclusion — stop churning credits on a persistent failure.
-          lt(config.pollFailureCountColumn, config.maxFailures()),
-          // Optional per-platform extra predicate (Reddit: skip deletion-detected posts).
-          config.extraWhere,
-        ),
-      );
+      .where(eligibilityWhere);
     return rows.map((r) => r.id as string);
   };
 }

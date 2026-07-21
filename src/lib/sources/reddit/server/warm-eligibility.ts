@@ -24,6 +24,15 @@ import { redditPosts } from "$lib/server/db/schema/index.js";
 import { env } from "$lib/server/config/env.js";
 import { createWarmEligibilitySelector } from "$lib/sources/server/social-warm-lane.js";
 
+// Cap the warm auto-refresh fan-out to the N newest eligible posts PER SUBREDDIT. A
+// legitimate low-traffic source never approaches it (its posts stay in the daily walk,
+// so they are refreshed there and never become warm-eligible); it exists so a firehose
+// subreddit added by mistake can't fan ~50 buried off-walk posts/day into the shared
+// prepaid budget (those buried posts also can't be single-fetched, so refreshing them is
+// pure waste — refresh-queue-tick.ts). Bounds one such source's warm spend to ~5 credits/day,
+// on top of the global 80/95% throttle. A code constant, not an operator knob (like K=2 / backfill 100).
+const WARM_MAX_PER_SUBREDDIT = 5;
+
 /**
  * Resolve the distinct post_ids eligible for a warm auto-refresh now. Returns []
  * when nothing is due. Pure read — no queue handle (the scheduler wraps it in the
@@ -42,4 +51,7 @@ export const selectWarmRedditPostIds = createWarmEligibilitySelector({
   maxFailures: () => env.REDDIT_WARM_MAX_FAILURES,
   // Stop warm-refreshing a post once it is detected removed (Variant A / the belt).
   extraWhere: isNull(redditPosts.deletionDetectedAt),
+  // Bound a firehose subreddit's warm fan-out to the 5 newest eligible posts.
+  perSubjectCap: WARM_MAX_PER_SUBREDDIT,
+  subjectColumn: redditPosts.subredditSlug,
 });
