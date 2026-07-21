@@ -29,7 +29,7 @@
 // existing vi.mock seam working unchanged (same reasoning as the 9e3b963 provider-
 // registry shim). This factory NEVER imports a platform tree directly.
 
-import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { db, type Tx } from "$lib/server/db/client.js";
 import { events } from "$lib/server/db/schema/events.js";
@@ -68,6 +68,11 @@ export interface WarmEligibilityConfig {
   windowDays(): number;
   stalenessHours(): number;
   maxFailures(): number;
+  /** OPTIONAL extra AND-predicate ANDed into the eligibility WHERE. Reddit binds
+   *  `isNull(reddit_posts.deletion_detected_at)` so a post detected as removed stops
+   *  being warm-refreshed (spending credit re-polling a dead post is pure waste).
+   *  IG/TikTok/Twitter omit it — they have no deletion-detect column. */
+  extraWhere?: SQL;
 }
 
 /**
@@ -115,6 +120,8 @@ export function createWarmEligibilitySelector(
           sql`(${config.lastPollStatusColumn} IS NULL OR ${config.lastPollStatusColumn} NOT IN ('not_found','private'))`,
           // Bounded-failure exclusion — stop churning credits on a persistent failure.
           lt(config.pollFailureCountColumn, config.maxFailures()),
+          // Optional per-platform extra predicate (Reddit: skip deletion-detected posts).
+          config.extraWhere,
         ),
       );
     return rows.map((r) => r.id as string);
