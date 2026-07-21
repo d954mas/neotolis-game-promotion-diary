@@ -23,6 +23,18 @@ import * as Audit from "../../src/lib/server/audit.js";
 import { NotFoundError, AppError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
 
+// The rebuilt Phase-12 Reddit adapter is PROVIDER-GATED (D-08 kill-switch):
+// createSource(reddit_*) returns 422 kind_not_configured unless the operator has
+// opted in via REDDIT_IMPORT_ENABLED. This suite exercises the CONFIGURED
+// source-create path (adapter functional), so force isRedditConfigured()→true; the
+// not-configured degrade (422 + no row + no credit) is asserted in
+// reddit-not-configured.test.ts. vi.mock is hoisted above the static createSource
+// import, so data-sources.ts reads the mocked probe.
+vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, isRedditConfigured: () => true };
+});
+
 // Service-layer integration for the data_sources registry. HTTP-route concerns
 // (status codes, route shape) live in the HTTP-boundary suite below; this
 // suite asserts service-layer behaviour exclusively.
