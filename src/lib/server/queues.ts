@@ -63,20 +63,33 @@ export const QUEUES = {
    *  refresh-click. */
   YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
 
-  // Per-kind: reddit (Phase 03.1 DV-RDT-7). FOUR cron-only pg-boss
-  // queues — handlers ENQUEUE rows into adapter_refresh_queue (ZERO
-  // Reddit HTTP per D-RDT-CRON-BURST) and return; the 8-tick worker
-  // setInterval (src/worker/index.ts) drains the reddit_account lanes at
-  // the 8 req/min effective ceiling.
-  //
-  // The Reddit batch worker does NOT subscribe via pg-boss.work — the
-  // SQL FOR UPDATE SKIP LOCKED tick pattern is the load-bearing answer
-  // to Reddit's 10 req/min hard limit under multi-replica deploys
-  // (D-RDT-WORKER).
-  REDDIT_CRON_ENQUEUE_SERVICE_SOURCES: "reddit.cron.enqueue-service-sources",
-  REDDIT_CRON_ENQUEUE_SERVICE_POSTS: "reddit.cron.enqueue-service-posts",
-  REDDIT_CRON_BASELINES: "reddit.cron.baselines",
-  REDDIT_CRON_DELETION_PROPAGATION: "reddit.cron.deletion-propagation",
+  // Per-kind: reddit (Phase 12, PAID ScrapeCreators scraper — the 4th consumer of
+  // the shared ScrapeCreators prepaid pool, D-01). Mirrors the TikTok/Twitter cron
+  // topology (two resumable feed walkers — author-search + native subreddit —
+  // age-tiered ongoing poll + warm per-post producer, midnight-PT daily-cap reset)
+  // PLUS the carry-over daily deletion-propagation purge (the GDPR control, D-06/D-08).
+  /** Author-scoped resumable walker (the D-02 ScrapeCreators author-search path).
+   *  Loops the `after` cursor to end-of-feed / SOCIAL_BACKFILL_MAX_POSTS (initial)
+   *  or K=2 pages (incremental, the firehose bound — 12-SPIKE cost caps). Fans out
+   *  INSERT events to all active subscribers; Variant-A disappearance reconciliation
+   *  sets deletion_detected_at for tracked posts absent from a completed walk. */
+  REDDIT_BACKFILL_ACCOUNT: "reddit.backfill.account",
+  /** Subreddit-scoped resumable walker (the native /v1/reddit/subreddit path). Same
+   *  walk shape as the author walker, keyed on the subreddit slug. */
+  REDDIT_BACKFILL_SUBREDDIT: "reddit.backfill.subreddit",
+  /** Active + cold ongoing poll + warm per-post producer collapsed via pg-boss
+   *  key-based schedules ({ tier } payload — active daily 06:00 UTC / cold daily /
+   *  warm hourly). The poll-cron handler dispatches on job.data.tier. */
+  REDDIT_POLL_CRON: "reddit.poll.cron",
+  /** Midnight-Pacific daily-cap counter reset. Clears ONLY the daily-cap spend
+   *  counter / audit-transition Set — NEVER the shared ScrapeCreators prepaid
+   *  balance (the monotonic hard ceiling, D-01 / Pitfall 3). */
+  REDDIT_QUOTA_RESET: "reddit.quota_reset",
+  /** Daily @05:00 UTC zero-HTTP purge of author/author_fullname on reddit_posts
+   *  whose deletion_detected_at is older than the 48h grace, with the
+   *  reddit.deletion_propagated audit written IN-TX (the legally load-bearing GDPR
+   *  control — D-06/D-08). */
+  REDDIT_DELETION_PROPAGATION: "reddit.deletion_propagation",
 
   // Per-kind: instagram (Phase 8). Mirrors the YouTube cron topology.
   /** Account-scoped resumable walker — one page (12 posts) per tick, fans

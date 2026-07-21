@@ -144,10 +144,17 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
           publishedAt: sql`COALESCE(${args.publishedAt ?? null}, ${redditPosts.publishedAt})`,
           author: sql`COALESCE(${args.author ?? null}, ${redditPosts.author})`,
           authorFullname: sql`COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname})`,
-          // ★ Idempotent first-detect: COALESCE keeps a prior non-null detection
-          //   timestamp (a re-appearing post never resets the grace clock); only a
-          //   currently-NULL value is stamped, and only when the belt fired.
-          deletionDetectedAt: sql`COALESCE(${redditPosts.deletionDetectedAt}, ${detectDeletion ? now : null})`,
+          // ★ Variant-A CLEAR-ON-REAPPEAR (12-SPIKE): a post that is currently ALIVE
+          //   in the feed (removed_by_category null ⇒ !detectDeletion) has its
+          //   deletion_detected_at CLEARED back to NULL. This makes the disappearance
+          //   detector self-correcting — a post falsely flagged by a transient walk gap
+          //   that reappears in a later walk is un-flagged BEFORE the 48h grace elapses,
+          //   so ONLY posts that stay gone ≥48h are purged. When the removed belt DOES
+          //   fire, COALESCE keeps a prior detection timestamp (idempotent first-detect —
+          //   the grace clock never resets).
+          deletionDetectedAt: detectDeletion
+            ? sql`COALESCE(${redditPosts.deletionDetectedAt}, ${now})`
+            : sql`NULL`,
           lastPolledAt: now,
           lastPollStatus: args.status,
           pollFailureCount: args.status === "ok" ? 0 : sql`${redditPosts.pollFailureCount} + 1`,
