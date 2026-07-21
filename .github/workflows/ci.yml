@@ -222,17 +222,15 @@ jobs:
       #     here; documented for operator readability).
       SERVICE_YOUTUBE_API_KEYS: mock-key
       ADMIN_EMAIL_ALLOWLIST: ''
-      # Reddit adapter smoke env (Phase 03.1 plan 10, V3+V24+V25).
-      # REDDIT_USER_AGENT is INTENTIONALLY UNSET at the job level so the
-      # baseline smoke-app boots with empty env — Half A asserts the
-      # parity contract (/readyz 200 + /sources HTML "Reddit not configured"
-      # + paste 422 reddit_not_configured). Half B
-      # (tests/smoke/lib/reddit-polling-flow.sh) tears down smoke-app and
-      # re-launches it together with smoke-worker + smoke-scheduler with
-      # REDDIT_USER_AGENT="node:com.neotolis.gpd-smoke:0.1.0 (by /u/smoke)"
-      # and REDDIT_BASE_URL_OVERRIDE=http://localhost:$REDDIT_MOCK_PORT
-      # (allocated by tests/smoke/lib/reddit-mock.sh). NO live Reddit
-      # calls in CI.
+      # Reddit not-configured parity smoke (Phase 12 — gated ScrapeCreators
+      # provider). REDDIT_IMPORT_ENABLED is INTENTIONALLY UNSET at the job level
+      # so the baseline smoke-app boots with the Reddit provider OFF (the D-08
+      # kill-switch). tests/smoke/lib/reddit-polling-flow.sh then asserts the
+      # not-configured degrade: POST /api/sources {kind:"reddit_account"} → 422
+      # kind_not_configured, and /sources/new HTML renders the Reddit chip
+      # disabled. Mirrors the Instagram / TikTok not-configured parity blocks.
+      # The paid ScrapeCreators import path has NO key in CI (covered by human
+      # UAT + integration tests) — NO live Reddit calls in CI.
       CI: 'true'
     steps:
       - uses: actions/checkout@v4
