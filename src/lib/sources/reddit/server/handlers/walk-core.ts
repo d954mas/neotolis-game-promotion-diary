@@ -177,6 +177,12 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   if (!isDeep) {
     state = { cursor: null, complete: false, collected: 0, operatorPaused: state.operatorPaused };
   }
+  // Only a pass that STARTED at the top of the feed (cursor null) has coverage that is
+  // contiguous down from "now" to oldestSeen — the precondition Variant-A reconciliation
+  // relies on. A RESUMED deep tick (cursor already set) walks only older pages this
+  // invocation; its seenIds miss the newer-but-alive posts collected in earlier ticks, so
+  // reconciling [oldestSeen, now] would false-mark them deleted. Skip reconcile in that case.
+  const startedFromTop = state.cursor === null;
 
   const collectedEvents: RawEvent[] = [];
   const seenIds: string[] = [];
@@ -319,7 +325,8 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // branch bound). Scope to [oldestSeen, now] — the window we actually walked — so a
   // bounded incremental (K=2) never false-marks older-but-alive posts. A post absent
   // from this window that is tracked + not already flagged → set deletion_detected_at.
-  const coveragePassComplete = !pausedThisTick && !notFound && walkedThisTick && state.complete;
+  const coveragePassComplete =
+    !pausedThisTick && !notFound && walkedThisTick && state.complete && startedFromTop;
   let reconciledDeletions = 0;
   if (coveragePassComplete && seenIds.length > 0 && oldestSeenPublishedAt !== null) {
     reconciledDeletions = await reconcileDisappearances(
@@ -417,9 +424,13 @@ async function reconcileDisappearances(
   seenIds: string[],
   oldestSeen: Date,
 ): Promise<number> {
+  // reddit_posts.author is stored VERBATIM (case-preserving, for display), but channelKey
+  // is the lowercased handle (Reddit usernames are case-insensitive for lookup). Compare
+  // case-insensitively or deletion detection silently never fires for a mixed-case author
+  // (e.g. "GallowBoob"). subredditSlug is already lowercased on write (normalize.ts).
   const subjectFilter =
     config.kind === "reddit_account"
-      ? eq(redditPosts.author, channelKey)
+      ? sql`LOWER(${redditPosts.author}) = ${channelKey}`
       : eq(redditPosts.subredditSlug, channelKey);
 
   const updated = await db

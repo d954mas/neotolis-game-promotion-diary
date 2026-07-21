@@ -71,10 +71,13 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
 
   let totalEnqueued = 0;
   for (const cfg of KIND_CONFIG) {
+    // Case-insensitive match: reddit_posts.author is stored verbatim (case-preserving) but
+    // channelKey is lowercased. LOWER() is a no-op for the already-lowercase subredditSlug.
+    // Without it a mixed-case account has newestPost=NULL → mis-tiered "active" forever.
     const newestPostExpr = sql<Date | null>`(
       SELECT MAX(${redditPosts.publishedAt})
       FROM ${redditPosts}
-      WHERE ${cfg.subject} = ${dataSourceChannelState.channelKey}
+      WHERE LOWER(${cfg.subject}) = ${dataSourceChannelState.channelKey}
     )`;
 
     // CROSS-TENANT BY DESIGN — channel state is global; the walker re-applies
