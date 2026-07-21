@@ -46,8 +46,8 @@ openssl rand -base64 32
 > URI set to `<BETTER_AUTH_URL>/api/auth/callback/google`.
 
 See [`.env.example`](../../.env.example) for every other variable (limits,
-retention window, admin allowlist, Reddit/YouTube keys, observability) — all
-optional with documented defaults.
+retention window, admin allowlist, YouTube + ScrapeCreators keys, observability)
+— all optional with documented defaults.
 
 ## 2. Boot it
 
@@ -103,7 +103,11 @@ copy-pasteable configs:
 - **Privacy by default.** All data is scoped to the signed-in user; there are no
   public dashboards or share links.
 - **Optional integrations degrade gracefully.** Leave `SERVICE_YOUTUBE_API_KEYS`
-  / `REDDIT_USER_AGENT` empty and those importers simply stay disabled — the app
-  boots and works.
+  empty and YouTube import stays disabled; leave the ScrapeCreators integrations
+  (`INSTAGRAM_PROVIDER` / `TIKTOK_PROVIDER` / `REDDIT_PROVIDER`) unset and those
+  importers render "not configured". Reddit additionally ships behind a
+  default-OFF kill-switch — it needs BOTH `REDDIT_IMPORT_ENABLED=true` AND
+  `REDDIT_PROVIDER=scrapecreators` (reusing the shared `SCRAPECREATORS_API_KEY`)
+  to turn on. The app boots and works with all of them empty.
 - **`/metrics` is off by default.** Set `METRICS_BEARER_TOKEN` only if you run
   the monitoring overlay (`docker-compose.monitoring.yml`).

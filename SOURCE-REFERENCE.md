@@ -160,19 +160,17 @@ Mirror the YouTube test files under `tests/unit/sources/reddit/` (HTTP wrapper, 
 
 The CI gates (`lint-typecheck` / `unit-integration` / `smoke`) cover the new adapter the moment it's registered.
 
-### §3.X Reddit (Phase 03.1) — public-`.json` deviation from the YouTube pattern
+### §3.X Reddit (Phase 12) — paid ScrapeCreators adapter, provider-gated + default-OFF
 
-Reddit's source plugin diverges from the YouTube canonical layout in five load-bearing ways. Every divergence is per CONTEXT.md DV-RDT-7 (Nov 2025 Reddit RBP closed self-service OAuth → public-`.json`-only).
+Reddit's original Phase 03.1 plugin was a free, anonymous public-`.json` scrape. That transport was **razed in Phase 12**: Reddit's `.json` endpoints 403 every datacenter IP (whole proxy pools fenced) and Reddit closed self-service OAuth in Nov 2025. The adapter was rebuilt on **ScrapeCreators** — the same paid, prepaid-credit provider that serves Instagram + TikTok — so Reddit now MIRRORS those adapters instead of diverging from them.
 
-1. **Transport**: no OAuth bearer. Native fetch to `https://www.reddit.com/r/X/new.json` etc., User-Agent header from `REDDIT_USER_AGENT` env (regex-validated `by /u/<handle>`). NO `oauth.reddit.com` host, NO `chargedFetch` key-rotation reservoir.
-2. **Rate-limit budget**: hard 10 req/min ceiling (vs OAuth's 60). Adapter enforces 8 req/min effective ceiling (-2 safety margin) via a **single batch-worker** (NOT pg-boss subscriber) — `setInterval(tick, 7500)` in `src/worker/index.ts` claims 1 entry per tick from the next-priority queue.
-3. **Queue model**: ONE SQL-backed table `reddit_refresh_queue` with 4 priority lanes (`service_source`, `service_post`, `user_source`, `user_post`) — NOT 7 pg-boss queues like YouTube. Worker round-robins through 8 slots/min (mapping: 1 service_source, 1 service_post, 3 user_source, 3 user_post). Fallthrough: empty slot → next non-empty queue in priority order.
-4. **Cron pattern**: 4 cron tasks (pg-boss schedules at 00/06/12/18 UTC for sources; 03/09/15/21 UTC for posts; @04 baselines; @05 deletion-propagation) ONLY enqueue rows into `reddit_refresh_queue`. They do NOT make Reddit HTTP calls.
-5. **Per-user quota**: two-axis sliding window — 1 source-action / 5min + 25 post-refreshes / 5min. Implemented via `AdapterUserQuotaCap.sourceActionsPerWindow + postRefreshesPerWindow + windowMinutes` (interface widened in plan 03.1-01).
+1. **Provider gate**: `REDDIT_PROVIDER` selects the implementation (empty => "not configured"; `scrapecreators` is the only buildable value). Mirrors `INSTAGRAM_PROVIDER` / `TIKTOK_PROVIDER` exactly.
+2. **Default-OFF kill-switch**: `REDDIT_IMPORT_ENABLED` — a string-literal-safe boolean where ONLY the literal `"true"` enables import. Even with the provider + key present, Reddit stays OFF until the operator explicitly opts in; the legally-hot platform never auto-enables (D-08).
+3. **Shared budget**: reuses the shared `SCRAPECREATORS_API_KEY` + the `SOCIAL_*` credit envelope (daily cap + monotonic prepaid balance). NO Reddit-specific key, NO Reddit-specific budget vars — Instagram + TikTok + Reddit draw the ONE shared prepaid balance.
+4. **Two source kinds**: `reddit_account` (a user's submitted-post history by handle — the PRIMARY path) and `reddit_subreddit` (a subreddit's recent posts — SECONDARY). Both walk the provider's author / subreddit endpoints.
+5. **Warm metric-refresh lane**: `REDDIT_WARM_WINDOW_DAYS` (default **2** — Reddit posts stabilize in 1-2 days, shorter than IG/TikTok's 7), `REDDIT_WARM_STALENESS_HOURS` (default **26**, just over the 24h free daily walk so a page-1 post never double-pays), `REDDIT_WARM_MAX_FAILURES` (default **5** consecutive non-ok polls before a post retires). A deletion-propagation pass purges author identity after a grace window.
 
-See `.planning/phases/03.1-reddit-adapter/03.1-CONTEXT.md` for the 22 D-RDT-* decisions that produced this divergence + DV-RDT-7 for the Nov 2025 policy context.
-
-§3.4 reservoir reference is unchanged for YouTube (rate-limiter-flexible in-process); Reddit uses the SQL queue + 8-tick worker pattern instead. Both are valid implementations of "Adapter owns its rate limit" per Phase 03.0.1 D-09.
+See `src/lib/sources/instagram/` for the reference ScrapeCreators adapter this mirrors, and `src/lib/sources/reddit/` for the rebuilt tree. The old `reddit_refresh_queue` / `reddit_pacer` / 8-tick batch-worker model and the old User-Agent / proxy-URL / base-URL-override env vars were all removed with the razed transport.
 
 ## 4. Common Patterns
 
