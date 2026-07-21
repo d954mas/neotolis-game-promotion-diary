@@ -24,18 +24,23 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
       platform === "reddit" ? ({ name: "scrapecreators-reddit" } as never) : null,
   };
 });
-vi.mock("../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    fetchRedditFeedPage: async (): Promise<RedditFeedPage> => provider.pages.shift() ?? emptyPage(),
-  };
-});
+vi.mock(
+  "../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js",
+  async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>;
+    return {
+      ...actual,
+      fetchRedditFeedPage: async (): Promise<RedditFeedPage> =>
+        provider.pages.shift() ?? emptyPage(),
+    };
+  },
+);
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { redditPosts, redditPostSnapshots } = await import("../../src/lib/server/db/schema/index.js");
+const { redditPosts, redditPostSnapshots } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { normalizeRedditFeed } = await import("../../src/lib/sources/reddit/server/normalize.js");
 const { handleBackfillAccount } =
   await import("../../src/lib/sources/reddit/server/handlers/backfill-account.js");
@@ -84,14 +89,27 @@ beforeEach(() => {
 describe("reddit e2e backfill (mock provider — Phase 12)", () => {
   it("[12-05] mock provider → backfill → reddit_posts + snapshots + events + audit(reddit_account) + per-user cap", async () => {
     const handle = `e2e_${uniq()}`;
-    const p1 = `x${uniq()}`, p2 = `y${uniq()}`;
+    const p1 = `x${uniq()}`,
+      p2 = `y${uniq()}`;
     const { userId } = await seedAccountSource(handle);
-    provider.pages = [normalizeRedditFeed({ success: true, posts: [makePost(p1, 1, handle), makePost(p2, 2, handle)], after: null })];
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [makePost(p1, 1, handle), makePost(p2, 2, handle)],
+        after: null,
+      }),
+    ];
 
     const before = await getUserQuotaUsedToday(userId, "reddit_account");
 
     await handleBackfillAccount({
-      data: { kind: "reddit_account", channelKey: handle, triggerUserId: userId, depthBoundIso: "1970-01-01T00:00:00Z", flow: "incremental" },
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        triggerUserId: userId,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "incremental",
+      },
     });
 
     const ids = [`t3_${p1}`, `t3_${p2}`];
@@ -99,7 +117,10 @@ describe("reddit e2e backfill (mock provider — Phase 12)", () => {
     const posts = await db.select().from(redditPosts).where(inArray(redditPosts.postId, ids));
     expect(posts.length).toBe(2);
     // reddit_post_snapshots rows (like=score, comment=num_comments).
-    const snaps = await db.select().from(redditPostSnapshots).where(inArray(redditPostSnapshots.postId, ids));
+    const snaps = await db
+      .select()
+      .from(redditPostSnapshots)
+      .where(inArray(redditPostSnapshots.postId, ids));
     expect(snaps.length).toBe(2);
     expect(snaps.every((s) => s.likeCount === 11 && s.commentCount === 4)).toBe(true);
     // events INSERTed for the subscriber.

@@ -32,7 +32,11 @@ const PROVIDER = "scrapecreators";
 const MAX_PICK = 200;
 const INCREMENTAL_WINDOW_DAYS = 14;
 
-const KIND_CONFIG: Array<{ kind: "reddit_account" | "reddit_subreddit"; queue: string; subject: PgColumn }> = [
+const KIND_CONFIG: Array<{
+  kind: "reddit_account" | "reddit_subreddit";
+  queue: string;
+  subject: PgColumn;
+}> = [
   { kind: "reddit_account", queue: QUEUES.REDDIT_BACKFILL_ACCOUNT, subject: redditPosts.author },
   {
     kind: "reddit_subreddit",
@@ -56,11 +60,17 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
 
   const throttle = await getSocialThrottleState(PLATFORM, PROVIDER);
   if (throttle === "ninetyfive") {
-    logger.info({ jobId: job.id, tier, throttle }, "reddit.poll.cron: budget at 95% — skipping all");
+    logger.info(
+      { jobId: job.id, tier, throttle },
+      "reddit.poll.cron: budget at 95% — skipping all",
+    );
     return;
   }
   if (throttle === "eighty" && tier === "cold") {
-    logger.info({ jobId: job.id, tier, throttle }, "reddit.poll.cron: budget at 80% — skipping cold");
+    logger.info(
+      { jobId: job.id, tier, throttle },
+      "reddit.poll.cron: budget at 80% — skipping cold",
+    );
     return;
   }
 
@@ -116,17 +126,29 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
         await boss.send(
           cfg.queue,
           { kind: cfg.kind, channelKey: ch.channelKey, depthBoundIso, flow: "auto_passive" },
-          { singletonKey: `reddit-poll-${tier}-${cfg.kind}-${ch.channelKey}`, singletonSeconds: 3600, priority: 0 },
+          {
+            singletonKey: `reddit-poll-${tier}-${cfg.kind}-${ch.channelKey}`,
+            singletonSeconds: 3600,
+            priority: 0,
+          },
         );
         totalEnqueued += 1;
       } catch (err) {
         logger.warn(
-          { jobId: job.id, channelKey: ch.channelKey, kind: cfg.kind, err: String((err as Error)?.message ?? err) },
+          {
+            jobId: job.id,
+            channelKey: ch.channelKey,
+            kind: cfg.kind,
+            err: String((err as Error)?.message ?? err),
+          },
           "reddit.poll.cron: enqueue failed; continuing",
         );
       }
     }
   }
 
-  logger.info({ jobId: job.id, tier, throttle, enqueued: totalEnqueued }, "reddit.poll.cron: tick complete");
+  logger.info(
+    { jobId: job.id, tier, throttle, enqueued: totalEnqueued },
+    "reddit.poll.cron: tick complete",
+  );
 }

@@ -113,6 +113,8 @@ describe("selectWarmRedditPostIds predicate", () => {
     expect(warm, "newest firehose post kept").toContain(ids[0]);
     expect(warm, "6th-newest firehose post dropped").not.toContain(ids[5]);
     expect(warm, "7th-newest firehose post dropped").not.toContain(ids[6]);
-    expect(warm, "a different subreddit's post is unaffected by the per-subject cap").toContain(other);
+    expect(warm, "a different subreddit's post is unaffected by the per-subject cap").toContain(
+      other,
+    );
   });
 });

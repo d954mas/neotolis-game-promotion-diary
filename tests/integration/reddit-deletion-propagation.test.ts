@@ -29,13 +29,17 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
       platform === "reddit" ? ({ name: "scrapecreators-reddit" } as never) : null,
   };
 });
-vi.mock("../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    fetchRedditFeedPage: async (): Promise<RedditFeedPage> => provider.pages.shift() ?? emptyPage(),
-  };
-});
+vi.mock(
+  "../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js",
+  async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>;
+    return {
+      ...actual,
+      fetchRedditFeedPage: async (): Promise<RedditFeedPage> =>
+        provider.pages.shift() ?? emptyPage(),
+    };
+  },
+);
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { env } = await import("../../src/lib/server/config/env.js");
@@ -102,7 +106,11 @@ async function seedTrackedPost(shortId: string, daysAgo: number, author: string)
 }
 
 async function readPost(shortId: string) {
-  const [row] = await db.select().from(redditPosts).where(eq(redditPosts.postId, `t3_${shortId}`)).limit(1);
+  const [row] = await db
+    .select()
+    .from(redditPosts)
+    .where(eq(redditPosts.postId, `t3_${shortId}`))
+    .limit(1);
   return row;
 }
 
@@ -113,7 +121,10 @@ beforeEach(() => {
 describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
   it("[12-05] disappearance-from-walk flags a WITHIN-WINDOW post; an OLDER-than-window post is NOT flagged", async () => {
     const handle = `del_${uniq()}`;
-    const A = `a${uniq()}`, B = `b${uniq()}`, C = `c${uniq()}`, D = `d${uniq()}`;
+    const A = `a${uniq()}`,
+      B = `b${uniq()}`,
+      C = `c${uniq()}`,
+      D = `d${uniq()}`;
     await seedAccountSource(handle);
     // Tracked: A@3d, B@2d, C@1d (all within the window), D@30d (older than the window).
     await seedTrackedPost(A, 3, handle);
@@ -123,21 +134,35 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
 
     // The current feed returns C + A (B disappeared). oldestSeen = A@3d → walked window
     // = [3d ago, now]. B@2d is inside it + absent → flagged. D@30d is older → not a candidate.
-    provider.pages = [walkPage([makePost(C, 1, handle, "gamedev"), makePost(A, 3, handle, "gamedev")])];
+    provider.pages = [
+      walkPage([makePost(C, 1, handle, "gamedev"), makePost(A, 3, handle, "gamedev")]),
+    ];
 
     await handleBackfillAccount({
-      data: { kind: "reddit_account", channelKey: handle, depthBoundIso: "1970-01-01T00:00:00Z", flow: "auto_passive" },
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
     });
 
-    expect((await readPost(B))!.deletionDetectedAt, "B disappeared within window → flagged").not.toBeNull();
-    expect((await readPost(D))!.deletionDetectedAt, "D older than walked window → NOT flagged").toBeNull();
+    expect(
+      (await readPost(B))!.deletionDetectedAt,
+      "B disappeared within window → flagged",
+    ).not.toBeNull();
+    expect(
+      (await readPost(D))!.deletionDetectedAt,
+      "D older than walked window → NOT flagged",
+    ).toBeNull();
     expect((await readPost(A))!.deletionDetectedAt, "A alive → not flagged").toBeNull();
     expect((await readPost(C))!.deletionDetectedAt, "C alive → not flagged").toBeNull();
   });
 
   it("[12-05] a post that REAPPEARS in a later walk has deletion_detected_at CLEARED (before the grace)", async () => {
     const handle = `del_${uniq()}`;
-    const A = `a${uniq()}`, B = `b${uniq()}`;
+    const A = `a${uniq()}`,
+      B = `b${uniq()}`;
     await seedAccountSource(handle);
     await seedTrackedPost(A, 3, handle);
     await seedTrackedPost(B, 2, handle);
@@ -145,14 +170,26 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     // Walk 1: B absent → flagged.
     provider.pages = [walkPage([makePost(A, 3, handle, "gamedev")])];
     await handleBackfillAccount({
-      data: { kind: "reddit_account", channelKey: handle, depthBoundIso: "1970-01-01T00:00:00Z", flow: "auto_passive" },
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
     });
     expect((await readPost(B))!.deletionDetectedAt).not.toBeNull();
 
     // Walk 2: B reappears (alive) → writeSnapshot clears the flag.
-    provider.pages = [walkPage([makePost(A, 3, handle, "gamedev"), makePost(B, 2, handle, "gamedev")])];
+    provider.pages = [
+      walkPage([makePost(A, 3, handle, "gamedev"), makePost(B, 2, handle, "gamedev")]),
+    ];
     await handleBackfillAccount({
-      data: { kind: "reddit_account", channelKey: handle, depthBoundIso: "1970-01-01T00:00:00Z", flow: "auto_passive" },
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
     });
     expect((await readPost(B))!.deletionDetectedAt, "reappeared post is un-flagged").toBeNull();
   });
@@ -163,7 +200,8 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     // with an uppercase letter (e.g. "GallowBoob") → deletion detection silently dead.
     const Author = `Gallow${uniq()}`; // has uppercase — the failing case
     const channelKey = Author.toLowerCase();
-    const A = `a${uniq()}`, B = `b${uniq()}`;
+    const A = `a${uniq()}`,
+      B = `b${uniq()}`;
     await seedAccountSource(channelKey);
     await seedTrackedPost(A, 3, Author); // stored verbatim, mixed case
     await seedTrackedPost(B, 2, Author);
@@ -171,10 +209,18 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     // Feed returns only A (B disappeared); the returned post carries the mixed-case author.
     provider.pages = [walkPage([makePost(A, 3, Author, "gamedev")])];
     await handleBackfillAccount({
-      data: { kind: "reddit_account", channelKey, depthBoundIso: "1970-01-01T00:00:00Z", flow: "auto_passive" },
+      data: {
+        kind: "reddit_account",
+        channelKey,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
     });
 
-    expect((await readPost(B))!.deletionDetectedAt, "mixed-case author B flagged via LOWER match").not.toBeNull();
+    expect(
+      (await readPost(B))!.deletionDetectedAt,
+      "mixed-case author B flagged via LOWER match",
+    ).not.toBeNull();
     expect((await readPost(A))!.deletionDetectedAt, "A alive → not flagged").toBeNull();
   });
 
@@ -185,7 +231,9 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     // false-mark them deleted → 48h later their author gets GDPR-purged. startedFromTop
     // guards against it: a pass that did not start at the top must not reconcile.
     const handle = `del_${uniq()}`;
-    const A = `a${uniq()}`, Bp = `b${uniq()}`, C = `c${uniq()}`;
+    const A = `a${uniq()}`,
+      Bp = `b${uniq()}`,
+      C = `c${uniq()}`;
     await seedAccountSource(handle);
     // "Tick 1" already collected the two newest posts (alive) + persisted a resume cursor.
     await seedTrackedPost(A, 1, handle);
@@ -233,7 +281,8 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
 
     try {
       const handle = `del_${uniq()}`;
-      const past = `p${uniq()}`, grace = `g${uniq()}`;
+      const past = `p${uniq()}`,
+        grace = `g${uniq()}`;
       // `past` detected >48h ago (eligible); `grace` detected 1h ago (within grace).
       await seedTrackedPost(past, 5, handle);
       await seedTrackedPost(grace, 5, handle);
@@ -262,7 +311,9 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       const auditRows = await db
         .select()
         .from(auditLog)
-        .where(and(eq(auditLog.userId, operatorId), eq(auditLog.action, "reddit.deletion_propagated")));
+        .where(
+          and(eq(auditLog.userId, operatorId), eq(auditLog.action, "reddit.deletion_propagated")),
+        );
       expect(auditRows.length, "one in-tx deletion_propagated audit").toBeGreaterThanOrEqual(1);
 
       // Idempotent re-run: the already-purged row is not re-processed → no NEW audit.
@@ -272,7 +323,9 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       const auditAfter = await db
         .select({ n: sql<number>`count(*)::int` })
         .from(auditLog)
-        .where(and(eq(auditLog.userId, operatorId), eq(auditLog.action, "reddit.deletion_propagated")));
+        .where(
+          and(eq(auditLog.userId, operatorId), eq(auditLog.action, "reddit.deletion_propagated")),
+        );
       expect(Number(auditAfter[0]!.n)).toBe(before);
     } finally {
       (env as { ADMIN_EMAIL_ALLOWLIST: Set<string> }).ADMIN_EMAIL_ALLOWLIST = savedAllowlist;

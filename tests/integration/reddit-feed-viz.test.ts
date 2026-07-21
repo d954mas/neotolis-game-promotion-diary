@@ -60,17 +60,14 @@ const { eventGames } = await import("../../src/lib/server/db/schema/event-games.
 const { redditPostSnapshots } = await import("../../src/lib/server/db/schema/index.js");
 const { createGame } = await import("../../src/lib/server/services/games.js");
 const { attachEventToGames } = await import("../../src/lib/server/services/events-mutation.js");
-const { getEventMetricSeries } = await import(
-  "../../src/lib/server/services/event-metric-series.js"
-);
+const { getEventMetricSeries } =
+  await import("../../src/lib/server/services/event-metric-series.js");
 const { normalizeRedditFeed } = await import("../../src/lib/sources/reddit/server/normalize.js");
-const { handleBackfillAccount } = await import(
-  "../../src/lib/sources/reddit/server/handlers/backfill-account.js"
-);
+const { handleBackfillAccount } =
+  await import("../../src/lib/sources/reddit/server/handlers/backfill-account.js");
 const { mapEventsToDtos } = await import("../../src/lib/server/dto.js");
-const { redditEnrichFeedDtos } = await import(
-  "../../src/lib/sources/reddit/server/feed-enrichment.js"
-);
+const { redditEnrichFeedDtos } =
+  await import("../../src/lib/sources/reddit/server/feed-enrichment.js");
 const { eventThumbnail } = await import("../../src/lib/components/charts/wishlist-chart-shared.js");
 
 const DAY = 86_400_000;
@@ -187,9 +184,7 @@ describe("reddit feed inbox + metric series (VIZ-05 + PLAT-04)", () => {
         mediaType: string | null;
       };
     };
-    const byId = new Map(
-      (dtos as unknown as RedditDto[]).map((d) => [d.externalId as string, d]),
-    );
+    const byId = new Map((dtos as unknown as RedditDto[]).map((d) => [d.externalId as string, d]));
     const selfDto = byId.get(`t3_${selfId}`)!;
     const imgDto = byId.get(`t3_${imgId}`)!;
 

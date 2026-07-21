@@ -254,7 +254,13 @@ describe("reddit snapshots write path (Phase 12)", () => {
     expect(first!.title).toBe("Indie Dev");
 
     // A transient miss (all rich fields null) must NOT blank the prior good values.
-    await upsertRedditAccount({ username, title: null, iconUrl: null, karma: null, followerCount: null });
+    await upsertRedditAccount({
+      username,
+      title: null,
+      iconUrl: null,
+      karma: null,
+      followerCount: null,
+    });
     const [second] = await db
       .select()
       .from(redditAccounts)

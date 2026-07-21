@@ -27,13 +27,17 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
       platform === "reddit" ? ({ name: "scrapecreators-reddit" } as never) : null,
   };
 });
-vi.mock("../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    fetchRedditFeedPage: async (): Promise<RedditFeedPage> => provider.pages.shift() ?? emptyPage(),
-  };
-});
+vi.mock(
+  "../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js",
+  async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>;
+    return {
+      ...actual,
+      fetchRedditFeedPage: async (): Promise<RedditFeedPage> =>
+        provider.pages.shift() ?? emptyPage(),
+    };
+  },
+);
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
@@ -119,7 +123,12 @@ describe("reddit native-subreddit walker (Phase 12)", () => {
     provider.pages = [walkPage(FIXTURE_POSTS)];
 
     await handleBackfillSubreddit({
-      data: { kind: "reddit_subreddit", channelKey: slug, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const imported = await db.select().from(events).where(eq(events.kind, "reddit_post"));
@@ -135,9 +144,11 @@ describe("reddit native-subreddit walker (Phase 12)", () => {
     const other = `oth_${uniq()}`;
     await seedSubredditSource(slug);
     // Present in the walk (slug), so they define the walked window [3d, now].
-    const P1 = `p1${uniq()}`, P2 = `p2${uniq()}`;
+    const P1 = `p1${uniq()}`,
+      P2 = `p2${uniq()}`;
     // Tracked, in-window, ABSENT from the walk: B in the walked slug, D in a DIFFERENT slug.
-    const B = `b${uniq()}`, D = `d${uniq()}`;
+    const B = `b${uniq()}`,
+      D = `d${uniq()}`;
     await seedTrackedPost(P1, 1, slug);
     await seedTrackedPost(P2, 3, slug);
     await seedTrackedPost(B, 2, slug);
@@ -147,11 +158,22 @@ describe("reddit native-subreddit walker (Phase 12)", () => {
     provider.pages = [walkPage([makePost(P1, 1, slug), makePost(P2, 3, slug)])];
 
     await handleBackfillSubreddit({
-      data: { kind: "reddit_subreddit", channelKey: slug, depthBoundIso: "1970-01-01T00:00:00Z", flow: "auto_passive" },
+      data: {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
     });
 
-    expect((await readPost(B))!.deletionDetectedAt, "same-subreddit absent post → flagged").not.toBeNull();
-    expect((await readPost(D))!.deletionDetectedAt, "different-subreddit post → NOT flagged (subject filter)").toBeNull();
+    expect(
+      (await readPost(B))!.deletionDetectedAt,
+      "same-subreddit absent post → flagged",
+    ).not.toBeNull();
+    expect(
+      (await readPost(D))!.deletionDetectedAt,
+      "different-subreddit post → NOT flagged (subject filter)",
+    ).toBeNull();
     expect((await readPost(P1))!.deletionDetectedAt, "present post → not flagged").toBeNull();
     expect((await readPost(P2))!.deletionDetectedAt, "present post → not flagged").toBeNull();
   });

@@ -122,10 +122,7 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     expect(single.calls[0]!.origin).toBe("user");
 
     // The reddit_posts cache row landed with the polling state + author (purge target).
-    const [cached] = await db
-      .select()
-      .from(redditPosts)
-      .where(eq(redditPosts.postId, "t3_abc123"));
+    const [cached] = await db.select().from(redditPosts).where(eq(redditPosts.postId, "t3_abc123"));
     expect(cached).toBeDefined();
     expect(cached!.lastPollStatus).toBe("ok");
     expect(cached!.permalink).toBe(url);
@@ -149,10 +146,10 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     expect(before.requests).toBe(0);
 
     single.next = singlePost({ id: "t3_cap001", shortcode: "cap001" });
-    await fetchEventPreviewMetadata(
-      "https://www.reddit.com/r/gamedev/comments/cap001/x/",
-      { userId: user.id, ipAddress: "127.0.0.1" },
-    );
+    await fetchEventPreviewMetadata("https://www.reddit.com/r/gamedev/comments/cap001/x/", {
+      userId: user.id,
+      ipAddress: "127.0.0.1",
+    });
 
     // A successful preview wrote exactly ONE cap-counter audit row
     // (event.poll_refreshed / flow=stats_refresh / platform=reddit_account /
@@ -193,16 +190,13 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
 
     // The cap gate throws AppError 429 BEFORE the fetch → no credit burned.
     await expect(
-      fetchEventPreviewMetadata(
-        "https://www.reddit.com/r/gamedev/comments/capexh/x/",
-        { userId: user.id, ipAddress: "127.0.0.1" },
-      ),
+      fetchEventPreviewMetadata("https://www.reddit.com/r/gamedev/comments/capexh/x/", {
+        userId: user.id,
+        ipAddress: "127.0.0.1",
+      }),
     ).rejects.toMatchObject({ code: "requests_quota_exhausted" });
     expect(single.calls).toHaveLength(0);
-    const cached = await db
-      .select()
-      .from(redditPosts)
-      .where(eq(redditPosts.postId, "t3_capexh"));
+    const cached = await db.select().from(redditPosts).where(eq(redditPosts.postId, "t3_capexh"));
     expect(cached).toHaveLength(0);
   });
 
@@ -218,10 +212,7 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     expect(result.kind).toBe("unavailable");
     // The provider WAS called (the cap was consulted) but no cache row landed.
     expect(single.calls).toHaveLength(1);
-    const cached = await db
-      .select()
-      .from(redditPosts)
-      .where(eq(redditPosts.postId, "t3_gone01"));
+    const cached = await db.select().from(redditPosts).where(eq(redditPosts.postId, "t3_gone01"));
     expect(cached).toHaveLength(0);
   });
 

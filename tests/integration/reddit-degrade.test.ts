@@ -51,7 +51,12 @@ describe("reddit graceful degrade (provider off — Phase 12)", () => {
 
     await expect(
       handleBackfillAccount({
-        data: { kind: "reddit_account", channelKey: handle, depthBoundIso: "1970-01-01T00:00:00Z", flow: "auto_passive" },
+        data: {
+          kind: "reddit_account",
+          channelKey: handle,
+          depthBoundIso: "1970-01-01T00:00:00Z",
+          flow: "auto_passive",
+        },
       }),
     ).resolves.toBeUndefined();
 
@@ -63,7 +68,12 @@ describe("reddit graceful degrade (provider off — Phase 12)", () => {
     const state = await db
       .select()
       .from(dataSourceChannelState)
-      .where(and(eq(dataSourceChannelState.kind, "reddit_account"), eq(dataSourceChannelState.channelKey, handle)));
+      .where(
+        and(
+          eq(dataSourceChannelState.kind, "reddit_account"),
+          eq(dataSourceChannelState.channelKey, handle),
+        ),
+      );
     expect(state.length).toBe(0);
     const queueAfter = await db
       .select()

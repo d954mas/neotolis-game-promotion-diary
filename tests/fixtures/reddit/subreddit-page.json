@@ -6,11 +6,7 @@
     "subreddit": "gamedev",
     "page_size": 24,
     "trimmed_to": 4,
-    "extra_fields_vs_author_search": [
-      "post_hint",
-      "domain",
-      "subreddit_id"
-    ],
+    "extra_fields_vs_author_search": ["post_hint", "domain", "subreddit_id"],
     "note": "Native subreddit envelope {success,posts,after}. Trimmed to 4 posts to minimize committed third-party public data. See 12-SPIKE.md."
   },
   "success": true,

@@ -29,13 +29,17 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
   };
 });
 
-vi.mock("../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    fetchRedditFeedPage: async (): Promise<RedditFeedPage> => provider.pages.shift() ?? emptyPage(),
-  };
-});
+vi.mock(
+  "../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js",
+  async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>;
+    return {
+      ...actual,
+      fetchRedditFeedPage: async (): Promise<RedditFeedPage> =>
+        provider.pages.shift() ?? emptyPage(),
+    };
+  },
+);
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
@@ -55,7 +59,9 @@ function normalizedFixturePages(): RedditFeedPage[] {
 }
 
 async function seedAccountSource(handle: string): Promise<string> {
-  const user = await seedUserDirectly({ email: `rdt-walk-${Math.random().toString(36).slice(2)}@t.io` });
+  const user = await seedUserDirectly({
+    email: `rdt-walk-${Math.random().toString(36).slice(2)}@t.io`,
+  });
   const [row] = await db
     .insert(dataSources)
     .values({
@@ -82,7 +88,12 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     provider.pages = normalizedFixturePages();
 
     await handleBackfillAccount({
-      data: { kind: "reddit_account", channelKey: handle, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     // ALL 17 fixture posts landed as events, keyed by post.name (t3 fullname).
@@ -101,7 +112,12 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     provider.pages = normalizedFixturePages();
 
     await handleBackfillAccount({
-      data: { kind: "reddit_account", channelKey: handle, depthBoundIso: "1970-01-01T00:00:00Z", flow: "initial" },
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "initial",
+      },
     });
 
     const expectedIds = new Set(ALL_FIXTURE_POSTS.map((p) => (p as { name: string }).name));

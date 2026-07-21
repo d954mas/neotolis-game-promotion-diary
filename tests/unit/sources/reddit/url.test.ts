@@ -76,9 +76,7 @@ describe("reddit url parsing (Phase 12 rebuild)", () => {
   });
 
   it("[12-03] redditParsePostUrl: host-check FIRST — example.com/r/X/comments/Y → null", () => {
-    expect(
-      redditParsePostUrl("https://example.com/r/gamedev/comments/1ubhppn/title"),
-    ).toBeNull();
+    expect(redditParsePostUrl("https://example.com/r/gamedev/comments/1ubhppn/title")).toBeNull();
     expect(redditParsePostUrl("https://reddit.com.evil.com/r/x/comments/y")).toBeNull();
     expect(redditParsePostUrl("garbage")).toBeNull();
   });

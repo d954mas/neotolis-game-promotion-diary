@@ -107,7 +107,10 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.work(QUEUES.REDDIT_POLL_CRON, { batchSize: 2 }, async (jobs) => {
     for (const job of jobs) {
       await handleRedditPollCron(
-        job as { id?: string; data: { tier: "active" | "cold" | "warm" } & Record<string, unknown> },
+        job as {
+          id?: string;
+          data: { tier: "active" | "cold" | "warm" } & Record<string, unknown>;
+        },
         boss,
       );
     }
@@ -167,7 +170,10 @@ async function backfillSource(
       depthBoundIso: EPOCH_ISO,
       flow: ctx.origin === "user" ? "incremental" : "auto_passive",
     },
-    { singletonKey: `reddit-backfill-${kind}-${channelKey}`, priority: ctx.origin === "user" ? 1 : 0 },
+    {
+      singletonKey: `reddit-backfill-${kind}-${channelKey}`,
+      priority: ctx.origin === "user" ? 1 : 0,
+    },
   );
   return { jobId, queue };
 }
@@ -189,7 +195,9 @@ async function backfillSource(
  *      validation — a typo yields an empty first walk). Throws AppError 422 on an
  *      unparseable URL so a phantom source is never created.
  */
-async function normalizeSourceOnCreate(input: NormalizeSourceInput): Promise<NormalizeSourceResult> {
+async function normalizeSourceOnCreate(
+  input: NormalizeSourceInput,
+): Promise<NormalizeSourceResult> {
   const parsed = redditParseSourceUrl(input.handleUrl);
   if (parsed === null) {
     throw new AppError(
@@ -283,9 +291,7 @@ async function enqueueRefreshNow(input: {
   tx?: DbOrTx;
 }): Promise<{ queue: string; jobId: string | null }> {
   const { adapterRefreshQueue } = await import("$lib/server/db/schema/index.js");
-  const { adapterRefreshQueueLabel } = await import(
-    "$lib/server/services/adapter-lane-worker.js"
-  );
+  const { adapterRefreshQueueLabel } = await import("$lib/server/services/adapter-lane-worker.js");
   const dbCtx = input.tx ?? db;
   const [inserted] = await dbCtx
     .insert(adapterRefreshQueue)
@@ -372,7 +378,8 @@ async function fetchEventPreviewMetadata(
     },
   });
 
-  const ownerUrl = post.ownerUsername !== null ? `https://www.reddit.com/user/${post.ownerUsername}` : "";
+  const ownerUrl =
+    post.ownerUsername !== null ? `https://www.reddit.com/user/${post.ownerUsername}` : "";
   return {
     kind: "ok",
     title: buildRedditTitle(post.caption) || `Reddit post · ${post.id}`,

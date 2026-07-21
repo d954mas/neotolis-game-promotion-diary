@@ -72,7 +72,8 @@ beforeEach(() => {
 
 describe("reddit.poll.cron enqueue + throttle skip-gate", () => {
   it("[12-05] active tier enqueues the ACTIVE channel (recent posts), not the cold one", async () => {
-    const act = `act${uniq()}`, cold = `cld${uniq()}`;
+    const act = `act${uniq()}`,
+      cold = `cld${uniq()}`;
     await seedChannel(act, 1); // newest post 1d → active
     await seedChannel(cold, 40); // newest post 40d → cold (> 28d boundary)
     const sent: SentJob[] = [];
@@ -85,7 +86,8 @@ describe("reddit.poll.cron enqueue + throttle skip-gate", () => {
   });
 
   it("[12-05] cold tier enqueues the COLD channel, not the active one", async () => {
-    const act = `act${uniq()}`, cold = `cld${uniq()}`;
+    const act = `act${uniq()}`,
+      cold = `cld${uniq()}`;
     await seedChannel(act, 1);
     await seedChannel(cold, 40);
     const sent: SentJob[] = [];
@@ -113,7 +115,8 @@ describe("reddit.poll.cron enqueue + throttle skip-gate", () => {
 
   it("[12-05] throttle at 80% skips COLD (non-essential) but still runs ACTIVE", async () => {
     throttle = "eighty";
-    const act = `act${uniq()}`, cold = `cld${uniq()}`;
+    const act = `act${uniq()}`,
+      cold = `cld${uniq()}`;
     await seedChannel(act, 1);
     await seedChannel(cold, 40);
     const sentCold: SentJob[] = [];
@@ -123,6 +126,9 @@ describe("reddit.poll.cron enqueue + throttle skip-gate", () => {
     await handleRedditPollCron({ id: "j6", data: { tier: "active" } }, stubBoss(sentActive));
 
     expect(sentCold, "cold is skipped at 80%").toHaveLength(0);
-    expect(sentActive.map((s) => s.payload.channelKey), "active still runs at 80%").toContain(act);
+    expect(
+      sentActive.map((s) => s.payload.channelKey),
+      "active still runs at 80%",
+    ).toContain(act);
   });
 });

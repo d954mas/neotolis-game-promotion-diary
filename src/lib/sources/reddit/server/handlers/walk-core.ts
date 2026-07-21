@@ -301,7 +301,16 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     }
     await markChannelLastPolledAt(config.kind, channelKey);
     if (triggerUserId) {
-      await writeWalkAudit({ config, job, flow, channelKey, triggerUserId, requestsUsed, inserted: 0, branch });
+      await writeWalkAudit({
+        config,
+        job,
+        flow,
+        channelKey,
+        triggerUserId,
+        requestsUsed,
+        inserted: 0,
+        branch,
+      });
     }
     logger.info(
       { jobId: job.id, channelKey },
@@ -311,7 +320,12 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   }
 
   // ── Fan-out INSERT per subscriber ──
-  const { insertedTotal, insertedByUser } = await fanOut(collectedEvents, subscribers, flow, triggerUserId);
+  const { insertedTotal, insertedByUser } = await fanOut(
+    collectedEvents,
+    subscribers,
+    flow,
+    triggerUserId,
+  );
   if (
     flow === "incremental" &&
     triggerUserId &&
@@ -453,7 +467,13 @@ async function reconcileDisappearances(
 
 async function fanOut(
   collectedEvents: RawEvent[],
-  subscribers: Array<{ id: string; userId: string; autoImport: boolean; isOwnedByMe: boolean; backfillTargetSince: Date | null }>,
+  subscribers: Array<{
+    id: string;
+    userId: string;
+    autoImport: boolean;
+    isOwnedByMe: boolean;
+    backfillTargetSince: Date | null;
+  }>,
   flow: RedditWalkFlow,
   triggerUserId: string | undefined,
 ): Promise<{ insertedTotal: number; insertedByUser: Map<string, number> }> {
@@ -478,7 +498,8 @@ async function fanOut(
       ),
     );
   const existingSet = new Set<string>();
-  for (const r of existing) if (r.externalId) existingSet.add(`${r.userId}|${r.sourceId}|${r.externalId}`);
+  for (const r of existing)
+    if (r.externalId) existingSet.add(`${r.userId}|${r.sourceId}|${r.externalId}`);
 
   for (const ev of collectedEvents) {
     for (const sub of subscribers) {
