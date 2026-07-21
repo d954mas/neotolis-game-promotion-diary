@@ -19,6 +19,7 @@ export {
   resetSocialDailyCap,
   markSocialThrottleTransition,
   markSocialBudgetExhausted,
+  resolveOperatorUserId,
   todayPacific,
   type SocialThrottleState,
   type SocialQuotaPool,

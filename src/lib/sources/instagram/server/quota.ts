@@ -533,8 +533,14 @@ export async function markSocialBudgetExhausted(args: {
  * Resolve operator's user_id by email — ADMIN_EMAIL_ALLOWLIST[0] is the
  * canonical operator. Cached at module scope (container restart re-resolves).
  * Returns null if the allowlist is empty OR the email has no matching user row.
+ *
+ * Exported so system-emitted cron audits (e.g. the Reddit deletion-propagation
+ * purge) that must write under the operator's user_id resolve it from the SAME
+ * cached one-source-of-truth the budget-exhausted audit uses — no third cache copy
+ * (the drift the razed reddit operator-resolver warned about). resetSocialDailyCap
+ * clears the cache each Pacific day.
  */
-async function resolveOperatorUserId(): Promise<string | null> {
+export async function resolveOperatorUserId(): Promise<string | null> {
   if (cachedOperatorId !== undefined) return cachedOperatorId;
   const allowlist = [...env.ADMIN_EMAIL_ALLOWLIST];
   if (allowlist.length === 0) {
