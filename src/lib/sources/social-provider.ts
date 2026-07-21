@@ -11,7 +11,7 @@
 //
 // Types + interfaces only. No implementation lives here.
 
-export type SocialPlatform = "instagram" | "tiktok" | "twitter"; // grows per later phase
+export type SocialPlatform = "instagram" | "tiktok" | "twitter" | "reddit"; // grows per later phase
 
 export interface NormalizedPost {
   /** Platform-native post/reel id → events.external_id. */
