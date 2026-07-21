@@ -403,6 +403,27 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
   return row?.postId ?? t3;
 }
 
+/**
+ * validateEventInput — reddit_post URL-invariant for the merged-state PATCH gate
+ * (mirrors youtube/telegram validateEventInput). The CREATE path enforces url-required
+ * via its Zod schema; without this the PATCH merged-state validator (events-mutation.ts)
+ * would let a client null the url on a reddit_post OR retag a non-Reddit event as
+ * reddit_post — the razed adapter carried this check and the Phase-12 rewrite dropped it.
+ */
+function validateEventInput(input: { kind: string; url?: string | null }): void {
+  if (input.kind !== "reddit_post") return;
+  if (!input.url) {
+    throw new AppError("url is required when kind=reddit_post", "kind_url_inconsistent", 422, {
+      reason: "reddit_post_requires_url",
+    });
+  }
+  if (redditParsePostUrl(input.url) === null) {
+    throw new AppError("url is not a recognized Reddit post URL", "kind_url_inconsistent", 422, {
+      reason: "url_not_reddit_post",
+    });
+  }
+}
+
 // NO registerRoutes: no same-origin thumbnail proxy (Pitfall 5 — hotlink + onerror;
 // the image/gallery card variant is confirmed at 12-06 UAT). Do NOT pre-build it.
 
@@ -416,6 +437,7 @@ export const redditAdapter: SourceAdapter & typeof redditAccountAdapterCore = {
   onSourceCreated,
   fetchEventPreviewMetadata,
   resolveCachedExternalId,
+  validateEventInput,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "reddit_post",
     canRun: async () => {

@@ -144,17 +144,26 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
           publishedAt: sql`COALESCE(${args.publishedAt ?? null}, ${redditPosts.publishedAt})`,
           author: sql`COALESCE(${args.author ?? null}, ${redditPosts.author})`,
           authorFullname: sql`COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname})`,
-          // ★ Variant-A CLEAR-ON-REAPPEAR (12-SPIKE): a post that is currently ALIVE
-          //   in the feed (removed_by_category null ⇒ !detectDeletion) has its
-          //   deletion_detected_at CLEARED back to NULL. This makes the disappearance
-          //   detector self-correcting — a post falsely flagged by a transient walk gap
-          //   that reappears in a later walk is un-flagged BEFORE the 48h grace elapses,
-          //   so ONLY posts that stay gone ≥48h are purged. When the removed belt DOES
-          //   fire, COALESCE keeps a prior detection timestamp (idempotent first-detect —
-          //   the grace clock never resets).
-          deletionDetectedAt: detectDeletion
-            ? sql`COALESCE(${redditPosts.deletionDetectedAt}, ${now})`
-            : sql`NULL`,
+          // ★ Variant-A CLEAR-ON-REAPPEAR (12-SPIKE): the grace clock is touched ONLY
+          //   on a confirmed-ALIVE poll (status "ok" — the post was actually fetched
+          //   back from the feed). A non-ok poll (not_found/private/rate_limited/
+          //   auth_error) is NOT evidence the post is alive, so it must LEAVE
+          //   deletion_detected_at UNTOUCHED. Gating the clear on !detectDeletion alone
+          //   was wrong: ScrapeCreators never returns removed_by_category, so
+          //   detectDeletion is always false, which meant a single "Refresh now" on an
+          //   already-flagged-removed post (user_post lane → not_found snapshot) wiped
+          //   the 48h grace the purge cron acts on — and the manual lane has no
+          //   deletion-detect guard (unlike the auto warm lane's isNull filter). On an
+          //   alive poll: a post the removed belt did NOT fire on is un-flagged back to
+          //   NULL (self-correcting a transient walk gap that reappears before the 48h
+          //   grace elapses); when the belt DID fire, COALESCE keeps the first-detect
+          //   timestamp (idempotent — the grace clock never resets).
+          deletionDetectedAt:
+            args.status !== "ok"
+              ? sql`${redditPosts.deletionDetectedAt}`
+              : detectDeletion
+                ? sql`COALESCE(${redditPosts.deletionDetectedAt}, ${now})`
+                : sql`NULL`,
           lastPolledAt: now,
           lastPollStatus: args.status,
           pollFailureCount: args.status === "ok" ? 0 : sql`${redditPosts.pollFailureCount} + 1`,

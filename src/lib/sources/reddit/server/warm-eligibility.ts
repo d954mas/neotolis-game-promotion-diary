@@ -24,13 +24,23 @@ import { redditPosts } from "$lib/server/db/schema/index.js";
 import { env } from "$lib/server/config/env.js";
 import { createWarmEligibilitySelector } from "$lib/sources/server/social-warm-lane.js";
 
-// Cap the warm auto-refresh fan-out to the N newest eligible posts PER SUBREDDIT. A
-// legitimate low-traffic source never approaches it (its posts stay in the daily walk,
-// so they are refreshed there and never become warm-eligible); it exists so a firehose
-// subreddit added by mistake can't fan ~50 buried off-walk posts/day into the shared
-// prepaid budget (those buried posts also can't be single-fetched, so refreshing them is
-// pure waste — refresh-queue-tick.ts). Bounds one such source's warm spend to ~5 credits/day,
-// on top of the global 80/95% throttle. A code constant, not an operator knob (like K=2 / backfill 100).
+// Cap the warm auto-refresh fan-out to the N newest eligible posts PER SUBREDDIT PER
+// TICK. A legitimate low-traffic source never approaches it (its posts stay in the daily
+// walk, so they are refreshed there and never become warm-eligible); it exists so a
+// firehose subreddit added by mistake can't fan its buried off-walk posts into an
+// UNBOUNDED per-tick warm batch and monopolize one tick's shared prepaid spend (those
+// buried posts also can't be single-fetched, so refreshing them is pure waste —
+// refresh-queue-tick.ts).
+//
+// SCOPE — this is a PER-TICK rate cap, NOT a per-day cap (do not over-claim). The warm
+// producer runs HOURLY and every refresh bumps last_polled_at, so a just-refreshed post
+// drops out of the next tick's stale set and the next tick picks the NEXT N newest. Over
+// 24 ticks a firehose subreddit can still push up to ~24×N distinct posts/day through the
+// paid lane. The real per-day ceiling on a mistaken firehose is the operator's global
+// 80/95% daily-cap throttle (createWarmRefreshHandler skips warm at ≥80%); this per-subject
+// cap only keeps ONE subreddit from dominating a single tick. A hard per-subreddit/day cap
+// would need a warm-specific daily counter (deferred — the global throttle is the money
+// stop). A code constant, not an operator knob (like K=2 / backfill 100).
 const WARM_MAX_PER_SUBREDDIT = 5;
 
 /**

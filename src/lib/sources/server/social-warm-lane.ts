@@ -344,7 +344,7 @@ interface RefreshProvider {
   ): Promise<NormalizedSinglePost | null>;
 }
 
-/** The claimGate permit shape (mirrors Reddit's `{ pacer: "already-acquired" }`):
+/** The claimGate permit shape (Twitter's QPS-pacer seam — the only pacer platform):
  *  `pacerAlreadyAcquired` is true iff the lane acquired the global pacer slot in the
  *  claimGate this tick, so the per-row HTTP seam skips its own acquire. */
 interface SocialRefreshPermit {
@@ -374,9 +374,8 @@ export interface SocialRefreshLaneConfig {
    *  it reach the seam, fail rate-limited, write a snapshot, and complete `done` with no
    *  retry — which is how a manual Refresh-Now silently no-ops under contention. When
    *  acquired, the permit threads `pacerAlreadyAcquired` so the seam does NOT
-   *  re-acquire. Runs on the claim `tx` so a claim-tx rollback rolls the slot back too
-   *  (mirrors Reddit's acquireRedditPacerSlotWith(ctx.tx)). IG/TikTok omit this (no
-   *  pacer) and keep their budget-only gate. */
+   *  re-acquire. Runs on the claim `tx` so a claim-tx rollback rolls the slot back too.
+   *  IG/TikTok/Reddit omit this (no QPS pacer) and keep their budget-only gate. */
   acquirePacerSlot?(tx: Tx): Promise<{ acquired: boolean; waitMs: number }>;
   /** Resolve the post's permalink from the public-data posts cache, or null on a
    *  cache miss (e.g. a paste before the first account poll → graceful skip). */
@@ -456,9 +455,9 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
     // Global QPS pacer (Twitter): acquire AFTER budget passes, on the claim tx so a
     // claim-tx rollback rolls the slot back too. A denied slot DEFERS — the row stays
     // pending and is retried, so a manual Refresh-Now is never consumed against a busy
-    // slot. Acquiring here (not at the seam) mirrors Reddit's claimRedditPacerSlot; the
-    // permit then tells the seam to skip its own acquire so the slot isn't double-spent.
-    // IG/TikTok pass no acquirePacerSlot → pacerAlreadyAcquired stays false.
+    // slot. Acquiring here (not at the seam) keeps the slot on the claim tx; the permit
+    // then tells the seam to skip its own acquire so the slot isn't double-spent.
+    // IG/TikTok/Reddit pass no acquirePacerSlot → pacerAlreadyAcquired stays false.
     let pacerAlreadyAcquired = false;
     if (config.acquirePacerSlot !== undefined) {
       const slot = await config.acquirePacerSlot(ctx.tx);

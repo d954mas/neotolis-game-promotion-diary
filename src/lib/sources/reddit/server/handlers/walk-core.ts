@@ -22,9 +22,11 @@
 //   - DAILY INCREMENTAL poll: bounded to K = INCREMENTAL_PAGE_CAP (2) pages — the
 //     firehose bound. A busy subreddit is capped to ~2 credits/poll; a legit
 //     low-traffic source hits end-of-feed / the window first.
-//   - Per-source ≤5 credits/day emerges from K=2 daily walk + the ≤1 warm one-shot
-//     catch (well under 5), on top of the inherited per-user LIMIT_SOCIAL_REQUESTS_
-//     PER_DAY + the operator 80/95% budget throttle (the hard money stops).
+//   - A LEGIT low-traffic source lands at ≤~5 credits/day: K=2 daily walk + at most ~1
+//     warm one-shot catch per post that fell off the walk. A mistaken FIREHOSE source is
+//     NOT bounded to ~5/day by the per-tick warm cap (see warm-eligibility.ts SCOPE note)
+//     — its hard ceiling is the inherited per-user LIMIT_SOCIAL_REQUESTS_PER_DAY + the
+//     operator 80/95% budget throttle (the real money stops).
 
 import { and, eq, gte, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";

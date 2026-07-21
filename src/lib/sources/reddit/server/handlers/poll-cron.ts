@@ -85,6 +85,10 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
     const candidates = await db
       .selectDistinct({
         channelKey: dataSourceChannelState.channelKey,
+        // MUST appear in the SELECT DISTINCT list — it is the ORDER BY key below, and
+        // Postgres rejects a DISTINCT whose ORDER BY expr is not projected (the twitter
+        // clone-source carries it; dropping it broke every active/cold tick).
+        lastPolledAt: dataSourceChannelState.lastPolledAt,
         newestPost: newestPostExpr,
       })
       .from(dataSourceChannelState)
