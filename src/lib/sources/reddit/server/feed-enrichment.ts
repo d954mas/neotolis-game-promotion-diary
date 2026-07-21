@@ -104,6 +104,7 @@ export async function redditEnrichFeedDtos(
           thumbnailUrl: redditPosts.thumbnailUrl,
           mediaType: redditPosts.mediaType,
           subredditSlug: redditPosts.subredditSlug,
+          author: redditPosts.author,
         })
         .from(redditPosts)
         .where(inArray(redditPosts.postId, externalIds)),
@@ -123,13 +124,19 @@ export async function redditEnrichFeedDtos(
 
     const postMeta = new Map<
       string,
-      { thumbnailUrl: string | null; mediaType: string | null; subredditSlug: string | null }
+      {
+        thumbnailUrl: string | null;
+        mediaType: string | null;
+        subredditSlug: string | null;
+        author: string | null;
+      }
     >();
     for (const r of postRows) {
       postMeta.set(r.postId, {
         thumbnailUrl: r.thumbnailUrl,
         mediaType: r.mediaType,
         subredditSlug: r.subredditSlug,
+        author: r.author,
       });
     }
 
@@ -139,12 +146,13 @@ export async function redditEnrichFeedDtos(
     //    unpaused tick. We overlay it onto each event's metadata.operator_paused so
     //    the PollingBadge lights up. NO per-event denormalization: one channel-state
     //    row drives every event of the source. Keyed on the subreddit_slug channelKey
-    //    (reddit_subreddit sources); account sources key on the username channelKey,
-    //    also carried through the same overlay when present.
+    //    (reddit_subreddit sources) OR the LOWERCASE username channelKey (reddit_account
+    //    sources — reddit_posts.author is stored verbatim, so lowercase it to match the
+    //    channel-state key). Both are gathered so a paused account source lights too.
     const channelKeys = [
       ...new Set(
         postRows
-          .map((r) => r.subredditSlug)
+          .flatMap((r) => [r.subredditSlug, r.author === null ? null : r.author.toLowerCase()])
           .filter((k): k is string => k !== null && k !== ""),
       ),
     ];
@@ -180,11 +188,12 @@ export async function redditEnrichFeedDtos(
         thumbnailUrl: meta?.thumbnailUrl ?? null,
         mediaType: meta?.mediaType ?? null,
       };
-      if (
-        meta?.subredditSlug !== null &&
-        meta?.subredditSlug !== undefined &&
-        pausedKeys.has(meta.subredditSlug)
-      ) {
+      // A post is paused if EITHER its subreddit source OR its account source is paused.
+      const subjectKeys = [
+        meta?.subredditSlug ?? null,
+        meta?.author == null ? null : meta.author.toLowerCase(),
+      ];
+      if (subjectKeys.some((k) => k !== null && pausedKeys.has(k))) {
         const base =
           dto.metadata !== null && typeof dto.metadata === "object"
             ? (dto.metadata as Record<string, unknown>)

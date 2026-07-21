@@ -337,7 +337,7 @@
 
   "admin_reddit_section_title": "Reddit ingest — operations",
   "admin_reddit_disabled_heading": "Reddit ingest disabled",
-  "admin_reddit_disabled_body": "REDDIT_USER_AGENT is empty in this environment, so the Reddit adapter is not running. Set the env var (see .env.example) and restart the worker to enable.",
+  "admin_reddit_disabled_body": "Reddit import is off: set REDDIT_IMPORT_ENABLED=true and REDDIT_PROVIDER=scrapecreators (see .env.example) and restart the worker to enable.",
   "admin_reddit_queue_block_title": "In queue right now",
   "admin_reddit_queue_block_intro": "Live snapshot of reddit_refresh_queue. pending = waiting for the worker. processing = handler running (usually 0–1). dead_letter = retries exhausted (review needed).",
   "admin_reddit_col_lane": "Queue",
