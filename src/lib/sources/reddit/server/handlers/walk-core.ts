@@ -192,10 +192,10 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // ── Walk pages within this invocation to the branch's coverage boundary ──
   for (let pageNo = 0; pageNo < pageCap; pageNo++) {
     if (state.complete) break;
-    if (isDeep && state.collected >= maxPosts) {
-      crossedBound = true;
-      break;
-    }
+    // Deep cap reached at a page boundary: stop WITHOUT marking complete (the feed may
+    // have more) — a partial pass, so reconciliation is skipped (coveragePassComplete
+    // reads state.complete).
+    if (isDeep && state.collected >= maxPosts) break;
     walkedThisTick = true;
 
     let page: Awaited<ReturnType<typeof fetchRedditFeedPage>>;
@@ -422,7 +422,6 @@ async function reconcileDisappearances(
       ? eq(redditPosts.author, channelKey)
       : eq(redditPosts.subredditSlug, channelKey);
 
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- reddit_posts is public-data (allowlisted); the disappearance sweep is scoped to one subject's walked window, not a tenant.
   const updated = await db
     .update(redditPosts)
     .set({ deletionDetectedAt: sql`NOW()`, updatedAt: new Date() })

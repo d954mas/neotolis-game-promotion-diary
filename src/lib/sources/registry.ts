@@ -12,10 +12,7 @@
 // route differ).
 import type { SourceAdapter, SourceKind } from "./adapter.js";
 import { youtubeAdapter } from "./youtube/server/index.js";
-// TODO(12-05): re-point at the rebuilt ScrapeCreators reddit barrel. The old
-// reddit adapter tree was razed in Plan 12-02 (D-05); Plans 12-03/04/05 rebuild
-// it. Temporarily unwired so the build stays green while the barrel is absent.
-// import { redditAdapter } from "./reddit/server/index.js";
+import { redditAdapter } from "./reddit/server/index.js";
 import { instagramAdapter } from "./instagram/server/index.js";
 import { telegramAdapter } from "./telegram/server/index.js";
 import { tiktokAdapter } from "./tiktok/server/index.js";
@@ -31,13 +28,11 @@ import { twitterAdapter } from "./twitter/server/index.js";
 // between them is symbolic but stable.
 const registry = new Map<SourceKind, SourceAdapter>([
   ["youtube_channel", youtubeAdapter],
-  // TODO(12-05): re-register reddit_account + reddit_subreddit → rebuilt
-  // redditAdapter (razed in 12-02; both kinds share one adapter). While
-  // unwired, getAdapter("reddit_*") throws and hasAdapter returns false, so
-  // reddit degrades to "not built" harmlessly (import gated off by
-  // REDDIT_IMPORT_ENABLED anyway).
-  // ["reddit_account", redditAdapter],
-  // ["reddit_subreddit", redditAdapter],
+  // reddit_account + reddit_subreddit BOTH map to the ONE redditAdapter (both kinds
+  // share one adapter — backfillSource dispatches on source.kind). It appears ONCE in
+  // the dedup-aware allAdapters array below.
+  ["reddit_account", redditAdapter],
+  ["reddit_subreddit", redditAdapter],
   ["instagram_account", instagramAdapter],
   ["telegram_channel", telegramAdapter],
   ["tiktok_account", tiktokAdapter],
