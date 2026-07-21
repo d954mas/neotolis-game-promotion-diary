@@ -71,24 +71,16 @@ afterEach(async () => {
     const names = rows.map((r) => `"${r.tablename}"`).join(", ");
     await pool.query(`TRUNCATE ${names} RESTART IDENTITY CASCADE`);
 
-    // reddit_pacer is a singleton-row global rate-limit token. TRUNCATE
-    // CASCADE empties it; restore the one row + reset next_allowed_at
-    // so the next test starts with an immediately-available slot.
-    // Without this, an integration test that makes >1 redditFetch
-    // would block on the pacer after the first call (slot fires
-    // every 7.5s).
-    await pool.query(`INSERT INTO "reddit_pacer" ("id", "next_allowed_at") VALUES (1, NOW())
-                      ON CONFLICT ("id") DO UPDATE
-                      SET next_allowed_at = NOW(),
-                          paused_until = NULL,
-                          pause_level = 0,
-                          last_pause_reason = NULL,
-                          last_paused_at = NULL`);
-
-    // twitter_pacer is the same singleton-row pattern (Phase 11 — minus the pause
-    // columns). TRUNCATE CASCADE empties it; restore id=1 with an immediately-
-    // available slot so any integration test that issues a real twitterFetch is not
-    // blocked on a missing/future pacer row.
+    // twitter_pacer is a singleton-row global rate-limit token (Phase 11). TRUNCATE
+    // CASCADE empties it; restore id=1 with an immediately-available slot so any
+    // integration test that issues a real twitterFetch is not blocked on a
+    // missing/future pacer row.
+    //
+    // NOTE: the old reddit_pacer re-seed lived here too, but Phase 12 razed the
+    // reddit_pacer table (ScrapeCreators has no per-account QPS ceiling). Its INSERT
+    // must NOT run — the table is gone, so it threw "relation reddit_pacer does not
+    // exist", the catch swallowed it, and the twitter_pacer re-seed below never ran →
+    // every twitter pacer test failed on a missing id=1 row.
     await pool.query(`INSERT INTO "twitter_pacer" ("id", "next_allowed_at") VALUES (1, NOW())
                       ON CONFLICT ("id") DO UPDATE SET next_allowed_at = NOW()`);
   } catch {
