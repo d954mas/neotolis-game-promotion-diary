@@ -18,7 +18,6 @@ const { selectWarmRedditPostIds } =
   await import("../../src/lib/sources/reddit/server/warm-eligibility.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
-const DAY = 86_400_000;
 const HOUR = 3_600_000;
 
 interface SeedOpts {

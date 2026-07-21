@@ -24,7 +24,7 @@
 import { pgTable, text, integer, timestamp } from "drizzle-orm/pg-core";
 
 export const redditSubreddits = pgTable("reddit_subreddits", {
-  // Lowercase subreddit slug (= data_sources.metadata.subreddit, the walk join
+  // Lowercase subreddit slug (= data_sources.metadata.slug, the walk join
   // key). Reddit forbids subreddit rename → rename-proof intrinsic PK, the safe
   // denormalization.
   slug: text("slug").primaryKey(),

@@ -36,6 +36,8 @@ import type {
   EventKind,
   EventPreviewMetadata,
   MinimalBoss,
+  NormalizeSourceInput,
+  NormalizeSourceResult,
   PollableSource,
   SourceAdapter,
   SourceCreatedHookSource,
@@ -168,6 +170,42 @@ async function backfillSource(
     { singletonKey: `reddit-backfill-${kind}-${channelKey}`, priority: ctx.origin === "user" ? 1 : 0 },
   );
   return { jobId, queue };
+}
+
+/**
+ * normalizeSourceOnCreate — PURE local URL canonicalization + metadata injection that
+ * runs BEFORE createSource's cheap exact-duplicate / quota pre-checks (adapter.ts
+ * NormalizeSourceInput contract). Two jobs canonicalizeOnCreate — which runs AFTER the
+ * pre-checks — structurally cannot do:
+ *   1. www-normalize the pasted URL (reddit.com/u/X → https://www.reddit.com/user/X) so
+ *      the exact handle_url duplicate pre-check compares apples to apples with the stored
+ *      canonical URL. Without it a re-add's RAW handle_url misses the pre-check, then
+ *      canonicalizeOnCreate resolves a non-null channelId and the re-add trips the generic
+ *      channel-id 409 (assertNoChannelConflict) instead of the per-kind 422 duplicate_source
+ *      the caller (UI toast + the reddit-specific message) expects.
+ *   2. inject metadata.handle (account) / metadata.slug (subreddit) — the URL-intrinsic,
+ *      rename-proof walk join key the read-model (enrichRedditSourcesWithLastPolled) and
+ *      backfillSource read. No upstream I/O: Reddit's key IS the immutable slug (lazy
+ *      validation — a typo yields an empty first walk). Throws AppError 422 on an
+ *      unparseable URL so a phantom source is never created.
+ */
+async function normalizeSourceOnCreate(input: NormalizeSourceInput): Promise<NormalizeSourceResult> {
+  const parsed = redditParseSourceUrl(input.handleUrl);
+  if (parsed === null) {
+    throw new AppError(
+      "Paste a Reddit profile or subreddit URL (e.g. https://www.reddit.com/user/<name> or /r/<sub>).",
+      "reddit_source_unresolvable",
+      422,
+      { handle_url: input.handleUrl },
+    );
+  }
+  const metadata =
+    parsed.kind === "reddit_subreddit" ? { slug: parsed.handle } : { handle: parsed.handle };
+  return {
+    handleUrl: parsed.externalUrl,
+    channelId: input.channelId ?? null,
+    metadata: { ...(input.metadata ?? {}), ...metadata },
+  };
 }
 
 /**
@@ -373,6 +411,7 @@ export const redditAdapter: SourceAdapter & typeof redditAccountAdapterCore = {
   registerQueues,
   scheduleCronTicks,
   backfillSource,
+  normalizeSourceOnCreate,
   canonicalizeOnCreate,
   onSourceCreated,
   fetchEventPreviewMetadata,

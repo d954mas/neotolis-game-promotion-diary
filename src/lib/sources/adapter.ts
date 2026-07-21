@@ -301,7 +301,7 @@ export interface CanonicalizeResult {
   displayName?: string | null;
   /** URL-intrinsic identifiers the walker needs as provider query keys, merged
    *  onto data_sources.metadata at create time. Mirrors
-   *  NormalizeSourceResult.metadata (Reddit's metadata.username/subreddit
+   *  NormalizeSourceResult.metadata (Reddit's metadata.handle/slug
    *  injection) — the Instagram walker reads metadata.handle here to call the
    *  provider (the account_id alone is not a query param). These are
    *  URL-intrinsic provider keys, NOT renameable display values, so persisting
@@ -331,7 +331,7 @@ export interface CreateContext {
  *
  *  Use this for deterministic parsing/canonicalization that must happen
  *  before exact handle_url duplicate checks, such as Reddit's
- *  reddit.com/u/X -> https://www.reddit.com/user/X and metadata.username
+ *  reddit.com/u/X -> https://www.reddit.com/user/X and metadata.handle
  *  injection. This hook MUST NOT burn upstream API quota; use
  *  canonicalizeOnCreate for I/O-backed canonicalization such as resolving
  *  a YouTube video URL to its channel id. */
@@ -550,7 +550,7 @@ export interface SyncStatsCapability {
     /** Optional per-adapter signal that the event's author matches one
      *  of the user's registered, owned sources. When set, createEvent
      *  UPDATEs events.author_is_me unless the caller passed an explicit
-     *  value. Reddit: t3.author === reddit_account.metadata.username.
+     *  value. Reddit: t3.author === reddit_account.metadata.handle.
      *  YouTube: inheritance happens via enrichFromUrl's findActiveSourceByHandleUrl,
      *  NOT via this field - YouTube returns undefined here. */
     authorIsMe?: boolean;

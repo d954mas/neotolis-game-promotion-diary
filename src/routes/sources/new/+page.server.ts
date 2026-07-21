@@ -161,12 +161,13 @@ export const actions: Actions = {
     const ipAddress = getClientAddress();
 
     // Reddit source metadata: the adapter's onSourceCreated /
-    // backfillSource dispatch on `metadata.username` (reddit_account) or
-    // `metadata.subreddit` (reddit_subreddit). Without these keys the
-    // first backfill enqueue silently no-ops (see adapter.ts L106-110).
-    // We populate them ONLY when the URL was auto-detected by
-    // parseSourceUrl (so the handle is canonical); manual-kind picks for
-    // Reddit fall back to a parse on the user-typed handleUrl.
+    // backfillSource dispatch on `metadata.handle` (reddit_account) or
+    // `metadata.slug` (reddit_subreddit) — the lowercase, rename-proof walk
+    // join key. The adapter's normalizeSourceOnCreate injects these inside
+    // createSource regardless; we ALSO populate them here when the URL was
+    // auto-detected by parseSourceUrl (so the canonical handle is present
+    // before the adapter hook runs). Manual-kind picks for Reddit fall back
+    // to the adapter's own parse on the user-typed handleUrl.
     const metadata: Record<string, unknown> = {};
     if (description) metadata.description = description;
     if (resolvedKind === "reddit_account" || resolvedKind === "reddit_subreddit") {
@@ -175,9 +176,9 @@ export const actions: Actions = {
       // and typed a non-URL, displayName is null — backfillSource
       // logs WARN and skips, which is the documented contract.
       if (resolvedKind === "reddit_account" && resolvedDisplayName) {
-        metadata.username = resolvedDisplayName;
+        metadata.handle = resolvedDisplayName;
       } else if (resolvedKind === "reddit_subreddit" && resolvedDisplayName) {
-        metadata.subreddit = resolvedDisplayName;
+        metadata.slug = resolvedDisplayName;
       }
     }
 

@@ -37,7 +37,7 @@
 import { pgTable, text, integer, timestamp } from "drizzle-orm/pg-core";
 
 export const redditAccounts = pgTable("reddit_accounts", {
-  // Lowercase immutable Reddit username (= data_sources.metadata.username, the
+  // Lowercase immutable Reddit username (= data_sources.metadata.handle, the
   // author-walk join key). Rename-proof intrinsic PK — the safe denormalization.
   username: text("username").primaryKey(),
   // Upstream Reddit display name / title as scraped. OUR truth for the account's

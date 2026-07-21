@@ -170,29 +170,30 @@ export async function enrichTelegramSourcesWithChannelTitle(dtos: DataSourceDto[
 }
 
 /**
- * Reddit sources don't have a channelId (they key on metadata.username
- * for reddit_account or metadata.subreddit for reddit_subreddit), so
- * `enrichWithChannelState` above misses them — they would show
- * "Never pulled" on /sources even after the worker has been polling
- * for days. Read last_metadata_refresh_at from the per-kind PUBLIC-
- * DATA caches and stamp it onto the DTO.
+ * Reddit sources carry the walk join key in metadata (metadata.handle for
+ * reddit_account, metadata.slug for reddit_subreddit — the lowercase, rename-proof
+ * username / subreddit slug the rebuilt adapter persists at create time). The
+ * "when did we last hear from Reddit about this subject" signal does NOT live on
+ * data_source_channel_state.last_polled_at (which the walker leaves null until a
+ * channel-scoped poll stamps it); it lives on the per-kind subject-entity tables.
+ * Read it from there and stamp it onto the DTO so /sources shows a real
+ * "updated N ago" instead of "Never pulled".
  *
  * reddit_subreddits / reddit_accounts (the Phase 12 subject-entity tables) carry
- * last_refreshed_at, stamped by the rebuilt adapter's write path (Plans 12-04/05)
- * on every successful walk — the same "when did we last hear from Reddit about
- * this subject" signal data_source_channel_state.last_polled_at gives YouTube.
- * Until the write path lands the column is null (renders "Never pulled"), which
- * is correct while the razed adapter is being rebuilt.
+ * last_refreshed_at, stamped by the rebuilt adapter's write path on every
+ * successful walk (walk-core upsertRedditAccount / upsertRedditSubreddit). The
+ * metadata VALUE (handle / slug) IS the tables' primary key (username / slug), so
+ * it joins directly — no separate id lookup.
  */
 async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise<void> {
   const subreddits: string[] = [];
   const usernames: string[] = [];
   for (const s of dtos) {
-    const md = (s.metadata ?? {}) as { subreddit?: unknown; username?: unknown };
-    if (s.kind === "reddit_subreddit" && typeof md.subreddit === "string" && md.subreddit) {
-      subreddits.push(md.subreddit);
-    } else if (s.kind === "reddit_account" && typeof md.username === "string" && md.username) {
-      usernames.push(md.username);
+    const md = (s.metadata ?? {}) as { slug?: unknown; handle?: unknown };
+    if (s.kind === "reddit_subreddit" && typeof md.slug === "string" && md.slug) {
+      subreddits.push(md.slug);
+    } else if (s.kind === "reddit_account" && typeof md.handle === "string" && md.handle) {
+      usernames.push(md.handle);
     }
   }
   if (subreddits.length === 0 && usernames.length === 0) return;
@@ -223,11 +224,11 @@ async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise
 
   for (const s of dtos) {
     if (s.lastPolledAt !== null && s.lastPolledAt !== undefined) continue;
-    const md = (s.metadata ?? {}) as { subreddit?: unknown; username?: unknown };
-    if (s.kind === "reddit_subreddit" && typeof md.subreddit === "string") {
-      s.lastPolledAt = subBySubreddit.get(md.subreddit) ?? null;
-    } else if (s.kind === "reddit_account" && typeof md.username === "string") {
-      s.lastPolledAt = subByUsername.get(md.username) ?? null;
+    const md = (s.metadata ?? {}) as { slug?: unknown; handle?: unknown };
+    if (s.kind === "reddit_subreddit" && typeof md.slug === "string") {
+      s.lastPolledAt = subBySubreddit.get(md.slug) ?? null;
+    } else if (s.kind === "reddit_account" && typeof md.handle === "string") {
+      s.lastPolledAt = subByUsername.get(md.handle) ?? null;
     }
   }
 }
