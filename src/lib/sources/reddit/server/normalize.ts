@@ -1,0 +1,321 @@
+// Reddit (ScrapeCreators) provider-shape → NormalizedPost / NormalizedSinglePost
+// / ResolvedAccount mapping (D-09).
+//
+// PURE module: no HTTP, no DB. Every field name + shape below is a LIVE-CONFIRMED
+// fact from 12-SPIKE.md (the `author:` search walk of u/d954mas + the native
+// r/gamedev subreddit envelope, 2026-07-21), NOT the documented contract. The net
+// deviations the spike froze versus the pre-spike docs are encoded here:
+//   1. externalId = `post.name` (the `t3_<base36>` fullname), NOT `post.id` (the
+//      base36 short id with no prefix).
+//   2. `is_self` + `thumbnail` are ABSENT from the response → the post FORM
+//      (self|link|image|gallery) is DERIVED from `post_hint` (subreddit endpoint)
+//      / `domain` / `url`-vs-`permalink` / `selftext`-non-empty / `is_video`.
+//   3. `removed_by_category` + `num_crossposts` are ABSENT → surfaced as null
+//      (forward-compat snapshot columns; deletion rides on disappearance-from-walk,
+//      NOT a field flag — spike Variant A).
+//   4. Two endpoints, ASYMMETRIC field sets — author-search adds `relative_position`;
+//      subreddit adds `post_hint`/`domain`/`subreddit_id`. Read the UNION by-presence.
+//
+// D-09 metric mapping (metrics-by-presence — absent → null, never 0):
+//   likes    = score         comments = num_comments
+//   views    = null (Reddit exposes none)   shares = null (num_crossposts absent)
+//
+// Validate-then-map discipline (mirrors tiktok/server/normalize.ts): each response
+// is parsed by a zod schema FIRST, then mapped. Spike-optional fields are
+// `.nullable().optional()` so a caption-less or metric-less post parses cleanly.
+//
+// SPIKE COVERAGE: image/gallery card variants were NOT sampled (neither u/d954mas
+// nor r/gamedev returned an image post) — the media-type derivation is built
+// defensively and live-confirmed at Plan 12-06 UAT.
+
+import { z } from "zod";
+import type {
+  NormalizedPost,
+  NormalizedSinglePost,
+  ProviderPage,
+  ResolvedAccount,
+  FeedOwner,
+} from "$lib/sources/social-provider.js";
+
+/** Reddit post FORM (stored in reddit_posts.media_type). Distinct from the
+ *  cross-platform NormalizedPost.kind vocabulary — is_self/thumbnail are ABSENT
+ *  so this is derived from post_hint / domain / url-vs-permalink / selftext. */
+export type RedditMediaType = "self" | "link" | "image" | "gallery";
+
+// ---- The ScrapeCreators reddit post shape (union across both endpoints) ----
+// name (t3_ fullname) + id (short) are the only always-present required ids;
+// everything else is nullable/optional so a trimmed or older post parses.
+const REDDIT_POST = z.object({
+  name: z.string(), // t3_<base36> fullname → externalId (spike deviation #1)
+  id: z.string(), // base36 short id (no prefix)
+  author: z.string().nullable().optional(),
+  author_fullname: z.string().nullable().optional(),
+  subreddit: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  selftext: z.string().nullable().optional(),
+  selftext_html: z.string().nullable().optional(),
+  score: z.number().nullable().optional(),
+  ups: z.number().nullable().optional(),
+  downs: z.number().nullable().optional(),
+  upvote_ratio: z.number().nullable().optional(),
+  total_awards_received: z.number().nullable().optional(),
+  num_comments: z.number().nullable().optional(),
+  // ABSENT from the ScrapeCreators response (spike) — forward-compat only.
+  num_crossposts: z.number().nullable().optional(),
+  removed_by_category: z.string().nullable().optional(),
+  created_utc: z.number().nullable().optional(),
+  created_at_iso: z.string().nullable().optional(),
+  permalink: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+  is_video: z.boolean().nullable().optional(),
+  over_18: z.boolean().nullable().optional(),
+  spoiler: z.boolean().nullable().optional(),
+  subreddit_subscribers: z.number().nullable().optional(),
+  // author-search-only.
+  relative_position: z.number().nullable().optional(),
+  // subreddit-only (the is_self replacement discriminator).
+  post_hint: z.string().nullable().optional(),
+  domain: z.string().nullable().optional(),
+  subreddit_id: z.string().nullable().optional(),
+  // ABSENT from ScrapeCreators (spike deviation #2) — accepted for forward-compat.
+  thumbnail: z.string().nullable().optional(),
+});
+
+type RedditPostRaw = z.infer<typeof REDDIT_POST>;
+
+// ---- The feed envelope (IDENTICAL for author-search + native subreddit) ----
+// { success, posts:[...], after }. End-of-feed = `after` absent/null (spike Q3:
+// the terminal page still carried posts) OR an empty posts[] (belt-and-suspenders).
+const FEED_ENVELOPE = z.object({
+  success: z.boolean().nullable().optional(),
+  posts: z.array(REDDIT_POST).nullable().optional(),
+  after: z.string().nullable().optional(),
+});
+
+/** Thumbnail literals Reddit historically used for "no image" (self/default/nsfw/
+ *  spoiler). The ScrapeCreators response OMITS `thumbnail` entirely, so this only
+ *  fires on the forward-compat path — harmless either way (Pitfall 5). */
+const THUMBNAIL_NON_URLS = new Set(["self", "default", "nsfw", "spoiler", "image", ""]);
+
+// i.redd.it + bare image extensions → an image the card can hotlink.
+const IMAGE_URL_RE = /(?:^https?:\/\/i\.redd\.it\/)|(?:\.(?:jpg|jpeg|png|gif|webp)(?:\?|$))/i;
+// A url that points BACK at a reddit comments permalink ⇒ a self/text post.
+const REDDIT_COMMENTS_URL_RE = /reddit\.com\/(?:r|user)\/[^/]+\/comments\//i;
+
+/** Derive the Reddit post FORM. is_self + thumbnail are ABSENT (spike deviation
+ *  #2), so classify from the union-by-presence discriminators: gallery URL →
+ *  gallery; post_hint/url image signal → image; self.<sub> domain / self-hint /
+ *  selftext / comments-url → self; everything else with an external domain →
+ *  link. Defensive (image/gallery unsampled — confirm at 12-06 UAT). */
+function deriveMediaType(raw: RedditPostRaw): RedditMediaType {
+  const url = raw.url ?? "";
+  const domain = raw.domain ?? null;
+  const postHint = raw.post_hint ?? null;
+  const hasSelftext = typeof raw.selftext === "string" && raw.selftext.trim() !== "";
+
+  if (/\/gallery\//i.test(url)) return "gallery";
+  if (postHint === "image") return "image";
+  if (IMAGE_URL_RE.test(url)) return "image";
+
+  const isSelfDomain = domain !== null && domain.startsWith("self.");
+  if (postHint === "self" || postHint === "text") return "self";
+  if (isSelfDomain) return "self";
+  if (REDDIT_COMMENTS_URL_RE.test(url)) return "self";
+
+  if (postHint === "link") return "link";
+  if (domain !== null && !isSelfDomain) return "link";
+  return hasSelftext ? "self" : "link";
+}
+
+/** Reddit FORM → the cross-platform NormalizedPost.kind vocabulary. reddit_posts
+ *  stores the richer RedditMediaType (via `mediaType` below); the port only
+ *  carries the shared vocab so the feed card + cross-source filter stay uniform. */
+function toPortKind(mediaType: RedditMediaType, raw: RedditPostRaw): NormalizedPost["kind"] {
+  if (raw.is_video === true) return "video";
+  switch (mediaType) {
+    case "image":
+      return "image";
+    case "gallery":
+      return "carousel";
+    case "self":
+    case "link":
+      return "text";
+  }
+}
+
+/** Thumbnail by-presence: a real URL survives; a Reddit "no image" literal → null;
+ *  otherwise DERIVE from the post url for image posts (i.redd.it). `thumbnail` is
+ *  absent from ScrapeCreators, so the image path is the live one (spike #2). */
+function pickThumbnail(raw: RedditPostRaw, mediaType: RedditMediaType): string | null {
+  const thumb = raw.thumbnail ?? null;
+  if (thumb !== null && !THUMBNAIL_NON_URLS.has(thumb) && /^https?:\/\//i.test(thumb)) {
+    return thumb;
+  }
+  if (mediaType === "image" && typeof raw.url === "string" && IMAGE_URL_RE.test(raw.url)) {
+    return raw.url;
+  }
+  return null;
+}
+
+/** Canonical permalink. ScrapeCreators returns `permalink` as a path (e.g.
+ *  `/r/<sub>/comments/<id>/<slug>/`); prefix the host. `url` may be an EXTERNAL
+ *  link (link posts), so never use it as the permalink. */
+function pickPermalink(raw: RedditPostRaw): string | null {
+  if (typeof raw.permalink === "string" && raw.permalink !== "") {
+    return raw.permalink.startsWith("http")
+      ? raw.permalink
+      : `https://www.reddit.com${raw.permalink}`;
+  }
+  return null;
+}
+
+/** D-09 event/preview title = the FIRST non-empty line of the given text, capped
+ *  at ~100 chars (the Add Event form title). One spelling for the walker + the
+ *  paste preview — callers pass the post title (falling back to selftext). */
+export function buildRedditTitle(text: string | null | undefined): string {
+  const trimmed = text?.trim() ?? "";
+  if (trimmed === "") return "";
+  const firstLine = trimmed.split("\n", 1)[0]!.trim();
+  return firstLine.length > 100 ? `${firstLine.slice(0, 99).trimEnd()}…` : firstLine;
+}
+
+/** The Reddit-specific fields the walker passes to the snapshot writer + the
+ *  reddit_posts row — they ride ALONGSIDE the port NormalizedPost (D-09), never
+ *  on the port type itself (nothing above the seam sees a ScrapeCreators name). */
+export interface NormalizedRedditPost extends NormalizedPost {
+  /** reddit_posts.media_type — the richer Reddit FORM (self|link|image|gallery). */
+  mediaType: RedditMediaType;
+  /** The post title (reddit_posts.title) — reddit posts carry a title distinct
+   *  from the self-post body, unlike IG/TikTok captions. */
+  title: string | null;
+  /** The self-post body (reddit_posts.caption) — null for link/image posts. */
+  selftext: string | null;
+  /** Lowercase intrinsic slug (the safe denorm — reddit_posts.subreddit_slug). */
+  subredditSlug: string | null;
+  /** Reddit username (reddit_posts.author — PURGED to null by the deletion cron). */
+  author: string | null;
+  /** Stable `t2_` id (reddit_posts.author_fullname). */
+  authorFullname: string | null;
+  /** The raw D-09 platform-owned columns the snapshot writer retains verbatim. */
+  raw: {
+    score: number | null;
+    upvoteRatio: number | null;
+    numComments: number | null;
+    numCrossposts: number | null;
+    removedByCategory: string | null;
+  };
+}
+
+/** Map one ScrapeCreators reddit post → NormalizedRedditPost. externalId =
+ *  post.name (the t3_ fullname — spike deviation #1). Exported pure so the unit
+ *  test asserts the mapping directly without spinning up the provider. */
+export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
+  const post = REDDIT_POST.parse(raw);
+  const mediaType = deriveMediaType(post);
+  const selftext =
+    typeof post.selftext === "string" && post.selftext.trim() !== "" ? post.selftext : null;
+  const title = typeof post.title === "string" && post.title !== "" ? post.title : null;
+
+  return {
+    id: post.name, // t3_<base36> fullname — the rename-proof externalId (NOT post.id)
+    kind: toPortKind(mediaType, post),
+    publishedAt: new Date((post.created_utc ?? 0) * 1000),
+    metrics: {
+      // D-09 metrics-by-presence: absent → null, never 0.
+      views: null, // Reddit exposes no view count
+      likes: typeof post.score === "number" ? post.score : null,
+      comments: typeof post.num_comments === "number" ? post.num_comments : null,
+      shares: null, // num_crossposts is ABSENT from the response
+    },
+    caption: title, // the post title is the headline; the body rides in `selftext`
+    thumbnailUrl: pickThumbnail(post, mediaType),
+    permalink: pickPermalink(post),
+    mediaType,
+    title,
+    selftext,
+    subredditSlug: post.subreddit != null ? post.subreddit.toLowerCase() : null,
+    author: post.author ?? null,
+    authorFullname: post.author_fullname ?? null,
+    raw: {
+      score: typeof post.score === "number" ? post.score : null,
+      upvoteRatio: typeof post.upvote_ratio === "number" ? post.upvote_ratio : null,
+      numComments: typeof post.num_comments === "number" ? post.num_comments : null,
+      // ABSENT from ScrapeCreators — always null (forward-compat column).
+      numCrossposts: typeof post.num_crossposts === "number" ? post.num_crossposts : null,
+      removedByCategory: post.removed_by_category ?? null,
+    },
+  };
+}
+
+/** Map one reddit post → NormalizedSinglePost (the paste-preview path). The
+ *  shortcode is the base36 short id (`post.id`, the `/comments/<id>/` URL tail);
+ *  the owner is the post's author (Reddit has no separate profile response). */
+export function normalizeSingleRedditPost(raw: unknown): NormalizedSinglePost {
+  const post = REDDIT_POST.parse(raw);
+  const full = normalizeRedditPost(raw);
+  return {
+    id: full.id,
+    shortcode: post.id,
+    kind: full.kind,
+    publishedAt: full.publishedAt,
+    metrics: full.metrics,
+    caption: full.caption,
+    thumbnailUrl: full.thumbnailUrl,
+    ownerId: post.author_fullname ?? null,
+    ownerUsername: post.author ?? null,
+  };
+}
+
+/** Anchor a ResolvedAccount off a post's FREE author fields (Reddit exposes no
+ *  user-profile endpoint — spike). `t2_` fullname → accountId (falls back to the
+ *  username), username → the renameable @handle. Null when there is no author. */
+export function normalizeRedditOwner(raw: unknown): ResolvedAccount | null {
+  const post = REDDIT_POST.parse(raw);
+  const username = post.author ?? null;
+  if (username === null || username === "") return null;
+  return {
+    accountId: post.author_fullname ?? username,
+    displayName: username,
+    username,
+    fullName: null,
+    avatarUrl: null,
+    followerCount: null,
+  };
+}
+
+/** The FREE feed owner (the account/subreddit the page belongs to) — read off the
+ *  first post's author. Reddit's feed carries no top-level owner object, so we
+ *  anchor on the post author (author-search: one author for the whole page). */
+function pickFeedOwner(post: RedditPostRaw | undefined): FeedOwner | null {
+  if (post === undefined) return null;
+  const username = post.author ?? null;
+  if (username === null) return null;
+  return {
+    accountId: post.author_fullname ?? null,
+    username,
+    avatarUrl: null,
+  };
+}
+
+/** Tree-local feed page — the richer ProviderPage the reddit walker (Plan 12-05)
+ *  consumes: `posts` carry the reddit-specific columns for the snapshot writer. */
+export interface RedditFeedPage extends ProviderPage {
+  posts: NormalizedRedditPost[];
+}
+
+/** Validate + map a feed envelope (author-search OR subreddit) → RedditFeedPage.
+ *  nextCursor = `after ?? null`; endOfFeed = null-`after` (spike Q3 terminal
+ *  signal) OR empty posts[]. 1 credit/page (spike Q5). */
+export function normalizeRedditFeed(json: unknown): RedditFeedPage {
+  const parsed = FEED_ENVELOPE.parse(json);
+  const rawPosts = parsed.posts ?? [];
+  const posts = rawPosts.map((p) => normalizeRedditPost(p));
+  const nextCursor = parsed.after ?? null;
+  return {
+    posts,
+    nextCursor,
+    endOfFeed: nextCursor === null || posts.length === 0,
+    creditsUsed: 1,
+    owner: pickFeedOwner(rawPosts[0]),
+  };
+}
