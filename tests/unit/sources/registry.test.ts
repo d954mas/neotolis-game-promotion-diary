@@ -30,7 +30,9 @@ describe("SourceRegistry", () => {
     expect(adapter.refreshQueue?.canRefresh("reddit_post")).toBe(false);
   });
 
-  it("redditAdapter declares its fixed lane worker schedule", () => {
+  // TODO(12-05): re-enable once the ScrapeCreators reddit adapter is re-wired
+  // into the registry (temporarily unwired in Plan 12-02; getAdapter throws).
+  it.skip("redditAdapter declares its fixed lane worker schedule", () => {
     const adapter = getAdapter("reddit_account");
     const worker = adapter.workQueue?.scheduledWorkers[0];
     expect(worker?.name).toBe("reddit.refresh");
@@ -79,12 +81,14 @@ describe("SourceRegistry", () => {
     expect(typeof adapter.canBackfillSource).toBe("function");
   });
 
-  it("redditAdapter does not treat synthetic daily observability as a syncStats hard stop", () => {
+  // TODO(12-05): re-enable once the reddit adapter is re-wired (unwired in 12-02).
+  it.skip("redditAdapter does not treat synthetic daily observability as a syncStats hard stop", () => {
     const adapter = getAdapter("reddit_account");
     expect(adapter.syncStats?.canRun).toBeUndefined();
   });
 
-  it("redditAdapter does not treat synthetic daily observability as a source-backfill hard stop", () => {
+  // TODO(12-05): re-enable once the reddit adapter is re-wired (unwired in 12-02).
+  it.skip("redditAdapter does not treat synthetic daily observability as a source-backfill hard stop", () => {
     const adapter = getAdapter("reddit_account");
     expect(adapter.canBackfillSource).toBeUndefined();
   });

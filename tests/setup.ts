@@ -26,13 +26,6 @@ const dbUrl =
   process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/neotolis_test";
 process.env.DATABASE_URL = dbUrl;
 
-// REDDIT_USER_AGENT compliant default — integration tests that exercise
-// the Reddit adapter (paste path, fetchEventStats, /api/reddit/fetch-metadata)
-// need a non-empty value so isRedditConfigured() returns true. Tests that
-// specifically assert the unconfigured behavior (REDDIT_USER_AGENT empty)
-// vi.stubEnv() locally. CI sets this same value in the workflow env.
-process.env.REDDIT_USER_AGENT ??= "node:com.neotolis.gpd:0.1.0-test (by /u/integration-test)";
-
 // Social-provider budget envelope for the cost-guardrail integration tests
 // (social-budget-throttle). env.ts defaults both to 0 (degrade) for the
 // not-configured production case; tests need a concrete daily cap to exercise

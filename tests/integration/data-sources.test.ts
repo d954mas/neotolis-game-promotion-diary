@@ -17,7 +17,7 @@ import { toDataSourceDto } from "../../src/lib/server/dto.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
-import { redditUsersCache } from "../../src/lib/sources/reddit/server/schema/index.js";
+import { redditAccounts } from "../../src/lib/sources/reddit/server/schema/index.js";
 import { dataSourceChannelState } from "../../src/lib/server/db/schema/data-source-channel-state.js";
 import * as Audit from "../../src/lib/server/audit.js";
 import { NotFoundError, AppError } from "../../src/lib/server/services/errors.js";
@@ -120,9 +120,9 @@ describe("register data sources via POST /api/sources", () => {
       "127.0.0.1",
     );
     const lastMetadataRefreshAt = new Date("2026-05-18T10:00:00.000Z");
-    await db.insert(redditUsersCache).values({
+    await db.insert(redditAccounts).values({
       username: "detailpolled",
-      lastMetadataRefreshAt,
+      lastRefreshedAt: lastMetadataRefreshAt,
     });
 
     const detail = await loadSourceDetailPage(userA.id, created.id);

@@ -12,10 +12,9 @@
 // (Reddit service-load gauge), so the no-unfiltered-tenant-query rule
 // stays satisfied.
 
-import { db } from "../db/client.js";
 import { allAdapters } from "$lib/sources/registry.js";
-import { redditAdapter, getRecentLoad } from "$lib/sources/reddit/server/index.js";
-import { checkRedditUserCap } from "$lib/sources/reddit/server/quota.js";
+// TODO(12-06): re-wire the Reddit quota block against the rebuilt adapter
+// (redditAdapter / getRecentLoad / checkRedditUserCap were razed in 12-02).
 import { getUserQuotaUsedToday, getUserQuotaLifetime, nextPacificMidnight } from "./quota.js";
 
 export interface QuotaPlatformView {
@@ -67,29 +66,14 @@ export async function loadQuotaPlatforms(userId: string): Promise<QuotaPlatformV
  * of the YouTube two-axis bars; when the operator hasn't configured
  * REDDIT_USER_AGENT we surface the "not configured" empty state.
  */
-export async function loadRedditQuota(userId: string): Promise<RedditQuotaView> {
-  if (!redditAdapter.observability.auth.isOperatorConfigured) {
-    return { isOperatorConfigured: false };
-  }
-  const [sourceActionsResult, postRefreshesResult, serviceLoad] = await Promise.all([
-    checkRedditUserCap(db, userId, "source-actions"),
-    checkRedditUserCap(db, userId, "post-refreshes"),
-    getRecentLoad(60),
-  ]);
-  return {
-    isOperatorConfigured: true,
-    sourceActions: {
-      used: sourceActionsResult.used,
-      cap: sourceActionsResult.cap,
-      windowMinutes: sourceActionsResult.window_minutes,
-    },
-    postRefreshes: {
-      used: postRefreshesResult.used,
-      cap: postRefreshesResult.cap,
-      windowMinutes: postRefreshesResult.window_minutes,
-    },
-    serviceLoad,
-  };
+export async function loadRedditQuota(_userId: string): Promise<RedditQuotaView> {
+  // TODO(12-06): re-wire against the rebuilt ScrapeCreators reddit adapter. The
+  // old free-`.json` quota path (checkRedditUserCap / getRecentLoad) was razed in
+  // Plan 12-02; until Plans 12-05/12-06 restore the adapter + its user-cap
+  // service, the banner renders the "not configured" empty state (the same state
+  // the empty-provider degrade will show). REDDIT_IMPORT_ENABLED is off by
+  // default, so this is the correct interim signal.
+  return { isOperatorConfigured: false };
 }
 
 /**

@@ -130,32 +130,6 @@ const RawSchema = z.object({
         .filter(Boolean),
     ),
 
-  // Phase 03.1 - Reddit operator User-Agent (DV-RDT-7: public-`.json` adapter).
-  // Reddit's ToS REQUIRES a compliant UA. Default UAs (urllib, axios, node-fetch)
-  // are aggressively rate-limited. Empty default => Reddit cleanly disabled
-  // (self-host parity preserved - paste returns 422 reddit_not_configured,
-  // /admin/quota Reddit tab shows "not configured", smoke gate validates).
-  // Non-empty MUST match `<platform>:<id>:<version> (by /u/<handle>)`.
-  // Stored plaintext in env (not envelope-encrypted) - the operator's UA, not
-  // a user secret; Pino redact still covers the field name to keep ops logs
-  // hygienic.
-  REDDIT_USER_AGENT: z
-    .string()
-    .default("")
-    .superRefine((ua, ctx) => {
-      if (ua === "") return;
-      const REDDIT_UA_RE = /^[^\s:]+:[^\s:]+:[^\s:]+\s+\(by\s+\/u\/[A-Za-z0-9_-]+\)$/;
-      if (!REDDIT_UA_RE.test(ua)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            "REDDIT_USER_AGENT must match `<platform>:<id>:<version> (by /u/<handle>)` per Reddit ToS (DV-RDT-7). " +
-            "Example: 'node:com.neotolis.gpd:0.1.0 (by /u/operator)'. " +
-            "Default UAs are aggressively rate-limited by Reddit.",
-        });
-      }
-    }),
-
   // Comma-separated admin user emails (case-insensitive - the admin
   // middleware lowercases + trims before lookup). Empty default =>
   // /admin/* returns 404 for everyone (self-host parity preserved by
@@ -178,28 +152,6 @@ const RawSchema = z.object({
   // endpoint; the smoke-gate harness overrides to a mock reverse-proxy URL.
   // Validated as a URL by zod so a typo fails fast at boot.
   YOUTUBE_API_BASE_URL: z.string().url().default("https://www.googleapis.com/youtube/v3"),
-
-  // Reddit base URL - production default = the official reddit.com endpoint.
-  // The CI smoke gate sets this to a mock reverse-proxy URL
-  // (http://localhost:<port>) so the worker's chargedFetch redirects to the
-  // mock without touching live Reddit. Mirrors YOUTUBE_API_BASE_URL precedent.
-  // Validated as a URL so typos fail fast at boot.
-  // DO NOT set in production - leaving unset (or set to the default) is the
-  // only supported live behavior.
-  REDDIT_BASE_URL_OVERRIDE: z.string().url().optional(),
-
-  // Optional outbound HTTP proxy for Reddit fetches. When set, every
-  // `redditFetch` routes through this proxy via undici's ProxyAgent.
-  // Format: `http://user:pass@host:port` (Webshare static-residential
-  // shape). Empty/unset = direct fetch (self-host operators on residential
-  // IPs need nothing).
-  //
-  // Why this exists: Reddit aggressively 403's outbound traffic from
-  // datacenter IP ranges (Hetzner, DO, Linode, AWS, Cloudflare Workers).
-  // The author's prod VPS hits this fence. Routing through a residential
-  // proxy makes Reddit see a consumer-ISP IP and respond normally.
-  // See docs/deploy/MANUAL-DEPLOY.md for the operator decision tree.
-  REDDIT_PROXY_URL: z.string().url().optional(),
 
   // Deployment hint for operators. Adapter-owned workers are protected by
   // per-adapter singleton locks or DB-backed claim gates; this value is no
@@ -232,8 +184,8 @@ const RawSchema = z.object({
 
   // Operator's prepaid ScrapeCreators API key (the `x-api-key` header).
   // Plaintext env, NOT envelope-encrypted — per CONTEXT D-03 (REVISED
-  // 2026-06-05): this is operator config like SERVICE_YOUTUBE_API_KEYS /
-  // REDDIT_USER_AGENT, never a per-user DB secret. Envelope encryption
+  // 2026-06-05): this is operator config like SERVICE_YOUTUBE_API_KEYS, never
+  // a per-user DB secret. Envelope encryption
   // protects per-user secrets keyed by the env KEK; an operator key IS the
   // operator's env config, so it does not apply. Empty default => provider
   // not configured (graceful degrade). The Pino redact path `apiKey` already
@@ -390,6 +342,37 @@ const RawSchema = z.object({
   // floor, safe for a free-tier self-host). A paid operator on 3 QPS lowers it to ~400
   // (≈2.5 QPS, margin under the ceiling). Read by twitter/server/pacer.ts.
   TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+
+  // ---- Phase 12 — Reddit import (ScrapeCreators author/subreddit walk) ----
+
+  // Which provider implementation serves the `reddit` platform. Mirrors
+  // INSTAGRAM_PROVIDER / TIKTOK_PROVIDER exactly. Empty default => Reddit is NOT
+  // configured (the add-source Reddit chip renders disabled, SOC-05 graceful
+  // degrade, no scraper credits spent). The 12-01 live spike returned GO on the
+  // ScrapeCreators author path (D-01), so `scrapecreators` is the ONLY buildable
+  // value — the Apify fallback (D-03) was not built, so there is no "apify"
+  // option. Reddit REUSES the shared SCRAPECREATORS_API_KEY + SOCIAL_* budget
+  // envelope (no new key, no new budget vars).
+  REDDIT_PROVIDER: z.enum(["scrapecreators"]).or(z.literal("")).default(""),
+
+  // Reddit isolation kill-switch (D-08). STRING-LITERAL-SAFE boolean: ONLY the
+  // literal "true" enables import; the gate (Plan 12-03) compares `=== "true"`.
+  // NOT z.coerce.boolean() — that maps the STRING "false" to true (Pitfall 2).
+  // Default "false" (disabled): even with REDDIT_PROVIDER + the shared
+  // SCRAPECREATORS_API_KEY present, Reddit import stays OFF until the operator
+  // explicitly sets "true" — the legally-hot platform never auto-enables.
+  REDDIT_IMPORT_ENABLED: z.enum(["true", "false"]).default("false"),
+
+  // Reddit metric-refresh warm lane (Plans 12-04/12-05). Reddit posts stabilize
+  // in 1-2 days (unlike YouTube's long tail), so the window is SHORT (2, not the
+  // IG/TikTok/Twitter 7): recent posts refresh for free on the daily walk, with a
+  // single one-shot next-day catch for posts that fell off the walk. Staleness
+  // 26h stays just over the 24h free walk interval so a page-1 post never
+  // double-pays; 5 failures retires a post. These are env knobs (operator-tunable
+  // post-deploy); the lane machinery is wired in 12-04/12-05.
+  REDDIT_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(2),
+  REDDIT_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
+  REDDIT_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -499,11 +482,8 @@ export const env = {
   IMAGE_TAG: raw.IMAGE_TAG,
   DOMAIN: raw.DOMAIN,
   SERVICE_YOUTUBE_API_KEYS: raw.SERVICE_YOUTUBE_API_KEYS,
-  REDDIT_USER_AGENT: raw.REDDIT_USER_AGENT,
   ADMIN_EMAIL_ALLOWLIST: raw.ADMIN_EMAIL_ALLOWLIST,
   YOUTUBE_API_BASE_URL: raw.YOUTUBE_API_BASE_URL,
-  REDDIT_BASE_URL_OVERRIDE: raw.REDDIT_BASE_URL_OVERRIDE,
-  REDDIT_PROXY_URL: raw.REDDIT_PROXY_URL,
   WORKER_REPLICA_COUNT: raw.WORKER_REPLICA_COUNT,
   ALERT_WEBHOOK_URL: raw.ALERT_WEBHOOK_URL,
   METRICS_BEARER_TOKEN: raw.METRICS_BEARER_TOKEN,
@@ -533,6 +513,11 @@ export const env = {
   TWITTER_WARM_STALENESS_HOURS: raw.TWITTER_WARM_STALENESS_HOURS,
   TWITTER_WARM_MAX_FAILURES: raw.TWITTER_WARM_MAX_FAILURES,
   TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: raw.TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS,
+  REDDIT_PROVIDER: raw.REDDIT_PROVIDER,
+  REDDIT_IMPORT_ENABLED: raw.REDDIT_IMPORT_ENABLED,
+  REDDIT_WARM_WINDOW_DAYS: raw.REDDIT_WARM_WINDOW_DAYS,
+  REDDIT_WARM_STALENESS_HOURS: raw.REDDIT_WARM_STALENESS_HOURS,
+  REDDIT_WARM_MAX_FAILURES: raw.REDDIT_WARM_MAX_FAILURES,
 } as const;
 
 export type Env = typeof env;

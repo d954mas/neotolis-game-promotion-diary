@@ -722,10 +722,14 @@ type RedditPostSnapshotRow = typeof redditPostSnapshots.$inferSelect;
 export interface RedditPostSnapshotDto {
   postId: string;
   polledAt: Date;
-  status: string;
+  // Normalized cross-source metrics (like = score, comment = num_comments).
+  likeCount: number | null;
+  commentCount: number | null;
+  // Raw D-09 columns (Phase 12 rebuild). `status` / `awardsTotal` from the old
+  // free-`.json` shape are gone — ScrapeCreators does not expose them.
   score: number | null;
   numComments: number | null;
-  awardsTotal: number | null;
+  numCrossposts: number | null;
   upvoteRatio: number | null;
   removedByCategory: string | null;
 }
@@ -734,10 +738,11 @@ export function toRedditPostSnapshotDto(r: RedditPostSnapshotRow): RedditPostSna
   return {
     postId: r.postId,
     polledAt: r.polledAt,
-    status: r.status,
+    likeCount: r.likeCount,
+    commentCount: r.commentCount,
     score: r.score,
     numComments: r.numComments,
-    awardsTotal: r.awardsTotal,
+    numCrossposts: r.numCrossposts,
     upvoteRatio: r.upvoteRatio,
     removedByCategory: r.removedByCategory,
   };

@@ -8,7 +8,8 @@
 import type { SourceKind } from "./adapter.js";
 import type { CardProps } from "./card-props.js";
 import * as youtubeUiServer from "./youtube/ui/server.js";
-import * as redditUiServer from "./reddit/ui/server.js";
+// TODO(12-06): re-point at the rebuilt reddit ui/server barrel (razed in 12-02).
+// import * as redditUiServer from "./reddit/ui/server.js";
 import * as instagramUiServer from "./instagram/ui/server.js";
 import * as telegramUiServer from "./telegram/ui/server.js";
 import * as tiktokUiServer from "./tiktok/ui/server.js";
@@ -33,8 +34,11 @@ export interface AdapterUiServer {
 // (the event.kind drives the card, not source.kind).
 const uiRegistry = new Map<SourceKind, AdapterUiServer>([
   ["youtube_channel", youtubeUiServer as unknown as AdapterUiServer],
-  ["reddit_account", redditUiServer as unknown as AdapterUiServer],
-  ["reddit_subreddit", redditUiServer as unknown as AdapterUiServer],
+  // TODO(12-06): re-register reddit_account + reddit_subreddit → rebuilt
+  // redditUiServer (razed in 12-02). While unwired, a reddit_post event falls
+  // back to the universal card mapper.
+  // ["reddit_account", redditUiServer as unknown as AdapterUiServer],
+  // ["reddit_subreddit", redditUiServer as unknown as AdapterUiServer],
   ["instagram_account", instagramUiServer as unknown as AdapterUiServer],
   ["telegram_channel", telegramUiServer as unknown as AdapterUiServer],
   ["tiktok_account", tiktokUiServer as unknown as AdapterUiServer],

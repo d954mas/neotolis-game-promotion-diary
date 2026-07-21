@@ -14,10 +14,8 @@ import { NotFoundError } from "$lib/server/services/errors.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { getEventMetricSeriesForRow } from "$lib/server/services/event-metric-series.js";
 import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
-import {
-  loadRedditEventDetailPreview,
-  type RedditEventDetailPreview,
-} from "$lib/sources/reddit/server/index.js";
+// TODO(12-06): restore the Reddit event-detail preview from the rebuilt adapter
+// (loadRedditEventDetailPreview was razed in 12-02).
 
 /**
  * /events/[id] loader — full detail surface.
@@ -67,13 +65,10 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       gameIds.length > 0 ? (games.find((g) => g.id === gameIds[0]) ?? null) : null;
     const dto = toEventDto(row, gameIds, pollData);
 
-    // Reddit-specific detail-page preview. The adapter owns the DB
-    // query against `reddit_posts`; this loader stays at routes-call-
-    // adapters granularity (no direct schema imports here).
-    let redditPost: RedditEventDetailPreview | null = null;
-    if (row.kind === "reddit_post" && row.externalId !== null) {
-      redditPost = await loadRedditEventDetailPreview(row.externalId);
-    }
+    // Reddit-specific detail-page preview — TODO(12-06): re-wire against the
+    // rebuilt adapter (razed in 12-02). Interim: no preview (null), so the
+    // detail page renders the generic event view for reddit_post events.
+    const redditPost: null = null;
 
     // Adapter-driven feed enrichment. Mirrors /feed loader's overlay so
     // Reddit's score / num_comments / subscribers / baseline land on the

@@ -19,7 +19,8 @@ import type FeedCard from "$lib/components/FeedCard.svelte";
 import type { EventKind, SourceKind } from "./adapter.js";
 import { eventKindToSourceKind } from "./event-to-source-kind.js";
 import * as youtubeUiClient from "./youtube/ui/index.js";
-import * as redditUiClient from "./reddit/ui/index.js";
+// TODO(12-06): re-point at the rebuilt reddit ui/index barrel (razed in 12-02).
+// import * as redditUiClient from "./reddit/ui/index.js";
 import * as instagramUiClient from "./instagram/ui/index.js";
 import * as telegramUiClient from "./telegram/ui/index.js";
 import * as tiktokUiClient from "./tiktok/ui/index.js";
@@ -55,10 +56,11 @@ export interface AdapterUiClient {
 
 const uiClientRegistry = new Map<SourceKind, AdapterUiClient>([
   ["youtube_channel", youtubeUiClient as unknown as AdapterUiClient],
-  // reddit_account + reddit_subreddit both map to the same Reddit UI
-  // client module — same reasoning as registry-ui.ts.
-  ["reddit_account", redditUiClient as unknown as AdapterUiClient],
-  ["reddit_subreddit", redditUiClient as unknown as AdapterUiClient],
+  // TODO(12-06): re-register reddit_account + reddit_subreddit → rebuilt
+  // redditUiClient (razed in 12-02). While unwired, /feed renders reddit_post
+  // events with the universal FeedCard and paste-preview finds no reddit adapter.
+  // ["reddit_account", redditUiClient as unknown as AdapterUiClient],
+  // ["reddit_subreddit", redditUiClient as unknown as AdapterUiClient],
   ["instagram_account", instagramUiClient as unknown as AdapterUiClient],
   ["telegram_channel", telegramUiClient as unknown as AdapterUiClient],
   ["tiktok_account", tiktokUiClient as unknown as AdapterUiClient],

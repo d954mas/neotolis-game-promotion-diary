@@ -15,10 +15,7 @@ import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { youtubeChannels, telegramChannels } from "../db/schema/index.js";
 import { dataSourceChannelState } from "../db/schema/data-source-channel-state.js";
-import {
-  redditSubredditsCache,
-  redditUsersCache,
-} from "$lib/sources/reddit/server/schema/index.js";
+import { redditSubreddits, redditAccounts } from "$lib/sources/reddit/server/schema/index.js";
 import { events } from "../db/schema/events.js";
 import { auditLog } from "../db/schema/audit-log.js";
 import { getSourceById, listSources } from "./data-sources.js";
@@ -180,11 +177,12 @@ export async function enrichTelegramSourcesWithChannelTitle(dtos: DataSourceDto[
  * for days. Read last_metadata_refresh_at from the per-kind PUBLIC-
  * DATA caches and stamp it onto the DTO.
  *
- * reddit_subreddits_cache / reddit_users_cache are upserted by the
- * adapter's poll handlers (sub_poll, author_poll, post_single) on
- * every successful drain, so last_metadata_refresh_at is the same
- * "when did we last hear from Reddit about this subject" signal that
- * data_source_channel_state.last_polled_at gives YouTube.
+ * reddit_subreddits / reddit_accounts (the Phase 12 subject-entity tables) carry
+ * last_refreshed_at, stamped by the rebuilt adapter's write path (Plans 12-04/05)
+ * on every successful walk — the same "when did we last hear from Reddit about
+ * this subject" signal data_source_channel_state.last_polled_at gives YouTube.
+ * Until the write path lands the column is null (renders "Never pulled"), which
+ * is correct while the razed adapter is being rebuilt.
  */
 async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise<void> {
   const subreddits: string[] = [];
@@ -203,24 +201,24 @@ async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise
   if (subreddits.length > 0) {
     const rows = await db
       .select({
-        name: redditSubredditsCache.name,
-        lastMetadataRefreshAt: redditSubredditsCache.lastMetadataRefreshAt,
+        slug: redditSubreddits.slug,
+        lastRefreshedAt: redditSubreddits.lastRefreshedAt,
       })
-      .from(redditSubredditsCache)
-      .where(inArray(redditSubredditsCache.name, subreddits));
-    for (const r of rows) subBySubreddit.set(r.name, r.lastMetadataRefreshAt);
+      .from(redditSubreddits)
+      .where(inArray(redditSubreddits.slug, subreddits));
+    for (const r of rows) subBySubreddit.set(r.slug, r.lastRefreshedAt);
   }
 
   const subByUsername = new Map<string, Date | null>();
   if (usernames.length > 0) {
     const rows = await db
       .select({
-        username: redditUsersCache.username,
-        lastMetadataRefreshAt: redditUsersCache.lastMetadataRefreshAt,
+        username: redditAccounts.username,
+        lastRefreshedAt: redditAccounts.lastRefreshedAt,
       })
-      .from(redditUsersCache)
-      .where(inArray(redditUsersCache.username, usernames));
-    for (const r of rows) subByUsername.set(r.username, r.lastMetadataRefreshAt);
+      .from(redditAccounts)
+      .where(inArray(redditAccounts.username, usernames));
+    for (const r of rows) subByUsername.set(r.username, r.lastRefreshedAt);
   }
 
   for (const s of dtos) {
