@@ -7,13 +7,10 @@
 // reasoning. channel-context-backfill remains the canonical
 // populator for that table.
 //
-// Mirrors src/lib/sources/reddit/server/handlers/post-single.ts in
-// shape and intent. The Reddit paste flow has been doing this for
-// months — every paste UPSERTs reddit_posts + reddit_users_cache +
-// reddit_subreddits_cache + writes a reddit_post_snapshots row
-// synchronously, so /feed enrichment JOINs find the cache row on
-// the first render AND `enqueue-service-posts-cron` walks the
-// pasted post on its next tick (auto-refresh from day one).
+// Populating the caches synchronously on paste (not lazily) is what
+// lets /feed enrichment JOINs find the youtube_videos row on the
+// first render AND the service-post cron walk the pasted video on
+// its next tick (auto-refresh from day one).
 //
 // YouTube was NOT doing this. enrichFromUrl returned the oEmbed
 // result without touching youtube_videos, so:
@@ -36,8 +33,8 @@
 //
 //   2. Future worker-tick reuse (e.g. a cross-source reset / refresh
 //      worker that wants to seed a video from scratch). The function
-//      shape is symmetric with handlePostSingle so adopting it later
-//      is a thin wrapper.
+//      shape is a self-contained seed-one-video path, so adopting it
+//      later is a thin wrapper.
 //
 // Endpoint choice — videos.list?part=snippet,statistics is the same
 // endpoint pollStatsByVideoId uses for stats refresh. Reusing it

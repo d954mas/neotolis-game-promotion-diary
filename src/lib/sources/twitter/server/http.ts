@@ -41,7 +41,7 @@
 // top-up, higher only with a subscription). The ceiling is shared across EVERY call
 // path (backfill / warm-refresh / paste) and across replicas, so this seam enforces
 // it PROACTIVELY: every twitterFetch acquires the DB-backed twitter_pacer slot
-// (./pacer.ts, mirroring reddit_pacer) BEFORE reserving budget or making the call. A
+// (./pacer.ts) BEFORE reserving budget or making the call. A
 // denied slot throws AdapterError(rate-limited, retryAfterMs) with NO reservation and
 // NO HTTP — the backfill self-resumes and the lane defers, the same path 429 takes.
 // Two layers, one classification: (a) the proactive pacer keeps the global rate under

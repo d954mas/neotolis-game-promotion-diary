@@ -197,19 +197,6 @@ export function redditSubredditLabel(metadata: unknown): string {
   return typeof md.subreddit === "string" && md.subreddit.length > 0 ? `r/${md.subreddit}` : "";
 }
 
-/** Read the Reddit author handle from event metadata. SAFE — the
- *  author handle is the user's permanent identifier at post time and
- *  the post URL doesn't carry it; the metadata snapshot reflects who
- *  posted, not a renameable display name. */
-export function redditAuthorByline(metadata: unknown): string | null {
-  if (metadata === null || typeof metadata !== "object") return null;
-  const md = metadata as { author?: unknown };
-  if (typeof md.author === "string" && md.author.length > 0) {
-    return `/u/${md.author}`;
-  }
-  return null;
-}
-
 /** Read the Instagram account handle/display name from FK-joined
  *  data_sources, NEVER from event metadata (no-denorm rule — the IG handle
  *  is owned by data_sources and can be renamed). Falls back to displayName
@@ -284,32 +271,6 @@ export function resolveSourceLabel(
   if (sourceLabel.length > 0) return sourceLabel;
   if (event.sourceId === null && event.authorHandle) return `@${event.authorHandle}`;
   return sourceLabel;
-}
-
-/** Image-URL predicate — accepts Reddit's CDN hosts + common image
- *  extensions. The card thumbnail only renders for Reddit posts when
- *  this returns true to avoid embedding non-image URLs as <img>. */
-export function isImageLikeUrl(url: string): boolean {
-  const lower = url.toLowerCase();
-  if (lower.startsWith("https://i.redd.it/")) return true;
-  if (lower.startsWith("https://preview.redd.it/")) return true;
-  return /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(lower);
-}
-
-/** Read metadata.media.url defensively — used by Reddit/Twitter/
- *  Telegram thumbnails. Returns null when missing/wrong shape. */
-export function readMediaUrlFromMetadata(md: unknown): string | null {
-  if (md === null || typeof md !== "object") return null;
-  const mediaContainer = (md as { media?: unknown }).media;
-  if (
-    mediaContainer === null ||
-    mediaContainer === undefined ||
-    typeof mediaContainer !== "object"
-  ) {
-    return null;
-  }
-  const url = (mediaContainer as { url?: unknown }).url;
-  return typeof url === "string" && url.length > 0 ? url : null;
 }
 
 /** Compute the thumbnail URL for any event kind. Returns null when no

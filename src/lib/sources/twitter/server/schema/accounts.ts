@@ -61,8 +61,8 @@
 // FOUNDATION ONLY: this table is the subject entity (CHECKLIST §1a) that future
 // per-account percentile baselines + an account page will read. Those are NOT
 // built now — designed for, not implemented. The canonical percentile pattern to
-// copy when they land is reddit_subreddit_baselines (a separate public-data
-// aggregate table keyed by the subject key).
+// copy when they land is a separate public-data aggregate table keyed by
+// the subject key.
 
 import { pgTable, text, timestamp, integer, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";

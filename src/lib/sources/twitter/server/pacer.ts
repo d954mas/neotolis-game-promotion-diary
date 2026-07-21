@@ -7,7 +7,7 @@
 // workers / browser sessions exist. A denied slot surfaces as AdapterError(rate-limited)
 // WITHOUT a budget reservation or HTTP call — proactively avoiding a wasted 429 + credit.
 //
-// Mirrors reddit_pacer (acquireRedditPacerSlotWith) MINUS the escalating pause columns:
+// The pacer is the PROACTIVE slot gate only — no escalating pause columns:
 // twitter's 429 is a transient QPS ceiling already self-resumed via the http seam's
 // retryAfterMs, so a single next_allowed_at is the whole gate.
 

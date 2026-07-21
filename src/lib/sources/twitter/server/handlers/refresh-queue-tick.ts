@@ -124,7 +124,7 @@ const twitterRefreshLane = createSocialRefreshLane({
   // budget gate and on the claim tx so a rollback rolls the slot back too. A denied
   // slot DEFERS the row (stays pending → retried) instead of letting it reach the seam,
   // fail rate-limited, and complete `done` — which is how a manual Refresh-Now silently
-  // no-opped under QPS contention. Mirrors Reddit's acquireRedditPacerSlotWith(ctx.tx).
+  // no-opped under QPS contention. Twitter is the reference QPS-pacer adapter (acquireTwitterPacerSlot(ctx.tx)).
   // The permit then makes the seam skip its own acquire (no double-spend).
   acquirePacerSlot: (tx) => acquireTwitterPacerSlot(tx),
   resolvePermalink,

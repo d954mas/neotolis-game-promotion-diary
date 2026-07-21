@@ -38,14 +38,16 @@ export function toCardProps(event: RedditEventLite): CardProps {
   const stats = event.redditEnrichment?.stats ?? null;
   const metrics: CardProps["metrics"] = [];
   if (stats) {
-    // Likes (= Reddit score / net ups) and comments render whenever present. NO
-    // views chip and NO shares chip (D-09 — Reddit exposes neither).
+    // Score (= Reddit net ups, the `likeCount` field) and comments render whenever
+    // present. Reddit-namespaced labels (card_reddit_metric_*) — NOT the YouTube keys —
+    // so a YouTube copy change never leaks into the Reddit card. NO views chip and NO
+    // shares chip (D-09 — Reddit exposes neither).
     if (stats.likeCount !== null) {
-      metrics.push({ label: m.card_youtube_metric_likes(), value: formatStat(stats.likeCount) });
+      metrics.push({ label: m.card_reddit_metric_score(), value: formatStat(stats.likeCount) });
     }
     if (stats.commentCount !== null) {
       metrics.push({
-        label: m.card_youtube_metric_comments(),
+        label: m.card_reddit_metric_comments(),
         value: formatStat(stats.commentCount),
       });
     }

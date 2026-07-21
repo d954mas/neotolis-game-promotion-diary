@@ -502,11 +502,10 @@ export async function enrichFromUrl(
   }
 
   // Reddit branch — adapter-driven preview through
-  // redditAdapter.fetchEventPreviewMetadata. /api/events/preview-url
-  // (this endpoint) and /api/reddit/fetch-metadata both go through the
-  // same hook; the EnrichmentResult shape adapts Reddit's response so
-  // POST /api/events/preview-url returns a uniform contract across
-  // adapters.
+  // redditAdapter.fetchEventPreviewMetadata. Reddit mounts no /api/reddit/*
+  // route; paste-preview rides the universal POST /api/events/preview-url (this
+  // endpoint), and the EnrichmentResult shape adapts Reddit's response so the
+  // endpoint returns a uniform contract across adapters.
   if (parsed.kind === "reddit_post") {
     const adapter = getAdapter("reddit_account");
     if (adapter.fetchEventPreviewMetadata === undefined) {
