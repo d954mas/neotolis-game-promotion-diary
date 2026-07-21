@@ -15,7 +15,6 @@
   import PageHeader from "$lib/components/PageHeader.svelte";
   import QuotaKeyTable from "$lib/components/QuotaKeyTable.svelte";
   import QuotaAuditList from "$lib/components/QuotaAuditList.svelte";
-  import RedditOpsPanel from "$lib/components/RedditOpsPanel.svelte";
   import YoutubeOpsPanel from "$lib/components/YoutubeOpsPanel.svelte";
   import ProviderSpendPanel from "$lib/components/ProviderSpendPanel.svelte";
   import type { PageData } from "./$types";
@@ -52,7 +51,11 @@
   <details class="admin-quota__section" open>
     <summary><h2>{m.admin_reddit_section_title()}</h2></summary>
     <div class="admin-quota__section-body">
-      <RedditOpsPanel data={data.reddit} />
+      <ProviderSpendPanel
+        block={data.reddit}
+        heading={m.admin_reddit_section_title()}
+        disabledHint={m.sources_new_reddit_disabled()}
+      />
     </div>
   </details>
 

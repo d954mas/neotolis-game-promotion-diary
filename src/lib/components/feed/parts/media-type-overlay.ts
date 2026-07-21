@@ -82,6 +82,7 @@ export interface MediaTypeOverlayEvent {
   tiktokEnrichment?: { mediaType?: string | null } | null;
   twitterEnrichment?: { mediaType?: string | null } | null;
   youtubeEnrichment?: { mediaType?: string | null } | null;
+  redditEnrichment?: { mediaType?: string | null } | null;
 }
 
 /**
@@ -142,6 +143,12 @@ export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPil
     // A native-video tweet → "Video"; a photo / animated_gif ("image") or a
     // text-only tweet ("text") → no pill (a photo/text needs no marker).
     return event.twitterEnrichment?.mediaType === "video" ? mediaTypeOverlay("video") : null;
+  }
+  if (event.kind === "reddit_post") {
+    // Reddit FORM (12-SPIKE #2 — derived from post_hint/url, not is_self): a gallery
+    // post → "Carousel" (the multi-image album affordance); self / link / single
+    // image → no pill (a plain image needs no marker, self/link have no image).
+    return event.redditEnrichment?.mediaType === "gallery" ? mediaTypeOverlay("carousel") : null;
   }
   return null;
 }

@@ -68,30 +68,23 @@ export interface CardEventLite {
     commentCount: number;
     polledAt: Date | string;
   } | null;
+  /** Reddit public-data decoration attached by
+   *  sources/reddit/server/feed-enrichment.ts (mirrors instagramEnrichment). D-09
+   *  metric set: likes (score) + comments (num_comments) ONLY — Reddit exposes no
+   *  view count and no share/crosspost count (12-SPIKE Q4), so NO viewCount /
+   *  shareCount fields. Each stat is INDEPENDENTLY nullable (metrics-by-presence).
+   *  thumbnailUrl is the raw i.redd.it cover HOTLINKED directly (12-SPIKE Pitfall 5
+   *  — NO proxy; onerror fallback in the card), FREQUENTLY NULL (ScrapeCreators
+   *  omits `thumbnail`; only image/gallery posts derive one). mediaType
+   *  ("self" | "link" | "image" | "gallery") drives the adaptive card variant. */
   redditEnrichment?: {
     stats: {
-      score: number;
-      numComments: number;
-      upvoteRatio: number;
-      awardsTotal: number;
+      likeCount: number | null;
+      commentCount: number | null;
+      polledAt: Date | string;
     } | null;
-    subredditSubscribers: number | null;
-    authorKarma: number | null;
-    baseline: {
-      medianScore24h: number | null;
-      p75Score24h: number | null;
-      sampleSize: number;
-    } | null;
-    linkUrl?: string | null;
-    bodyExcerpt?: string | null;
-    /** Subreddit slug from reddit_posts.subreddit (source-of-truth). */
-    subreddit?: string | null;
-    /** Author handle from reddit_posts.author (source-of-truth, NULL on
-     *  Reddit-side account deletion). */
-    author?: string | null;
-    /** ISO timestamp when the worker detected the post is gone from
-     *  Reddit. Cards use this for the "Deleted on Reddit" banner. */
-    deletionDetectedAt?: string | null;
+    thumbnailUrl: string | null;
+    mediaType: string | null;
   };
   /** Instagram public-data decoration attached by
    *  sources/instagram/server/feed-enrichment.ts (mirrors redditEnrichment).
@@ -328,9 +321,11 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
   }
   if (event.kind === "reddit_post") {
-    const link = event.redditEnrichment?.linkUrl ?? null;
-    if (link && isImageLikeUrl(link)) return link;
-    return readMediaUrlFromMetadata(event.metadata);
+    // Reddit HOTLINKS the raw i.redd.it cover (12-SPIKE Pitfall 5 — NO proxy, unlike
+    // TikTok/IG). Read the enrichment thumbnail (the source-of-truth the chart marker
+    // + feed card read), NOT event.metadata. FREQUENTLY null (thumbnail absent from
+    // ScrapeCreators; only image/gallery posts derive one) → no image, text card.
+    return event.redditEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "twitter_post") {
     // Twitter HOTLINKS the raw pbs.twimg.com cover (no proxy — unlike TikTok's ORB-

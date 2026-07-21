@@ -11,10 +11,6 @@
 // gone — the overlay's DOM chips + dashed guide line replaced it. buildDayGroups
 // + eventThumbnail (which the overlay consumes) stay.
 
-import {
-  isImageLikeUrl,
-  readMediaUrlFromMetadata,
-} from "$lib/components/feed/parts/derive-card-data.js";
 import { kindIconSvg } from "$lib/components/kind-icon-svg.js";
 import type { EventDto } from "$lib/server/dto.js";
 
@@ -138,8 +134,12 @@ export function buildDayGroups(
  *   - YouTube (`kind==="youtube_video"` + externalId) → the intrinsic
  *     `img.youtube.com/vi/{externalId}/mqdefault.jpg` (no enrichment needed —
  *     externalId IS the video id, part of the canonical URL).
- *   - Reddit → the enrichment `linkUrl` when it's image-like, else the
- *     `metadata.media.url` snapshot (same chain the RedditFeedCard renders).
+ *   - Reddit → `redditEnrichment.thumbnailUrl` (the raw Reddit CDN cover —
+ *     i.redd.it — set by sources/reddit/server/feed-enrichment.ts). Hotlinked
+ *     directly, NO proxy (12-SPIKE Pitfall 5 YAGNI). FREQUENTLY NULL (ScrapeCreators
+ *     omits `thumbnail`; only image/gallery posts derive one) → the marker falls
+ *     back to the kind-colored placeholder. Reads the enrichment object (the SAME
+ *     source the feed card uses), NOT `event.metadata` — parity with Twitter/IG.
  *   - Twitter → `twitterEnrichment.thumbnailUrl` (the raw pbs.twimg.com cover set
  *     by sources/twitter/server/feed-enrichment.ts). Hotlinked directly — NO proxy
  *     (11-SPIKE.md Q6 / Plan 11-03: pbs.twimg.com is historically permissive, unlike
@@ -165,7 +165,10 @@ type ThumbnailEvent = {
   kind: string;
   externalId: string | null;
   metadata: unknown;
-  redditEnrichment?: { linkUrl?: string | null } | null;
+  redditEnrichment?: {
+    thumbnailUrl?: string | null;
+    stats?: { polledAt?: Date | string } | null;
+  } | null;
   instagramEnrichment?: { thumbnailUrl?: string | null } | null;
   telegramEnrichment?: { thumbnailUrl?: string | null } | null;
   tiktokEnrichment?: {
@@ -184,9 +187,11 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
     return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
   }
   if (event.kind === "reddit_post") {
-    const link = event.redditEnrichment?.linkUrl ?? null;
-    if (link && isImageLikeUrl(link)) return link;
-    return readMediaUrlFromMetadata(event.metadata);
+    // Reddit HOTLINKS the raw i.redd.it cover (12-SPIKE Pitfall 5 — NO proxy). Read
+    // the enrichment object (the SAME source the feed card reads), NOT event.metadata,
+    // so the marker stays in sync with the card. FREQUENTLY null (thumbnail absent from
+    // ScrapeCreators; only image/gallery posts derive one) → kind-colored placeholder.
+    return event.redditEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "twitter_post") {
     // Twitter HOTLINKS the raw pbs.twimg.com cover (11-SPIKE.md Q6 / Plan 11-03 —

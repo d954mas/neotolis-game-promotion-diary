@@ -36,28 +36,6 @@ import { auditLog } from "../db/schema/audit-log.js";
 import type { AuditAction } from "../audit/actions.js";
 import { todayPacific } from "./quota.js";
 import { getAdapter } from "$lib/sources/registry.js";
-// TODO(12-06): re-import getQueueDepth/getDailyByType from the rebuilt reddit
-// adapter (razed in 12-02). Until then the Reddit Ops block collapses to
-// { isConfigured: false } and these type shapes live locally so RedditOpsPanel +
-// /admin keep compiling (verbatim from the old reddit observability contract).
-type RedditQueueName = "service_source" | "service_post" | "user_source" | "user_post";
-type RedditQueueType = "sub_poll" | "author_poll" | "post_single";
-export interface RedditQueueDepthRow {
-  queueName: RedditQueueName;
-  pending: number;
-  processing: number;
-  deadLetter: number;
-  oldestPendingAgeSeconds: number | null;
-}
-export interface RedditDailyByType {
-  total: number;
-  byType: Record<RedditQueueType, number>;
-  lifetimeTotal: number;
-  capExhaustedCount: number;
-  adapterDegradedSince: Date | null;
-  adapterPausedUntil: Date | null;
-  adapterPauseReason: string | null;
-}
 import {
   getYoutubeQueueDepth,
   getYoutubeDailyByType,
@@ -66,11 +44,11 @@ import {
 } from "$lib/sources/youtube/server/observability.js";
 import { getInstagramProviderBlock } from "$lib/sources/instagram/server/observability.js";
 import { getTikTokProviderBlock } from "$lib/sources/tiktok/server/observability.js";
+import { getRedditProviderBlock } from "$lib/sources/reddit/server/observability.js";
 
 // Re-export types so the /admin Svelte components (which can only
 // type-import from this server-service module) can reference the same shapes
-// the loader returns. RedditQueueDepthRow/RedditDailyByType are defined locally
-// above (interim, until the 12-06 rewire).
+// the loader returns.
 export type { YoutubeQueueDepthRow, YoutubeDailyByType };
 
 export interface QuotaKeyRow {
@@ -114,17 +92,25 @@ const SERVICE_LEVEL_AUDIT_ACTIONS: readonly AuditAction[] = [
 const ADMIN_AUDIT_TAIL_LIMIT = 50;
 
 /**
- * Reddit Ops block surfaced on the /admin page alongside the YouTube
- * quota table + service audit list. When the operator hasn't configured
- * REDDIT_USER_AGENT, the block collapses to `{ isConfigured: false }`
- * — the page renders a "Reddit ingest disabled" placeholder instead of
- * the live tables.
+ * Reddit (ScrapeCreators) provider block surfaced on /admin/quota — the twin of
+ * AdminInstagramBlock/AdminTiktokBlock (same shape, same collapse-when-unconfigured
+ * contract). The rebuilt Reddit adapter (Phase 12) is a PAID ScrapeCreators provider
+ * behind the D-08 kill-switch, sharing the provider-wide prepaid balance with
+ * Instagram + TikTok (D-01), so remainingBalance / prepaidBalance read the SAME
+ * ceiling; the per-platform creditsUsed / requestsToday are Reddit's own daily spend.
+ * When the operator hasn't opted in (isRedditConfigured() false — REDDIT_IMPORT_ENABLED
+ * unset), the block collapses to `{ isConfigured: false }` and the page renders the
+ * "Reddit import not configured by operator" placeholder.
  */
 export type AdminRedditBlock =
   | {
       isConfigured: true;
-      queueDepth: RedditQueueDepthRow[];
-      daily: RedditDailyByType;
+      requestsToday: number;
+      creditsUsed: number;
+      dailyCap: number;
+      remainingBalance: number;
+      prepaidBalance: number;
+      throttleState: "ok" | "eighty" | "ninetyfive";
     }
   | { isConfigured: false };
 
@@ -234,12 +220,24 @@ export async function loadAdminQuotaPage(): Promise<{
     .orderBy(desc(auditLog.createdAt))
     .limit(ADMIN_AUDIT_TAIL_LIMIT);
 
-  // Reddit Ops block — TODO(12-06): re-wire against the rebuilt ScrapeCreators
-  // adapter (the old free-`.json` queue-depth / daily-by-type readers were razed
-  // in Plan 12-02). Interim: always collapse to the "Reddit ingest disabled"
-  // placeholder. REDDIT_IMPORT_ENABLED is off by default, so this is the correct
-  // signal until Plans 12-05/12-06 restore the adapter + its ops observability.
-  const reddit: AdminRedditBlock = { isConfigured: false };
+  // Reddit provider block — the twin of the Instagram/TikTok blocks (Phase 12
+  // rebuilt adapter is a ScrapeCreators provider, NOT the old free-`.json` queue
+  // model). getRedditProviderBlock reads isRedditConfigured() at call time (the D-08
+  // kill-switch: REDDIT_IMPORT_ENABLED must be "true"); when off the block collapses
+  // to { isConfigured: false } so the page renders the placeholder instead of a
+  // zeroed spend table that looks like an outage.
+  const rd = await getRedditProviderBlock(now);
+  const reddit: AdminRedditBlock = rd.isConfigured
+    ? {
+        isConfigured: true,
+        requestsToday: rd.requestsToday,
+        creditsUsed: rd.creditsUsed,
+        dailyCap: rd.dailyCap,
+        remainingBalance: rd.remainingBalance,
+        prepaidBalance: rd.prepaidBalance,
+        throttleState: rd.throttleState,
+      }
+    : { isConfigured: false };
 
   // YouTube ops block. Read from the shared adapter_refresh_queue with
   // adapter_kind='youtube_channel' — same shape the Reddit panel uses,

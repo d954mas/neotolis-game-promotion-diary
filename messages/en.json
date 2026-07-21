@@ -99,7 +99,7 @@
 
   "sources_new_reddit_input_hint": "Paste a Reddit URL (e.g. https://reddit.com/r/IndieDev or https://reddit.com/user/handle) or use raw prefixes r/IndieDev or u/handle.",
   "sources_new_reddit_listing_limit": "Reddit caps each subreddit and user listing at ~1000 most recent posts. Older posts can't be backfilled — Reddit doesn't expose them through the public API.",
-  "sources_new_reddit_disabled": "Reddit is not configured by the operator (REDDIT_USER_AGENT env empty).",
+  "sources_new_reddit_disabled": "Reddit import is off because no provider is configured. A self-host operator enables it by setting REDDIT_IMPORT_ENABLED=true plus REDDIT_PROVIDER and the shared ScrapeCreators API key. See the self-host docs.",
   "sources_new_instagram_disabled_hint": "Instagram import is off because no provider is configured. A self-host operator enables it by setting the `INSTAGRAM_PROVIDER` and provider API-key environment variables. See the self-host docs.",
   "sources_new_tiktok_disabled_hint": "TikTok import is off because no provider is configured. A self-host operator enables it by setting the `TIKTOK_PROVIDER` and provider API-key environment variables. See the self-host docs.",
 
@@ -175,14 +175,14 @@
   "source_kind_label_tiktok_account": "TikTok",
 
   "source_cadence_youtube_channel": "New videos every 6 hours",
-  "source_cadence_reddit_account": "New posts every 6 hours",
+  "source_cadence_reddit_account": "New posts checked daily",
   "source_cadence_instagram_account": "New posts daily; recent posts’ stats refresh about once a day",
   "source_cadence_tiktok_account": "New videos daily; recent videos’ stats refresh about once a day",
   "source_cadence_twitter": "New tweets daily; recent tweets’ stats refresh about once a day",
   "source_cadence_telegram_channel": "New posts every 6 hours; view counts refresh about twice a day",
   "source_cadence_default": "Polls automatically",
 
-  "source_kind_status_reddit_account": "Coming soon — pending Reddit OAuth",
+  "source_kind_status_reddit_account": "Set REDDIT_IMPORT_ENABLED to enable Reddit import",
   "source_kind_status_twitter_account": "Set TWITTER_PROVIDER to enable Twitter/X import",
   "source_kind_status_telegram_channel": "Coming soon",
   "source_kind_status_discord_server": "Coming soon",

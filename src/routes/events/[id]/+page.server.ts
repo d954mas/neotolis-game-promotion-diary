@@ -14,8 +14,6 @@ import { NotFoundError } from "$lib/server/services/errors.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { getEventMetricSeriesForRow } from "$lib/server/services/event-metric-series.js";
 import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
-// TODO(12-06): restore the Reddit event-detail preview from the rebuilt adapter
-// (loadRedditEventDetailPreview was razed in 12-02).
 
 /**
  * /events/[id] loader — full detail surface.
@@ -65,15 +63,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       gameIds.length > 0 ? (games.find((g) => g.id === gameIds[0]) ?? null) : null;
     const dto = toEventDto(row, gameIds, pollData);
 
-    // Reddit-specific detail-page preview — TODO(12-06): re-wire against the
-    // rebuilt adapter (razed in 12-02). Interim: no preview (null), so the
-    // detail page renders the generic event view for reddit_post events.
-    const redditPost: null = null;
-
     // Adapter-driven feed enrichment. Mirrors /feed loader's overlay so
-    // Reddit's score / num_comments / subscribers / baseline land on the
-    // event DTO before the page render — same data path the FeedCard
-    // uses, no per-route adapter import.
+    // Reddit's likes / comments / thumbnail land on the event DTO (via
+    // redditEnrichFeedDtos → redditEnrichment) before the page render — the
+    // rebuilt adapter (Plan 12-04) exposes NO separate detail-preview; the
+    // event-detail surface reads redditEnrichment from this loop, same data
+    // path the FeedCard uses, no per-route adapter import.
     for (const adapter of allAdapters) {
       if (adapter.enrichFeedDtos === undefined) continue;
       await adapter.enrichFeedDtos(locals.user.id, [dto]);
@@ -116,7 +111,6 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
           )
         : null,
       sources: sourceDtos,
-      redditPost,
       metricSeries,
     };
   } catch (err) {

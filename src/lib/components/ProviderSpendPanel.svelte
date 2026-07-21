@@ -27,19 +27,20 @@
   import type {
     AdminInstagramBlock,
     AdminTiktokBlock,
+    AdminRedditBlock,
   } from "$lib/server/services/admin-quota-read.js";
 
-  // The IG + TikTok provider blocks are structurally identical (same spend/cap +
-  // balance + throttle shape, same collapse-when-unconfigured contract), so this
-  // one panel renders either. `heading` + `disabledHint` let each section title
-  // its not-configured placeholder for the right platform; both default to the
-  // generic "Provider spend" copy.
+  // The IG + TikTok + Reddit provider blocks are structurally identical (same
+  // spend/cap + balance + throttle shape, same collapse-when-unconfigured contract),
+  // so this one panel renders any of them. `heading` + `disabledHint` let each
+  // section title its not-configured placeholder for the right platform; both
+  // default to the generic "Provider spend" copy.
   let {
     block,
     heading = m.admin_quota_section_providers_title(),
     disabledHint = m.sources_new_instagram_disabled_hint(),
   }: {
-    block: AdminInstagramBlock | AdminTiktokBlock;
+    block: AdminInstagramBlock | AdminTiktokBlock | AdminRedditBlock;
     heading?: string;
     disabledHint?: string;
   } = $props();

@@ -10,7 +10,6 @@
 // reddit-snapshots.test.ts.
 
 import { describe, it, expect } from "vitest";
-import { sql } from "drizzle-orm";
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { youtubeVideoSnapshots } = await import("../../src/lib/server/db/schema/index.js");
