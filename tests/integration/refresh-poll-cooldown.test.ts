@@ -31,6 +31,20 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
   };
 });
 
+// Reddit is D-08 default-OFF in the test env (REDDIT_IMPORT_ENABLED unset) → the
+// adapter's refreshQueue.canRun would skip with "reddit not configured". Mock the
+// provider as configured so the reddit refresh-poll cases exercise the enqueue + the
+// shared social cap (the youtube cases are unaffected — they don't read this module).
+vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    isRedditConfigured: () => true,
+    getSocialProvider: (platform: string) =>
+      platform === "reddit" ? ({ name: "scrapecreators-reddit" } as never) : null,
+  };
+});
+
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { youtubeVideos, adapterRefreshQueue } =
@@ -290,36 +304,49 @@ describe("refresh-poll cooldown service", () => {
     );
   });
 
-  it("reddit_post refresh-poll enforces the post-refresh sliding-window cap before cooldown metadata write", async () => {
+  it("reddit_post refresh-poll enforces the shared social per-user cap (429) before the cooldown write", async () => {
+    // Phase 12: reddit joined the paid-scraper model — the old bespoke 30/15-min
+    // reddit_post_quota_exhausted cap is gone; the load-bearing per-user limit is the
+    // shared enforceAdapterUserQuota (requests_quota_exhausted), keyed on the source
+    // kind. Park the user AT the cap and assert the refresh-poll is rejected BEFORE the
+    // cooldown metadata write (enforceAdapterUserQuota runs before the eager-write).
     sentJobs.length = 0;
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
     const u = await seedUserDirectly({ email: `rp-reddit-cap-${uniq()}@test.local` });
     const ev = await insertEvent(u.id, {
       kind: "reddit_post",
       externalId: "abc_blocked",
       url: "https://www.reddit.com/r/IndieDev/comments/abc_blocked/test/",
     });
-    const now = new Date();
-    // Seed REDDIT_USER_CAP.postRefreshesPerWindow rows so the next refresh
-    // hits the cap (recalibrated v0.1: 30 per 15-min window).
-    for (let i = 0; i < 30; i++) {
-      await db.insert(adapterRefreshQueue).values({
-        adapterKind: "reddit_account",
-        queueName: "user_post",
-        type: "post_single",
-        payload: { post_id: `t3_seed_refresh_${i}`, flow: "refresh-now" },
+    for (let i = 0; i < env.LIMIT_SOCIAL_REQUESTS_PER_DAY; i++) {
+      await writeAuditStrict({
         userId: u.id,
-        priority: 0,
-        status: "done",
-        enqueuedAt: new Date(now.getTime() - 60_000),
-        lastAttemptAt: new Date(now.getTime() - 60_000),
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: "reddit_account",
+          platform: "reddit_account",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
       });
     }
 
     await expect(requestRefreshPoll(u.id, ev.id, "127.0.0.1")).rejects.toMatchObject({
-      code: "reddit_post_quota_exhausted",
+      code: "requests_quota_exhausted",
       status: 429,
     });
     expect(sentJobs).toHaveLength(0);
+    // No user_post row enqueued — the cap fired before the enqueue.
+    const queued = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(
+        and(eq(adapterRefreshQueue.userId, u.id), eq(adapterRefreshQueue.queueName, "user_post")),
+      );
+    expect(queued).toHaveLength(0);
 
     const [row] = await db.select().from(events).where(eq(events.id, ev.id));
     const meta = (row!.metadata ?? {}) as { last_user_refresh_at?: string };

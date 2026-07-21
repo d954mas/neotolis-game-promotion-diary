@@ -12,7 +12,11 @@ import { getSocialProvider } from "../../src/lib/sources/reddit/server/provider/
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { events } from "../../src/lib/server/db/schema/events.js";
-import { adapterRefreshQueue, redditPosts } from "../../src/lib/server/db/schema/index.js";
+import {
+  adapterRefreshQueue,
+  redditPosts,
+  redditPostSnapshots,
+} from "../../src/lib/server/db/schema/index.js";
 import { dataSourceChannelState } from "../../src/lib/server/db/schema/data-source-channel-state.js";
 import { handleBackfillAccount } from "../../src/lib/sources/reddit/server/handlers/backfill-account.js";
 import {
@@ -68,8 +72,35 @@ describe("reddit graceful degrade (provider off — Phase 12)", () => {
     expect(queueAfter.length, "walker enqueued no orphan pending row").toBe(queueBefore.length);
   });
 
-  it("[12-05] provider null: the refresh-queue lane tick is a NO-OP (no throw)", async () => {
+  it("[12-05] provider null: the refresh-queue lane tick claims a pending row but writes NO snapshot (no spend)", async () => {
     __resetRedditRefreshQueueWorkerForTest();
+    // A pending service_post warm row + its cached post. With getSocialProvider("reddit")
+    // null, refreshPost returns BEFORE the HTTP seam → no fetch, no snapshot, no credit —
+    // the row still completes (no orphan pending). Asserts the OFF path spends nothing,
+    // not merely that the tick didn't throw.
+    const s = uniq();
+    await db.insert(redditPosts).values({
+      postId: `t3_${s}`,
+      subredditSlug: "gamedev",
+      permalink: `https://www.reddit.com/r/gamedev/comments/${s}/x/`,
+      lastPollStatus: "ok",
+    });
+    await db.insert(adapterRefreshQueue).values({
+      adapterKind: "reddit_account",
+      queueName: "service_post",
+      type: "post_stats",
+      payload: { post_id: `t3_${s}` },
+      userId: null,
+      priority: 10,
+      status: "pending",
+    });
+
     await expect(redditRefreshQueueTick()).resolves.toBeDefined();
+
+    const snaps = await db
+      .select()
+      .from(redditPostSnapshots)
+      .where(eq(redditPostSnapshots.postId, `t3_${s}`));
+    expect(snaps.length, "OFF lane writes no snapshot / burns no credit").toBe(0);
   });
 });

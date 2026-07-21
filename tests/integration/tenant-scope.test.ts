@@ -1142,16 +1142,21 @@ describe("instagram cross-tenant (source + event 404 not 403)", () => {
     expect(owned.kind).toBe("instagram_post");
   });
 
-  it("the IG public-data cache tables carry NO user_id column (tenant guarantee lives on events, not the cache)", async () => {
-    // instagram_posts / instagram_post_snapshots / social_provider_spend /
-    // social_provider_balance are public-data (no per-user scope) by design —
-    // the same shape youtube_videos / reddit_*_cache use. Assert the schema has
-    // no user_id column so a future refactor that accidentally adds tenant data
-    // to a public cache trips here (and would need the events SELECT to remain
-    // the boundary).
+  it("the IG + Reddit public-data cache tables carry NO user_id column (tenant guarantee lives on events, not the cache)", async () => {
+    // instagram_posts / instagram_post_snapshots / reddit_accounts /
+    // reddit_subreddits / reddit_posts / reddit_post_snapshots /
+    // social_provider_spend / social_provider_balance are public-data (no
+    // per-user scope) by design — the same shape youtube_videos uses. Assert the
+    // schema has no user_id column so a future refactor that accidentally adds
+    // tenant data to a public cache trips here (and would need the events SELECT
+    // to remain the boundary).
     const publicDataTables = [
       "instagram_posts",
       "instagram_post_snapshots",
+      "reddit_accounts",
+      "reddit_subreddits",
+      "reddit_posts",
+      "reddit_post_snapshots",
       "social_provider_spend",
       "social_provider_balance",
     ];
