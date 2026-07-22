@@ -222,15 +222,22 @@ jobs:
       #     here; documented for operator readability).
       SERVICE_YOUTUBE_API_KEYS: mock-key
       ADMIN_EMAIL_ALLOWLIST: ''
-      # Reddit not-configured parity smoke (Phase 12 — gated ScrapeCreators
-      # provider). REDDIT_IMPORT_ENABLED is INTENTIONALLY UNSET at the job level
-      # so the baseline smoke-app boots with the Reddit provider OFF (the D-08
-      # kill-switch). tests/smoke/lib/reddit-polling-flow.sh then asserts the
-      # not-configured degrade: POST /api/sources {kind:"reddit_account"} → 422
-      # kind_not_configured, and /sources/new HTML renders the Reddit chip
-      # disabled. Mirrors the Instagram / TikTok not-configured parity blocks.
-      # The paid ScrapeCreators import path has NO key in CI (covered by human
-      # UAT + integration tests) — NO live Reddit calls in CI.
+      # Reddit smoke (Phase 12 — gated ScrapeCreators provider). Two flows in
+      # tests/smoke/lib/reddit-polling-flow.sh:
+      #   1. NOT-CONFIGURED parity: REDDIT_IMPORT_ENABLED is INTENTIONALLY UNSET at
+      #      the job level so the baseline smoke-app boots with the provider OFF (the
+      #      D-08 kill-switch). Asserts POST /api/sources {reddit_account} → 422
+      #      kind_not_configured + /sources/new renders the Reddit chip disabled.
+      #   2. PROVIDER-ON smoke (reddit_provider_on_smoke, runs LAST): re-launches
+      #      smoke-app/smoke-worker with REDDIT_IMPORT_ENABLED=true + a funded budget,
+      #      pointed at a HERMETIC ScrapeCreators mock (tests/smoke/lib/
+      #      scrapecreators-mock.mjs). Asserts provider-ON bootstrap + worker/queue
+      #      registration, the create-source gate ACCEPTING, a walk importing through
+      #      the mock, and the reserve-before-HTTP seam debiting the SHARED
+      #      "scrapecreators" ledger (the P0 budget-key fix). The provider-ON env is
+      #      injected per-container by the flow, NOT here — the baseline stays OFF.
+      # Still NO live ScrapeCreators calls in CI (the mock intercepts every request,
+      # mirroring the YouTube-mock discipline) — no real API key ever enters CI.
       CI: 'true'
     steps:
       - uses: actions/checkout@v4

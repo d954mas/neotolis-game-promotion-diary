@@ -560,4 +560,20 @@ fi
 log "(IG.2) PASS — /sources/new renders Instagram disabled ('not configured by operator')"
 log "=== Instagram not-configured parity PASSED ==="
 
+# ============================================================
+# Reddit PROVIDER-ON smoke (Phase 12 — hermetic ScrapeCreators mock)
+# ============================================================
+# The OFF parity flows above prove Reddit degrades cleanly when unconfigured. This
+# final block flips the D-08 kill-switch ON against a hermetic ScrapeCreators mock and
+# drives the paid path the OFF flow can't reach: provider-ON bootstrap, worker
+# registration of the reddit backfill queues + outbox forwarder, the create-source gate
+# ACCEPTING, the author walk fetching through the mock, and the reserve-before-HTTP
+# budget seam debiting the SHARED "scrapecreators" ledger (the P0 fix). No live
+# ScrapeCreators traffic — every call hits the local stub. Runs LAST because it
+# re-launches smoke-app/smoke-worker provider-ON (the earlier OFF flows must run first).
+# reddit_provider_on_smoke is defined in reddit-polling-flow.sh (sourced above).
+log "=== Reddit provider-ON smoke ==="
+reddit_provider_on_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
+log "=== Reddit provider-ON smoke PASSED ==="
+
 log "ALL SMOKE ASSERTIONS PASSED"

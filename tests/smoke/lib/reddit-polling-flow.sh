@@ -87,3 +87,146 @@ reddit_not_configured_smoke() {
 
   log "=== Reddit not-configured parity PASSED ==="
 }
+
+# ---------------------------------------------------------------------------
+# Reddit PROVIDER-ON smoke — boots the production image with the D-08 kill-switch
+# FLIPPED ON (REDDIT_IMPORT_ENABLED=true) pointed at a hermetic ScrapeCreators mock,
+# and drives the full seam the OFF parity flow can't reach: provider-ON bootstrap,
+# worker registration of the reddit backfill queues + outbox forwarder, the create-
+# source gate flipping to ACCEPT, the author walk fetching through the mock, and the
+# reserve-before-HTTP budget seam debiting the SHARED "scrapecreators" ledger (the P0
+# fix — a reddit-private key would leave the shared balance untouched). No live
+# ScrapeCreators traffic: every call hits the local stub. Runs LAST so its provider-ON
+# re-launch of smoke-app/smoke-worker doesn't disturb the earlier OFF parity flows.
+reddit_provider_on_smoke() {
+  local app_url="$1"
+  local session_cookie="$2"
+
+  log "=== Reddit provider-ON smoke (hermetic ScrapeCreators mock) ==="
+
+  # ----- 1. Boot the ScrapeCreators reddit mock on a free host port -----
+  local mock_port mock_pid
+  mock_port=$(node -e 'const s=require("net").createServer(); s.listen(0,()=>{const p=s.address().port; s.close(()=>console.log(p));});')
+  [[ -n "$mock_port" ]] || fail "(RDT-ON) could not allocate a mock port"
+  SCRAPECREATORS_MOCK_PORT="$mock_port" node "$(dirname "${BASH_SOURCE[0]}")/scrapecreators-mock.mjs" \
+    >/tmp/scrapecreators-mock.log 2>&1 &
+  mock_pid=$!
+  local mock_up=false
+  for _ in $(seq 1 50); do
+    if grep -q "listening on" /tmp/scrapecreators-mock.log 2>/dev/null; then mock_up=true; break; fi
+    sleep 0.1
+  done
+  if [[ "$mock_up" != "true" ]]; then
+    cat /tmp/scrapecreators-mock.log 2>/dev/null || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON) scrapecreators-mock did not bind within 5s"
+  fi
+  log "scrapecreators-mock up on :$mock_port"
+
+  # ----- 2. Re-launch smoke-app + smoke-worker PROVIDER-ON, pointed at the mock -----
+  # REDDIT_IMPORT_ENABLED=true flips the kill-switch; SCRAPECREATORS_BASE_URL routes every
+  # provider request to the stub; a funded budget (cap + prepaid balance) lets the
+  # reserve-before-HTTP gate pass. Same DB as the baseline, so the OAuth session persists.
+  docker rm -f smoke-app smoke-worker 2>/dev/null || true
+  local reddit_env=(
+    -e REDDIT_IMPORT_ENABLED=true
+    -e REDDIT_PROVIDER=scrapecreators
+    -e SCRAPECREATORS_API_KEY=mock-key
+    -e "SCRAPECREATORS_BASE_URL=http://localhost:$mock_port"
+    -e SOCIAL_PROVIDER_DAILY_CAP_CREDITS=100
+    -e SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS=1000
+    -e LIMIT_SOCIAL_REQUESTS_PER_DAY=50
+  )
+  # shellcheck disable=SC2046
+  docker run -d --name smoke-app --network host \
+    -e APP_ROLE=app -e PORT="$APP_PORT" "${reddit_env[@]}" $(common_env_args) neotolis:ci >/dev/null
+  # shellcheck disable=SC2046
+  docker run -d --name smoke-worker --network host \
+    -e APP_ROLE=worker "${reddit_env[@]}" $(common_env_args) neotolis:ci >/dev/null
+
+  local ready=false
+  for _ in $(seq 1 60); do
+    if curl -fsS "http://localhost:$APP_PORT/readyz" >/dev/null 2>&1; then ready=true; break; fi
+    sleep 1
+  done
+  if [[ "$ready" != "true" ]]; then
+    docker logs smoke-app 2>&1 | tail -40 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON) provider-ON app /readyz never came up (bootstrap crashed with Reddit ON?)"
+  fi
+  set +o pipefail
+  timeout 30 docker logs -f smoke-worker 2>&1 | grep -q -m1 "worker ready"
+  local wr=$?
+  set -o pipefail
+  if [ $wr -ne 0 ]; then
+    docker logs smoke-worker 2>&1 | tail -50 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON) provider-ON worker did not print 'worker ready' (queue registration crashed?)"
+  fi
+  log "(RDT-ON.0) PASS — provider-ON app + worker booted (bootstrap + queue/outbox registration OK with Reddit ON)"
+
+  # ----- 3. create a reddit_account source — the gate must now ACCEPT it -----
+  local create_code create_body
+  create_code=$(curl -sS -o /tmp/rdt-on-create.txt -w '%{http_code}' -X POST "$app_url/api/sources" \
+    -H "cookie: $session_cookie" -H "content-type: application/json" \
+    -d '{"kind":"reddit_account","handleUrl":"https://www.reddit.com/user/smokeauthor","isOwnedByMe":true,"autoImport":true}' \
+    || echo "curl-failed")
+  create_body=$(cat /tmp/rdt-on-create.txt 2>/dev/null || echo "")
+  if [[ "$create_code" != "200" && "$create_code" != "201" ]]; then
+    echo "$create_body"
+    docker logs smoke-app 2>&1 | tail -40 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.1) reddit_account create with the provider ON returned $create_code, expected 200/201"
+  fi
+  log "(RDT-ON.1) PASS — reddit_account create ACCEPTED provider-ON (the kill-switch flips the gate)"
+
+  # ----- 4. wait for the backfill walk to import via the mock (full HTTP seam) -----
+  log "waiting up to 60s for the walk to import t3_smoke01 (event + snapshot via the mock)"
+  local imported=false
+  for _ in $(seq 1 60); do
+    local found
+    found=$(docker exec smoke-app node -e '
+      import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
+        const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
+        const c = new Client({ connectionString: process.env.DATABASE_URL });
+        await c.connect();
+        try {
+          const e = await c.query("SELECT 1 FROM events WHERE external_id=$1 AND kind=$2 LIMIT 1", ["t3_smoke01","reddit_post"]);
+          const s = await c.query("SELECT 1 FROM reddit_post_snapshots WHERE post_id=$1 LIMIT 1", ["t3_smoke01"]);
+          console.log(e.rowCount>0 && s.rowCount>0 ? "yes":"no");
+        } finally { await c.end(); }
+      }).catch((err)=>{console.error(err);process.exit(1);});
+    ' 2>/dev/null || echo "no")
+    if [[ "$found" == "yes" ]]; then imported=true; break; fi
+    sleep 1
+  done
+  if [[ "$imported" != "true" ]]; then
+    docker logs smoke-worker 2>&1 | tail -80 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.2) the provider-ON walk never imported t3_smoke01 (event + snapshot) via the mock"
+  fi
+  log "(RDT-ON.2) PASS — walk imported the event + snapshot through the hermetic mock (real HTTP seam live)"
+
+  # ----- 5. the reserve-before-HTTP budget seam charged the SHARED ledger (P0) -----
+  local balance
+  balance=$(docker exec smoke-app node -e '
+    import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
+      const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
+      const c = new Client({ connectionString: process.env.DATABASE_URL });
+      await c.connect();
+      try {
+        const r = await c.query("SELECT prepaid_balance_credits FROM social_provider_balance WHERE provider=$1", ["scrapecreators"]);
+        console.log(r.rowCount>0 ? String(r.rows[0].prepaid_balance_credits) : "missing");
+      } finally { await c.end(); }
+    }).catch((err)=>{console.error(err);process.exit(1);});
+  ' 2>&1)
+  log "shared scrapecreators balance after the walk: $balance (seeded 1000)"
+  if [[ "$balance" == "missing" || "$balance" == "1000" ]]; then
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.3) the shared 'scrapecreators' balance was not debited ($balance) — reddit spend did not charge the shared ledger (P0 budget-key regression)"
+  fi
+  log "(RDT-ON.3) PASS — reddit spend debited the SHARED 'scrapecreators' balance (P0 seam live in the image)"
+
+  kill -TERM "$mock_pid" 2>/dev/null || true
+  log "=== Reddit provider-ON smoke PASSED ==="
+}
