@@ -98,6 +98,22 @@ copy-pasteable configs:
 - **KEK rotation** — [`kek-rotation.md`](./kek-rotation.md): rotating the
   key-encryption key without downtime.
 
+## Upgrade notes
+
+Migrations run automatically at boot and are forward-only. **Always take a Postgres
+backup before upgrading** ([`backups.md`](./backups.md)) — a forward-only migration
+cannot be rolled back in place.
+
+- **⚠️ Phase 12 (Reddit rebuild) drops the old Reddit tables.** Migration `0070`
+  **destructively `DROP`s** the eight legacy free-`.json` Reddit tables (`reddit_posts`,
+  `reddit_users_cache`, `reddit_subreddits_cache`, the snapshot/baseline/pacer tables)
+  ahead of the ScrapeCreators rebuild. **Any historical Reddit import data on a
+  pre-Phase-12 self-host is permanently lost on upgrade** — it is only recoverable from a
+  backup you took first. This is intentional (the old anonymous-scrape path was already
+  dead in production; the rebuild starts from a clean schema), not a bug. Non-Reddit data
+  (games, events, other sources) is untouched. If you never enabled Reddit import, you
+  have nothing to lose here — but take the backup anyway.
+
 ## Notes
 
 - **Privacy by default.** All data is scoped to the signed-in user; there are no
