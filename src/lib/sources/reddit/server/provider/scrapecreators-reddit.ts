@@ -23,11 +23,7 @@
 
 import { env } from "$lib/server/config/env.js";
 import { redditFetch } from "../http.js";
-import {
-  normalizeRedditFeed,
-  normalizeSingleRedditPost,
-  type RedditFeedPage,
-} from "../normalize.js";
+import { normalizeRedditFeed, type RedditFeedPage } from "../normalize.js";
 import { redditParsePostUrl } from "../url.js";
 import type {
   NormalizedSinglePost,
@@ -93,7 +89,18 @@ export async function fetchRedditFeedPage(
 }
 
 export const scrapeCreatorsRedditProvider: SocialProvider = {
-  name: "scrapecreators-reddit",
+  // BUDGET KEY, not a registry identity: `name` is the value the HTTP seam
+  // (redditFetch) passes to reserveSocialCredits + the OBS metric as `provider`.
+  // The prepaid ledger (social_provider_balance / social_provider_spend) + the
+  // 80/95 throttle are keyed by PROVIDER, and the ScrapeCreators balance is ONE
+  // pool shared across IG + TikTok + Reddit (D-01) — so this MUST be the canonical
+  // "scrapecreators" (matching IG/TikTok's provider.name), NOT a reddit-private
+  // "scrapecreators-reddit". A distinct key seeds a SECOND full prepaid balance and
+  // makes Reddit spend invisible to the shared hard ceiling + the throttle gate the
+  // read paths (observability / poll-cron) already query under "scrapecreators".
+  // The platform label ("reddit") is what keeps per-platform metric/spend
+  // attribution distinct; the registry resolves providers by PLATFORM, never name.
+  name: "scrapecreators",
 
   async fetchPosts(
     platform: SocialPlatform,
@@ -150,19 +157,23 @@ export const scrapeCreatorsRedditProvider: SocialProvider = {
     const fullname = `t3_${parsed.externalId}`;
     const match = page.posts.find((p) => p.id === fullname);
     if (match === undefined) return null;
-    return normalizeSingleRedditPost({
-      name: match.id,
-      id: parsed.externalId,
-      author: match.author,
-      author_fullname: match.authorFullname,
-      subreddit: match.subredditSlug,
-      title: match.title,
-      selftext: match.selftext,
-      score: match.raw.score,
-      upvote_ratio: match.raw.upvoteRatio,
-      num_comments: match.raw.numComments,
-      created_utc: Math.floor(match.publishedAt.getTime() / 1000),
-      permalink: match.permalink,
-    });
+    // `match` is ALREADY a fully-normalized post — project it straight to the single-post
+    // shape. Do NOT re-normalize a stripped synthetic object: that dropped url/is_video/
+    // post_hint/thumbnail, so the preview kind always collapsed to text/link and image
+    // posts lost their thumbnail. The derived kind + thumbnail carry through here.
+    return {
+      id: match.id,
+      shortcode: parsed.externalId,
+      kind: match.kind,
+      publishedAt: match.publishedAt,
+      metrics: match.metrics,
+      caption: match.caption,
+      thumbnailUrl: match.thumbnailUrl,
+      ownerId: match.authorFullname,
+      ownerUsername: match.author,
+      // Carry the richer Reddit FORM so the paste-preview snapshot persists the real
+      // media_type (image/gallery cards render correctly before the source walk).
+      mediaType: match.mediaType,
+    };
   },
 };
