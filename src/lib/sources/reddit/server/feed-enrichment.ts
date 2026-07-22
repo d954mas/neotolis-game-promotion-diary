@@ -55,6 +55,11 @@ export interface RedditEnrichment {
    *  Drives the per-form card affordance + the cross-source media-type filter. NULL
    *  until resolved. */
   mediaType: string | null;
+  /** ISO timestamp when the Variant-A walk / write-path belt first detected this post
+   *  as deleted-on-Reddit (reddit_posts.deletion_detected_at), else null. The event
+   *  detail surface (EventDetailContent) renders a "Deleted on Reddit" notice off this;
+   *  without projecting it here that notice could never appear. */
+  deletionDetectedAt: string | null;
 }
 
 /** Discriminator key for the in-place decoration. The card-props mapper (Plan 06)
@@ -105,6 +110,7 @@ export async function redditEnrichFeedDtos(
           mediaType: redditPosts.mediaType,
           subredditSlug: redditPosts.subredditSlug,
           author: redditPosts.author,
+          deletionDetectedAt: redditPosts.deletionDetectedAt,
         })
         .from(redditPosts)
         .where(inArray(redditPosts.postId, externalIds)),
@@ -129,6 +135,7 @@ export async function redditEnrichFeedDtos(
         mediaType: string | null;
         subredditSlug: string | null;
         author: string | null;
+        deletionDetectedAt: Date | null;
       }
     >();
     for (const r of postRows) {
@@ -137,6 +144,7 @@ export async function redditEnrichFeedDtos(
         mediaType: r.mediaType,
         subredditSlug: r.subredditSlug,
         author: r.author,
+        deletionDetectedAt: r.deletionDetectedAt,
       });
     }
 
@@ -156,10 +164,14 @@ export async function redditEnrichFeedDtos(
           .filter((k): k is string => k !== null && k !== ""),
       ),
     ];
+    // Namespaced `${kind}:${channelKey}` — a subreddit slug and an account username
+    // can be the SAME string (r/gamedev vs u/gamedev), so a flat key set would let a
+    // paused account spuriously light the paused badge on an unrelated subreddit's posts.
     const pausedKeys = new Set<string>();
     if (channelKeys.length > 0) {
       const stateRows = await db
         .select({
+          kind: dataSourceChannelState.kind,
           channelKey: dataSourceChannelState.channelKey,
           metadata: dataSourceChannelState.metadata,
         })
@@ -172,7 +184,7 @@ export async function redditEnrichFeedDtos(
         );
       for (const r of stateRows) {
         const rd = (r.metadata as { reddit?: { operatorPaused?: unknown } } | null)?.reddit;
-        if (rd?.operatorPaused === true) pausedKeys.add(r.channelKey);
+        if (rd?.operatorPaused === true) pausedKeys.add(`${r.kind}:${r.channelKey}`);
       }
     }
 
@@ -187,13 +199,14 @@ export async function redditEnrichFeedDtos(
         stats: latest.get(eid) ?? null,
         thumbnailUrl: meta?.thumbnailUrl ?? null,
         mediaType: meta?.mediaType ?? null,
+        deletionDetectedAt: meta?.deletionDetectedAt ? meta.deletionDetectedAt.toISOString() : null,
       };
       // A post is paused if EITHER its subreddit source OR its account source is paused.
-      const subjectKeys = [
-        meta?.subredditSlug ?? null,
-        meta?.author == null ? null : meta.author.toLowerCase(),
-      ];
-      if (subjectKeys.some((k) => k !== null && pausedKeys.has(k))) {
+      // Match on the kind-namespaced key so the two keyspaces can't collide.
+      const isPaused =
+        (meta?.subredditSlug != null && pausedKeys.has(`reddit_subreddit:${meta.subredditSlug}`)) ||
+        (meta?.author != null && pausedKeys.has(`reddit_account:${meta.author.toLowerCase()}`));
+      if (isPaused) {
         const base =
           dto.metadata !== null && typeof dto.metadata === "object"
             ? (dto.metadata as Record<string, unknown>)

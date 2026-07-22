@@ -105,10 +105,10 @@
 
   "quota_banner_reddit_tab_title": "Reddit",
   "quota_banner_reddit_not_configured": "Reddit not configured",
-  "quota_banner_reddit_source_actions": "Reddit sources: {used} / {cap} source-actions in last {window} min",
-  "quota_banner_reddit_post_refreshes": "Reddit posts: {used} / {cap} post-refreshes in last {window} min",
-  "quota_banner_reddit_service_load": "Service load: {used} / {capacity} user slots available this minute",
-  "quota_banner_reddit_limits_explainer": "Reddit API limits are unusually strict (Reddit's Responsible Builder Policy). Source actions: 5 per 15 min. Post refreshes: 30 per 15 min. Total service throughput: ~8 requests/min. Queued refreshes land within 1-2 min.",
+  "quota_banner_reddit_account_requests": "Reddit accounts: {used} / {cap} requests today",
+  "quota_banner_reddit_subreddit_requests": "Reddit subreddits: {used} / {cap} requests today",
+  "quota_banner_reddit_service_load": "Service load: {used} / {capacity} shared ScrapeCreators credits used today",
+  "quota_banner_reddit_limits_explainer": "Reddit import is a paid ScrapeCreators provider on the shared prepaid budget. Each source kind (accounts, subreddits) has its own per-day request allowance; the service-load line shows the operator's shared daily ScrapeCreators spend. Refreshes pause automatically as the shared budget nears its limit.",
 
   "quota_exceeded_social_requests": "Daily import limit reached — try again tomorrow, or this resets at midnight Pacific.",
 
@@ -331,6 +331,7 @@
   "admin_quota_provider_requests_label": "Requests today",
   "admin_quota_provider_spend_label": "Spend / cap",
   "admin_quota_provider_balance_label": "Remaining balance",
+  "admin_quota_provider_prepaid_balance_label": "Prepaid balance",
   "admin_quota_provider_balance_note": "Computed as cap minus tracked spend. Independent of any external balance API.",
   "admin_layout_breadcrumb": "Operator-only data — visible because your email is in ADMIN_EMAIL_ALLOWLIST.",
   "admin_layout_breadcrumb_aria": "Admin mode",
@@ -383,7 +384,7 @@
   "chart_metric_likes": "Likes",
   "chart_metric_comments": "Comments",
   "chart_metric_shares": "Shares",
-  "chart_metric_score": "Upvotes",
+  "chart_metric_score": "Score",
   "chart_metric_num_comments": "Comments",
   "chart_metric_reactions": "Reactions",
   "chart_history_title": "History",

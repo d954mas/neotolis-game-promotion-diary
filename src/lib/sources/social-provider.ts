@@ -106,6 +106,13 @@ export interface NormalizedSinglePost {
   ownerId: string | null;
   /** Owner handle/username — display value, read from source-of-truth, not cached. */
   ownerUsername: string | null;
+  /** Reddit post FORM ("self"|"link"|"image"|"gallery") when the provider is Reddit;
+   *  else null/absent. OPTIONAL so non-Reddit provider impls stay untouched (same
+   *  pattern as ResolvedAccount.secUid). Lets the paste-preview snapshot persist the
+   *  real reddit_posts.media_type so an image/gallery card renders its media variant
+   *  IMMEDIATELY — without it the paste stored null and the card fell back to a plain
+   *  text layout until the next source walk re-derived the form. */
+  mediaType?: string | null;
 }
 
 /**

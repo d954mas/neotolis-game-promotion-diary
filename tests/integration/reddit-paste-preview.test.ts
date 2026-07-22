@@ -44,7 +44,14 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
           return single.next;
         },
         async fetchPosts() {
-          return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null };
+          return {
+            posts: [],
+            nextCursor: null,
+            endOfFeed: true,
+            creditsUsed: 1,
+            owner: null,
+            droppedCount: 0,
+          };
         },
         async resolveAccount() {
           return { accountId: "acct-preview-rdt", displayName: "Preview" };
@@ -138,6 +145,27 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     expect(snap).toBeDefined();
     expect(snap!.likeCount).toBe(42);
     expect(snap!.commentCount).toBe(7);
+  });
+
+  it("[review-P2] the preview persists the provider's media_type (image card renders before the walk)", async () => {
+    const user = await seedUserDirectly({ email: `rdt-preview-media-${uniq()}@t.io` });
+    // The provider derived an image FORM; the paste must persist it (pre-fix it wrote a
+    // hard-coded null, so an image post rendered as a plain text card until a source walk).
+    single.next = singlePost({
+      id: "t3_img01",
+      shortcode: "img01",
+      kind: "image",
+      mediaType: "image",
+      thumbnailUrl: "https://i.redd.it/x.png",
+    });
+    await fetchEventPreviewMetadata("https://www.reddit.com/r/gamedev/comments/img01/x/", {
+      userId: user.id,
+      ipAddress: "127.0.0.1",
+    });
+    const [cached] = await db.select().from(redditPosts).where(eq(redditPosts.postId, "t3_img01"));
+    expect(cached!.mediaType, "media_type persisted from the provider (was hard-coded null)").toBe(
+      "image",
+    );
   });
 
   it("[12-06] the preview reserves exactly one user credit (cap counter advances by 1)", async () => {

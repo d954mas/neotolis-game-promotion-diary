@@ -29,7 +29,14 @@ import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normali
 
 const provider = { pages: [] as RedditFeedPage[] };
 function emptyPage(): RedditFeedPage {
-  return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null };
+  return {
+    posts: [],
+    nextCursor: null,
+    endOfFeed: true,
+    creditsUsed: 1,
+    owner: null,
+    droppedCount: 0,
+  };
 }
 
 vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
@@ -57,7 +64,8 @@ const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { eventGames } = await import("../../src/lib/server/db/schema/event-games.js");
-const { redditPostSnapshots } = await import("../../src/lib/server/db/schema/index.js");
+const { redditPostSnapshots, redditPosts } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { createGame } = await import("../../src/lib/server/services/games.js");
 const { attachEventToGames } = await import("../../src/lib/server/services/events-mutation.js");
 const { getEventMetricSeries } =
@@ -244,7 +252,9 @@ describe("reddit feed inbox + metric series (VIZ-05 + PLAT-04)", () => {
     expect(keys).not.toContain("view_count");
     expect(keys).not.toContain("share_count");
     const likes = series.find((s) => s.metricKey === "like_count");
-    expect(likes!.labelKey).toBe("chart_metric_likes");
+    // Reddit names its upvote metric "Score" everywhere (matches the card) — the chart
+    // series uses chart_metric_score (up-arrow glyph), NOT the cross-platform "Likes".
+    expect(likes!.labelKey).toBe("chart_metric_score");
     expect(likes!.points.at(-1)!.value).toBe(11);
     const comments = series.find((s) => s.metricKey === "comment_count");
     expect(comments!.points.at(-1)!.value).toBe(4);
@@ -291,5 +301,34 @@ describe("reddit feed inbox + metric series (VIZ-05 + PLAT-04)", () => {
     const [selfDto] = await mapEventsToDtos(userId, [selfEv!]);
     await redditEnrichFeedDtos(userId, [selfDto!]);
     expect(eventThumbnail(selfDto as never)).toBeNull();
+  });
+
+  it("[review-P2] enrichment surfaces reddit_posts.deletion_detected_at as an ISO string (drives 'Deleted on Reddit')", async () => {
+    const handle = `del_${uniq()}`;
+    const postId = `d${uniq()}`;
+    const { userId } = await seedAccountSource(handle);
+    provider.pages = [
+      normalizeRedditFeed({ success: true, posts: [selfPost(postId, 1, handle)], after: null }),
+    ];
+    await runBackfill(userId, handle);
+
+    // Mark the post deleted-on-Reddit (as the Variant-A reconcile / purge cron would).
+    await db
+      .update(redditPosts)
+      .set({ deletionDetectedAt: new Date("2026-07-01T00:00:00Z") })
+      .where(eq(redditPosts.postId, `t3_${postId}`));
+
+    const evs = await db
+      .select()
+      .from(events)
+      .where(eq(events.externalId, `t3_${postId}`));
+    const dtos = await mapEventsToDtos(userId, evs);
+    await redditEnrichFeedDtos(userId, dtos);
+
+    // Pre-fix the enrichment never selected/projected this field, so the event-detail
+    // "Deleted on Reddit" notice could never appear. Now it rides as an ISO string.
+    const enr = (dtos[0] as { redditEnrichment?: { deletionDetectedAt?: string | null } })
+      .redditEnrichment;
+    expect(enr?.deletionDetectedAt).toBe("2026-07-01T00:00:00.000Z");
   });
 });

@@ -15,10 +15,11 @@
 // `reddit.deletion_propagated` audit INSERT run inside the SAME db.transaction on the
 // SAME connection. Either both land or both roll back — there is no window where
 // author data is purged but the forensic trail is missing. The audit INSERT goes
-// through `tx.insert(auditLog)` (NOT `writeAudit(...)` against the top-level `db`),
-// which is critical: calling writeAudit from inside a transaction would acquire a
-// SECOND pool connection while the tx still holds its first — the pool-deadlock
-// pattern. Using `tx` directly reuses the held connection and sidesteps the deadlock.
+// through `writeAuditTx(tx, …)` — the tx-aware audit.ts API (AGENTS.md: audit writes
+// only via audit.ts) — NOT `writeAudit(...)` against the top-level `db`, which is
+// critical: the db-bound writer from inside a transaction would acquire a SECOND pool
+// connection while the tx still holds its first — the pool-deadlock pattern.
+// writeAuditTx reuses the held connection and sidesteps the deadlock.
 //
 // When ADMIN_EMAIL_ALLOWLIST is empty (no operator resolvable) the purge STILL runs
 // but the audit is skipped (purging is the security-critical work; the missing
@@ -28,7 +29,7 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { auditLog } from "$lib/server/db/schema/audit-log.js";
+import { writeAuditTx } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import { resolveOperatorUserId } from "../quota.js";
 
@@ -57,12 +58,12 @@ export async function handleDeletionPropagationCron(): Promise<{ purged: number 
           "reddit.deletion_propagation_cron: no ADMIN_EMAIL_ALLOWLIST resolvable; skipping audit",
         );
       } else {
-        // IN-TX audit (NOT writeAudit — pool-deadlock). Both commit together.
-        await tx.insert(auditLog).values({
+        // IN-TX audit via the tx-aware audit.ts API (NOT the db-bound writeAudit —
+        // pool-deadlock). The purge UPDATE + this audit commit together.
+        await writeAuditTx(tx, {
           userId: operatorId,
           action: "reddit.deletion_propagated",
           ipAddress: "127.0.0.1",
-          userAgent: null,
           metadata: { posts_purged: purgedCount },
         });
       }
