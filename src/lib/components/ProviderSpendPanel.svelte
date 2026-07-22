@@ -74,7 +74,7 @@
     </div>
     {#if block.prepaidBalance !== block.remainingBalance}
       <div class="provider-spend__row provider-spend__row--sub">
-        <span class="provider-spend__label">Prepaid balance</span>
+        <span class="provider-spend__label">{m.admin_quota_provider_prepaid_balance_label()}</span>
         <span class="provider-spend__num">{block.prepaidBalance.toLocaleString()}</span>
       </div>
     {/if}

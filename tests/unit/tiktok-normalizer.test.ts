@@ -20,6 +20,7 @@ import {
   normalizeSingleVideoResponse,
   normalizeVideosResponse,
 } from "$lib/sources/tiktok/server/normalize.js";
+import { AdapterError } from "$lib/sources/errors.js";
 
 // A regular video aweme (aweme_type 0, no image_post_info) with all four
 // PLAT-02 metrics inline + snake_case author.
@@ -222,6 +223,43 @@ describe("tiktok normalizer (PLAT-02)", () => {
       "7649569886871522573",
     );
     expect(normalizeSingleVideoResponse({ success: true })).toBeNull();
+  });
+
+  it("[review-P3] a stray malformed aweme is DROPPED; the rest of the page survives (no paid-page nuke)", () => {
+    // A malformed lead item omits the REQUIRED aweme_id → AWEME.parse throws; it is
+    // dropped, and the owner still resolves from the first PARSED aweme (not the raw one).
+    const bad = { desc: "no aweme_id", create_time: 1781000000 }; // missing aweme_id
+    const good2 = { ...VIDEO_AWEME, aweme_id: "7600000000000000002" };
+    const good3 = { ...VIDEO_AWEME, aweme_id: "7600000000000000003" };
+    const page = normalizeVideosResponse({
+      aweme_list: [bad, VIDEO_AWEME, good2, good3],
+      max_cursor: 999,
+      has_more: 1,
+    });
+    // Only the bad row is dropped; the 3 good awemes survive in order.
+    expect(page.posts.map((p) => p.id)).toEqual([
+      "7649569886871522573",
+      "7600000000000000002",
+      "7600000000000000003",
+    ]);
+    // Owner still resolves from the first VALID aweme's author.
+    expect(page.owner?.username).toBe("stoolpresidente");
+  });
+
+  it("[review-P3] a MAJORITY-unparseable page THROWS (shape drift), not a silent partial page", () => {
+    const bad = [{ desc: "x" }, { foo: 1 }, {}]; // 3 awemes with no required aweme_id
+    let thrown: unknown;
+    try {
+      normalizeVideosResponse({
+        aweme_list: [VIDEO_AWEME, ...bad],
+        max_cursor: 0,
+        has_more: 0,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(AdapterError);
+    expect((thrown as AdapterError).category).toBe("transient");
   });
 });
 

@@ -23,8 +23,8 @@
 // cron queue only.
 //
 // isOperatorConfigured / isEnabled are ALWAYS true: Telegram needs no secret to
-// function (the structural contrast with Reddit's REDDIT_USER_AGENT gate and
-// IG's provider-key gate).
+// function (the structural contrast with Reddit's isRedditConfigured() /
+// REDDIT_IMPORT_ENABLED gate and IG's provider-key gate).
 
 import type {
   AdapterContext,

@@ -6,14 +6,14 @@
  *   - Metrics-by-presence (D-09): a post renders likes + comments ONLY; NO views chip
  *     and NO shares chip (Reddit exposes neither, 12-SPIKE Q4). A null metric is
  *     omitted (never a 0-or-dash).
- *   - ADAPTIVE layout (D-06): an IMAGE post (thumbnailUrl present) renders the
- *     hotlinked i.redd.it cover; a SELF/LINK post (thumbnailUrl null) renders the text
- *     card — NO thumbnail block at all.
- *   - The gallery variant carries a "Carousel" media-type overlay (the multi-image
- *     affordance); a single image / self / link post carries no pill.
- *   - onerror fallback: a failing hotlinked i.redd.it cover collapses to the text card
- *     (no broken <img>) — the latched adaptive fallback (image/gallery variant
- *     un-sampled by the spike; live-CDN renderability owed at the Task 3 UAT).
+ *   - ADAPTIVE layout (D-06), keyed on the post FORM (media_type): an IMAGE / GALLERY
+ *     post RESERVES the media slot (shows the cover when present, else the KindIcon
+ *     placeholder); a SELF/LINK post renders the text card — NO thumbnail block at all.
+ *   - The gallery variant carries a "Carousel" media-type overlay even with NO cover URL
+ *     (ScrapeCreators omits a gallery cover); a single image / self / link post has no pill.
+ *   - onerror fallback: a failing hotlinked i.redd.it cover on a MEDIA post keeps the
+ *     slot with the KindIcon placeholder (no broken <img>, media identity + pill survive)
+ *     — the latched adaptive fallback (live-CDN renderability owed at the Task 3 UAT).
  *
  * Mounts the real Svelte component in Chromium (vitest browser project) so the {#if}
  * presence branches + the BaseFeedCard onThumbnailError wiring are exercised against
@@ -170,7 +170,7 @@ describe("RedditFeedCard adaptive rendering (Phase 12 Plan 06 — PLAT-04)", () 
     unmount(component);
   });
 
-  it("[12-06] an image thumbnail onerror collapses to the text card (hotlink+onerror latch — no broken image)", () => {
+  it("[review-P2] an image thumbnail onerror KEEPS the media slot (placeholder + no broken image), not a text collapse", () => {
     const { card, component } = mountCard(
       makeEvent({
         stats: { likeCount: 1, commentCount: 1, polledAt: new Date() },
@@ -184,12 +184,31 @@ describe("RedditFeedCard adaptive rendering (Phase 12 Plan 06 — PLAT-04)", () 
     expect(img!.getAttribute("src")).toContain("i.redd.it");
     img!.dispatchEvent(new Event("error"));
     flushSync();
-    // After error: the onerror latch nulls the thumbnail. reddit_post is NOT a
-    // media-shape kind, so a null thumbnail COLLAPSES the thumb slot entirely — the
-    // card degrades to text-forward with no broken <img>.
+    // After error: the onerror latch nulls the cover, but an IMAGE post is a MEDIA post,
+    // so the slot STAYS (forceThumbSlot) and shows the KindIcon placeholder — the media
+    // identity survives instead of collapsing to a text card. No broken <img> anywhere.
     expect(card.querySelector(".card-thumb img")).toBeNull();
-    expect(card.querySelector(".card-thumb")).toBeNull();
+    const thumb = card.querySelector(".card-thumb");
+    expect(thumb, "the media slot stays after a failed hotlink").not.toBeNull();
+    expect(thumb!.classList.contains("empty")).toBe(true);
     expect(card.querySelector("img")).toBeNull();
+    unmount(component);
+  });
+
+  it("[review-P2] a GALLERY with NO cover URL still reserves the slot + Carousel pill (real ScrapeCreators shape)", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { likeCount: 12, commentCount: 2, polledAt: new Date() },
+        thumbnailUrl: null, // ScrapeCreators omits a gallery cover — the real shape
+        mediaType: "gallery",
+      }),
+    );
+    const thumb = card.querySelector(".card-thumb");
+    expect(thumb, "a gallery reserves the media slot even without a cover").not.toBeNull();
+    expect(card.querySelector(".card-thumb img")).toBeNull(); // no cover → KindIcon placeholder
+    const pill = card.querySelector(".card-thumb .media-type-pill") as HTMLElement | null;
+    expect(pill, "the Carousel pill survives without a cover").not.toBeNull();
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Carousel");
     unmount(component);
   });
 

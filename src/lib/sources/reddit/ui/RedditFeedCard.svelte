@@ -14,21 +14,22 @@
   //   - thumbnail: redditEnrichment.thumbnailUrl — the raw i.redd.it cover HOTLINKED
   //     directly (12-SPIKE Pitfall 5 — NO same-origin proxy; image/gallery variant
   //     un-sampled by the spike, owed at the Plan 12-06 UAT via the browser hotlink
-  //     test). FREQUENTLY NULL (ScrapeCreators omits `thumbnail`; only image/gallery
-  //     posts derive one). BaseFeedCard carries referrerpolicy=no-referrer +
-  //     loading=lazy and swaps to the .card-thumb.empty KindIcon placeholder on <img>
-  //     onerror (an expired CDN cover OR a blocked hotlink — the latched fallback).
+  //     test). FREQUENTLY NULL (ScrapeCreators omits `thumbnail`; only SINGLE-image
+  //     posts derive one — a GALLERY has media_type gallery but NO cover URL).
+  //     BaseFeedCard carries referrerpolicy=no-referrer + loading=lazy and swaps to
+  //     the .card-thumb.empty KindIcon placeholder on <img> onerror (an expired CDN
+  //     cover OR a blocked hotlink — the latched fallback).
   //   - stats: redditEnrichment.stats.{likeCount,commentCount} — the post's own polling
   //     data (owned by reddit_post_snapshots), not denormalized. Metrics-by-presence
   //     (D-09): render a metric ONLY when non-null. Reddit exposes exactly TWO metrics
   //     — NO views chip, NO shares chip (Reddit surfaces neither, 12-SPIKE Q4).
   //
-  //   - ADAPTIVE D-06 layout: an IMAGE / GALLERY post (redditEnrichment.thumbnailUrl
-  //     present) renders the hotlinked cover + the post title; a SELF (text) or LINK
-  //     post (thumbnailUrl null) is text-forward — we pass thumbnailUrl={null} so the
-  //     empty thumbnail slot never renders and the title/notes are the focal point.
-  //     reddit_post is NOT a media-shape kind, so BaseFeedCard only reserves the thumb
-  //     slot when thumbnailUrl is non-null — passing null collapses it.
+  //   - ADAPTIVE D-06 layout, keyed on the post FORM (redditEnrichment.mediaType), NOT
+  //     on cover presence: an IMAGE / GALLERY post RESERVES the media slot (forceThumbSlot)
+  //     so it shows the hotlinked cover when present, else the KindIcon placeholder +
+  //     the "Carousel" pill — a gallery (no cover URL) and an image whose hotlink 403s
+  //     both keep their media identity instead of silently collapsing to a text card. A
+  //     SELF (text) / LINK post reserves NO slot and is text-forward (title/notes focal).
   //
   // Registered via ./index.ts as `cardComponent` so /feed/+page.svelte's
   // `getCardComponent("reddit_post")` returns this component.
@@ -84,17 +85,20 @@
       source?.channelTitle ?? source?.displayName ?? redditSubredditLabel(event.metadata),
   );
 
-  // D-06 adaptive: a self/link post (thumbnailUrl null) is text-only → render
-  // text-forward (no thumbnail slot). An image/gallery post shows the hotlinked
-  // i.redd.it cover on top.
+  // D-06 adaptive: media-ness is the post FORM, not cover presence. An image / gallery
+  // post reserves the media slot (forceThumbSlot below) even when it has NO usable cover
+  // (a gallery never derives one; an image's hotlink can fail) so its media identity +
+  // pill survive. A self / link post reserves no slot → text-forward.
   const rawThumb = $derived(event.redditEnrichment?.thumbnailUrl ?? null);
-  const isTextOnly = $derived(rawThumb === null);
+  const mediaType = $derived(event.redditEnrichment?.mediaType ?? null);
+  const isMediaPost = $derived(mediaType === "image" || mediaType === "gallery");
 
   // Hotlink expiry OR a blocked i.redd.it fetch → the onerror latch → null thumbnail →
-  // BaseFeedCard renders the .card-thumb.empty KindIcon placeholder. `thumbErrored`
-  // latches on the <img> onerror so a transient placeholder doesn't flicker back.
+  // BaseFeedCard renders the .card-thumb.empty KindIcon placeholder (the slot stays via
+  // forceThumbSlot). `thumbErrored` latches on the <img> onerror so a transient
+  // placeholder doesn't flicker back.
   let thumbErrored = $state(false);
-  const thumbnailUrl = $derived.by(() => (isTextOnly || thumbErrored ? null : rawThumb));
+  const thumbnailUrl = $derived.by(() => (thumbErrored ? null : rawThumb));
 
   const stats = $derived(event.redditEnrichment?.stats ?? null);
 
@@ -122,6 +126,7 @@
   {currentUserName}
   statsSlot={statsSnippet}
   thumbnailOverlay={overlay}
+  forceThumbSlot={isMediaPost}
   onThumbnailError={() => (thumbErrored = true)}
 />
 

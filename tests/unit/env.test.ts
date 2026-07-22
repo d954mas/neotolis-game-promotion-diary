@@ -151,3 +151,36 @@ describe("env additions — YouTube + admin allowlist", () => {
     });
   });
 });
+
+describe("env additions — Reddit gating (D-08 kill-switch)", () => {
+  it("REDDIT_IMPORT_ENABLED defaults to 'false' (the default-OFF kill-switch)", async () => {
+    await withEnv({ REDDIT_IMPORT_ENABLED: undefined }, (env) => {
+      expect(env.REDDIT_IMPORT_ENABLED).toBe("false");
+    });
+  });
+
+  it("REDDIT_IMPORT_ENABLED accepts the explicit opt-in 'true'", async () => {
+    await withEnv({ REDDIT_IMPORT_ENABLED: "true" }, (env) => {
+      expect(env.REDDIT_IMPORT_ENABLED).toBe("true");
+    });
+  });
+
+  it("REDDIT_IMPORT_ENABLED is a STRICT enum — a non-'true'/'false' value is rejected (no coerce-boolean trap)", async () => {
+    // z.coerce.boolean("false") === true would silently AUTO-ENABLE Reddit; the strict
+    // z.enum(["true","false"]) rejects anything else at parse time instead.
+    await expect(withEnv({ REDDIT_IMPORT_ENABLED: "1" }, () => {})).rejects.toThrow();
+  });
+
+  it("REDDIT_PROVIDER defaults to '' (unset ⇒ isRedditConfigured false)", async () => {
+    await withEnv({ REDDIT_PROVIDER: undefined }, (env) => {
+      expect(env.REDDIT_PROVIDER).toBe("");
+    });
+  });
+
+  it("REDDIT_PROVIDER accepts 'scrapecreators' and rejects an unknown provider", async () => {
+    await withEnv({ REDDIT_PROVIDER: "scrapecreators" }, (env) => {
+      expect(env.REDDIT_PROVIDER).toBe("scrapecreators");
+    });
+    await expect(withEnv({ REDDIT_PROVIDER: "apify" }, () => {})).rejects.toThrow();
+  });
+});

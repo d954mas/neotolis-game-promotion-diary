@@ -18,12 +18,14 @@ import {
   keepForAccount,
   normalizeTweet,
   normalizeFeedResponse,
+  normalizeFeedResponseWithRaw,
   normalizeProfile,
   normalizeSingleTweet,
   normalizeSingleTweetResponse,
   tweetRawComponents,
   type Tweet,
 } from "$lib/sources/twitter/server/normalize.js";
+import { AdapterError } from "$lib/sources/errors.js";
 
 // isTwitterConfigured reads the CACHED `env` singleton (parsed once at module
 // load), so asserting its TWITTER_PROVIDER branches requires re-parsing env.ts
@@ -243,6 +245,40 @@ describe("twitter normalizer", () => {
       });
       expect(emptyCursor.nextCursor).toBeNull();
       expect(emptyCursor.endOfFeed).toBe(true);
+    });
+
+    it("[review-P3] a stray malformed tweet is DROPPED; page.posts AND rawTweets stay index-aligned (no paid-page nuke)", () => {
+      const good1: Tweet = { ...TEXT_TWEET, id: "10" };
+      const bad = { createdAt: "Thu Jun 12 09:00:00 +0000 2026" }; // missing REQUIRED `id` → TWEET.parse throws
+      const good2: Tweet = { ...TEXT_TWEET, id: "20" };
+      const good3: Tweet = { ...VIDEO_TWEET, id: "30" };
+      const { page, rawTweets } = normalizeFeedResponseWithRaw({
+        data: { tweets: [good1, bad, good2, good3] },
+        has_next_page: true,
+        next_cursor: "cursor-page-2",
+      });
+      // Only the bad row is dropped; the 3 valid tweets survive in order — no throw.
+      expect(page.posts.map((p) => p.id)).toEqual(["10", "20", "30"]);
+      // rawTweets IS the same valid subset: same length, index-aligned with page.posts
+      // (the walker zips them for the D-04 keepForAccount filter + D-05 raw components).
+      expect(rawTweets.map((t) => t.id)).toEqual(["10", "20", "30"]);
+      expect(rawTweets).toHaveLength(page.posts.length);
+      rawTweets.forEach((t, i) => expect(t.id).toBe(page.posts[i]!.id));
+      // Owner still resolves off the first VALID tweet (dropped lead row doesn't blank it).
+      expect(page.owner?.username).toBe("supergiantgames");
+    });
+
+    it("[review-P3] a MAJORITY-unparseable page THROWS AdapterError(transient) (shape drift), not a silent partial page", () => {
+      const good: Tweet = { ...TEXT_TWEET, id: "10" };
+      const bad = [{ text: "a" }, { text: "b" }, { text: "c" }]; // 3 tweets missing required `id`
+      let thrown: unknown;
+      try {
+        normalizeFeedResponseWithRaw({ data: { tweets: [good, ...bad] }, has_next_page: false });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AdapterError);
+      expect((thrown as AdapterError).category).toBe("transient");
     });
 
     it("[11-02] normalizeSingleTweetResponse reads TOP-LEVEL tweets[] (asymmetry vs feed)", () => {

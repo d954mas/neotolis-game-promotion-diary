@@ -16,6 +16,7 @@ import {
   normalizeReelsResponse,
   normalizeSinglePostResponse,
 } from "$lib/sources/instagram/server/normalize.js";
+import { AdapterError } from "$lib/sources/errors.js";
 
 // A media_type=2 + product_type "clips" item — a REEL (the spike-confirmed
 // reel marker). Has play_count + ig_play_count.
@@ -236,6 +237,36 @@ describe("instagram normalizer (provider shape -> NormalizedPost)", () => {
       paging_info: { max_id: null, more_available: false },
     });
     expect(page.owner).toBeNull();
+  });
+
+  it("[review-P3] normalizePostsResponse: a stray malformed item is DROPPED; the rest survive in order (no paid-page nuke)", () => {
+    const good1 = { id: "a", media_type: 1, taken_at: 1_780_000_000 };
+    const bad = { id: "b", media_type: 1 }; // missing the REQUIRED `taken_at` → MEDIA_ITEM.parse throws
+    const good2 = { id: "c", media_type: 1, taken_at: 1_780_000_100 };
+    const good3 = { id: "d", media_type: 1, taken_at: 1_780_000_200 };
+    const page = normalizePostsResponse({
+      items: [good1, bad, good2, good3],
+      next_max_id: "x",
+      more_available: true,
+    });
+    // Only the bad row is dropped; the 3 good posts survive in order.
+    expect(page.posts.map((p) => p.id)).toEqual(["a", "c", "d"]);
+  });
+
+  it("[review-P3] normalizeReelsResponse: a MAJORITY-unparseable page THROWS (shape drift), not a silent partial page", () => {
+    const good = { media: { id: "a", media_type: 2, taken_at: 1_780_000_000 } };
+    const bad = [{ media: { id: "b", media_type: 2 } }, { foo: 1 }, {}]; // 3 items missing required fields
+    let thrown: unknown;
+    try {
+      normalizeReelsResponse({
+        items: [good, ...bad],
+        paging_info: { max_id: null, more_available: false },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(AdapterError);
+    expect((thrown as AdapterError).category).toBe("transient");
   });
 });
 

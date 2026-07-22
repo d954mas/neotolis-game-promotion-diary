@@ -8,8 +8,9 @@
 //   - auth: kind="scrape", requiresUserSetup=false, isOperatorConfigured=true
 //     ALWAYS. There is nothing to configure (no API key / OAuth app / env
 //     secret), so the adapter is never "unconfigured". This is the structural
-//     difference from Reddit (gates on REDDIT_USER_AGENT) and IG (gates on a
-//     provider key) — Telegram has no gate.
+//     difference from Reddit (gates on isRedditConfigured() /
+//     REDDIT_IMPORT_ENABLED) and IG (gates on a provider key) — Telegram has
+//     no gate.
 //
 //   - quota.getDailyStats(date): there is no daily cap, so dailyLimit=0 and
 //     throttleState is always "ok". unitsUsed is a synthetic 24h count of

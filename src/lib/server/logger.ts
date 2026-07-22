@@ -84,21 +84,12 @@ export const REDACT_PATHS = [
   // rides ONLY in the X-API-Key request header (never logged as a field).
   "*.TWITTERAPIIO_API_KEY",
   "*.twitterapiioApiKey",
-  // Phase 03.1 — Reddit response/request opsec (DV-RDT-7).
-  // Reddit doesn't use OAuth under DV-RDT-7 (public-`.json` adapter only),
-  // but the redact list treats these field names as redacted regardless:
-  // defense-in-depth against accidentally logging a future BYO-OAuth bearer,
-  // a stray UA-as-bearer mishap, or rate-limit-header fingerprinting via
-  // `User-Agent` paired with response headers in structured-fetch dumps.
-  // Note: *.access_token / *.refresh_token are already redacted above (D-24);
-  // listed here as comments for the verification grep contract.
-  // - *.access_token   (already above)
-  // - *.refresh_token  (already above)
+  // Generic secret-shaped fields + HTTP auth headers (defense-in-depth): a stray
+  // structured-fetch dump or request-log must never surface a bearer token, an OAuth
+  // client secret, or an Authorization / Cookie header. (*.access_token /
+  // *.refresh_token are already redacted above, D-24.)
   "*.bearer",
   "*.client_secret",
-  "*.user_agent",
-  "headers.user-agent",
-  "req.headers.user-agent",
   "req.headers.authorization",
   "req.headers.cookie",
   // Phase 7 — Observability.

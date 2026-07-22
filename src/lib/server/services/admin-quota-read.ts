@@ -125,7 +125,7 @@ export interface AdminYoutubeBlock {
  * configured a provider (INSTAGRAM_PROVIDER / SCRAPECREATORS_API_KEY empty), the
  * block collapses to `{ isConfigured: false }` — the page renders the
  * "Instagram import not configured by operator" placeholder instead of empty
- * spend tables (mirrors the AdminRedditBlock REDDIT_USER_AGENT-empty collapse,
+ * spend tables (mirrors the AdminRedditBlock isRedditConfigured()-false collapse,
  * SOC-05).
  *
  * Configured shape:

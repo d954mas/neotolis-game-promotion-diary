@@ -466,7 +466,7 @@ export async function createSource(
   // provider (INSTAGRAM_PROVIDER / TIKTOK_PROVIDER + SCRAPECREATORS_API_KEY).
   // When unconfigured, surface a clean 422 `kind_not_configured` (NOT a 500,
   // NOT the schema-only `kind_not_yet_functional`) — mirrors the Reddit
-  // REDDIT_USER_AGENT-empty disabled-chip pattern. No APP_MODE branch: SaaS ==
+  // isRedditConfigured()-false disabled-chip pattern. No APP_MODE branch: SaaS ==
   // self-host, both read the same env. SOURCE_KINDS_NEEDING_PROVIDER is the
   // set-driven generalization of the old hardcoded instagram-only `if` (the X
   // kind in Phase 11 slots in with one more map entry, no re-edit here).

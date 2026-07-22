@@ -95,15 +95,18 @@ describe("reddit graceful degrade (provider off — Phase 12)", () => {
       permalink: `https://www.reddit.com/r/gamedev/comments/${s}/x/`,
       lastPollStatus: "ok",
     });
-    await db.insert(adapterRefreshQueue).values({
-      adapterKind: "reddit_account",
-      queueName: "service_post",
-      type: "post_stats",
-      payload: { post_id: `t3_${s}` },
-      userId: null,
-      priority: 10,
-      status: "pending",
-    });
+    const [queued] = await db
+      .insert(adapterRefreshQueue)
+      .values({
+        adapterKind: "reddit_account",
+        queueName: "service_post",
+        type: "post_stats",
+        payload: { post_id: `t3_${s}` },
+        userId: null,
+        priority: 10,
+        status: "pending",
+      })
+      .returning({ id: adapterRefreshQueue.id });
 
     await expect(redditRefreshQueueTick()).resolves.toBeDefined();
 
@@ -112,5 +115,14 @@ describe("reddit graceful degrade (provider off — Phase 12)", () => {
       .from(redditPostSnapshots)
       .where(eq(redditPostSnapshots.postId, `t3_${s}`));
     expect(snaps.length, "OFF lane writes no snapshot / burns no credit").toBe(0);
+    // …AND the claimed row is RESOLVED, not left dangling pending. The OFF path claims
+    // the row, refreshPost returns before the HTTP seam, and the lane marks it done — an
+    // early-return that skipped completing the row would silently backlog the queue. This
+    // asserts the header's "no orphan pending" claim that was previously unchecked.
+    const [after] = await db
+      .select({ status: adapterRefreshQueue.status })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.id, queued!.id));
+    expect(after?.status, "OFF lane resolves the row (no orphan pending)").not.toBe("pending");
   });
 });

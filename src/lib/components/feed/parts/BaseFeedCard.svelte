@@ -59,6 +59,7 @@
     statsSlot,
     extraSlot,
     thumbnailOverlay = null,
+    forceThumbSlot = false,
     onThumbnailError,
   }: {
     event: CardEventLite;
@@ -101,6 +102,12 @@
      *  over the picture OR the KindIcon placeholder (thumb-less manual events,
      *  expired/blocked covers), matching the event-detail behavior. */
     thumbnailOverlay?: OverlayPill | null;
+    /** Force the media slot to render even when `thumbnailUrl` is null and the kind
+     *  is not in isMediaShape(). Used by the adaptive Reddit card: a gallery post has
+     *  NO cover URL (only single images derive one) and an image post's hotlink can
+     *  fail — both must still reserve the slot so the KindIcon placeholder + the
+     *  media-type pill ("Carousel") render instead of the post collapsing to text. */
+    forceThumbSlot?: boolean;
     /** Optional thumbnail-load-error handler. Used by hotlinked-thumbnail
      *  cards (Instagram, D-08) whose CDN URL expires — on <img> error the
      *  wrapper flips its thumbnail to null so the .card-thumb.empty
@@ -122,7 +129,7 @@
 
   const dateLabel = $derived.by(() => formatOccurredAt(event.occurredAt));
   const mediaShape = $derived.by(() => isMediaShape(event.kind as CardEventKind));
-  const showThumb = $derived.by(() => mediaShape || thumbnailUrl !== null);
+  const showThumb = $derived.by(() => mediaShape || forceThumbSlot || thumbnailUrl !== null);
   const inboxRow = $derived.by(() => deriveIsInboxRow(event));
   const standalone = $derived.by(() => deriveIsStandalone(event));
 

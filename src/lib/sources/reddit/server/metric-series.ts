@@ -47,7 +47,11 @@ export async function redditFetchEventMetricSeries(
   return [
     {
       metricKey: "like_count",
-      labelKey: "chart_metric_likes",
+      // Reddit's upvote metric is "Score" everywhere it is NAMED (matches the card's
+      // card_reddit_metric_score) — NOT the cross-platform "Likes". chart_metric_score
+      // also carries the up-arrow glyph (EventHistoryChart), the right affordance for
+      // upvotes vs a heart.
+      labelKey: "chart_metric_score",
       points: rows.map((r) => ({ polledAt: r.polledAt.toISOString(), value: r.likeCount })),
     },
     {

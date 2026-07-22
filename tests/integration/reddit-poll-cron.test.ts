@@ -16,6 +16,18 @@ vi.mock("../../src/lib/sources/reddit/server/quota.js", async (importOriginal) =
   return { ...actual, getSocialThrottleState: async () => throttle };
 });
 
+// Provider CONFIGURED — poll-cron short-circuits when getSocialProvider("reddit") is
+// null (the D-08 OFF-skip), so the enqueue path under test only runs with it mocked ON.
+vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    isRedditConfigured: () => true,
+    getSocialProvider: (platform: string) =>
+      platform === "reddit" ? ({ name: "scrapecreators-reddit" } as never) : null,
+  };
+});
+
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { dataSourceChannelState } =

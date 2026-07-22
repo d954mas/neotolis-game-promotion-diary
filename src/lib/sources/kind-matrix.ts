@@ -134,8 +134,8 @@ const UI_KINDS: ReadonlyArray<{
  * Derivation (one rule, no per-kind literal):
  *   - NOT in FUNCTIONAL_KINDS → disabled "not-built" (Twitter / Discord today).
  *   - functional, adapter reports !isOperatorConfigured → disabled
- *     "not-configured" (Reddit with empty REDDIT_USER_AGENT, Instagram without
- *     a provider key).
+ *     "not-configured" (Reddit with isRedditConfigured() false, Instagram
+ *     without a provider key).
  *   - functional + configured → enabled (YouTube, Telegram always; Reddit /
  *     Instagram once the operator sets their env).
  *

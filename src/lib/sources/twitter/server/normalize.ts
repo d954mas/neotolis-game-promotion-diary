@@ -36,6 +36,7 @@
 // account id in scope (the walker passes it; the single-tweet paste path skips it).
 
 import { z } from "zod";
+import { mapPostsResilient } from "$lib/sources/feed-normalize.js";
 import type {
   FeedOwner,
   NormalizedPost,
@@ -252,10 +253,15 @@ function pickFeedOwner(author: Tweet["author"]): FeedOwner | null {
 // DEVIATION 1: tweets nest at `data.tweets[]` (NOT top-level). has_next_page is a
 // clean boolean; next_cursor is a string ("" on page 1). end-of-feed =
 // !has_next_page || !next_cursor.
+// data.tweets is z.unknown()[] — NOT z.array(TWEET) — so ONE malformed tweet cannot
+// throw at the envelope parse and nuke the whole paid page. Each tweet is strict-parsed
+// (TWEET.parse) independently in normalizeFeedResponseWithRaw via mapPostsResilient, which
+// drops a stray bad row but throws on a majority-drop shape change. The SINGLE-tweet path
+// stays strict (z.array(TWEET)) — a pasted tweet must fail loudly.
 const FEED_RESPONSE = z.object({
   data: z
     .object({
-      tweets: z.array(TWEET).nullable().optional(),
+      tweets: z.array(z.unknown()).nullable().optional(),
     })
     .nullable()
     .optional(),
@@ -303,20 +309,27 @@ export interface TwitterFeedPage {
  */
 export function normalizeFeedResponseWithRaw(json: unknown): TwitterFeedPage {
   const parsed = FEED_RESPONSE.parse(json);
-  const tweets = parsed.data?.tweets ?? [];
+  // Resilient per-tweet parse: a stray malformed tweet is DROPPED, but a majority-drop
+  // (provider shape change) throws AdapterError(transient) rather than yielding a partial
+  // page that would read as a false end-of-feed. `validTweets` is the SINGLE valid parsed
+  // subset — both `posts` and `rawTweets` derive from it, so page.posts[i] and rawTweets[i]
+  // stay index-aligned (the walker zips them for the D-04 keepForAccount filter + D-05 raw
+  // components). Parsing here (not via z.array(TWEET)) is what keeps the page resilient.
+  const rawUnknown = parsed.data?.tweets ?? [];
+  const validTweets = mapPostsResilient(rawUnknown, (raw) => TWEET.parse(raw), "twitter feed");
   const nextCursor =
     parsed.next_cursor !== null && parsed.next_cursor !== undefined && parsed.next_cursor !== ""
       ? parsed.next_cursor
       : null;
   return {
     page: {
-      posts: tweets.map((t) => normalizeTweet(t)),
+      posts: validTweets.map((t) => normalizeTweet(t)),
       nextCursor,
       endOfFeed: parsed.has_next_page !== true || nextCursor === null,
       creditsUsed: 1,
-      owner: pickFeedOwner(tweets[0]?.author),
+      owner: pickFeedOwner(validTweets[0]?.author),
     },
-    rawTweets: tweets,
+    rawTweets: validTweets,
   };
 }
 

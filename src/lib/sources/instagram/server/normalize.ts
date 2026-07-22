@@ -15,6 +15,7 @@
 // or a photo with no play_count parses cleanly and maps to null.
 
 import { z } from "zod";
+import { mapPostsResilient } from "$lib/sources/feed-normalize.js";
 import type {
   FeedOwner,
   NormalizedPost,
@@ -150,8 +151,12 @@ function pickFeedOwner(user: FeedUser): FeedOwner | null {
 // ---- POSTS endpoint response (08-SPIKE.md Call 1) ----
 // Cursor `next_max_id` + end signal `more_available` are BOTH top-level; the
 // FREE top-level `user` owner object rides along.
+// items is z.unknown()[] — NOT z.array(MEDIA_ITEM) — so ONE malformed item cannot throw
+// at the envelope parse and nuke the whole PAID page. Each item is strict-parsed
+// (MEDIA_ITEM.parse) independently in normalizePostsResponse via mapPostsResilient, which
+// drops a stray bad row but throws on a majority-drop shape change.
 const POSTS_RESPONSE = z.object({
-  items: z.array(MEDIA_ITEM),
+  items: z.array(z.unknown()),
   next_max_id: z.string().nullable().optional(),
   more_available: z.boolean().nullable().optional(),
   user: FEED_USER,
@@ -162,8 +167,13 @@ const POSTS_RESPONSE = z.object({
 // each item wraps the media object under `.media`. A top-level `user` is parsed
 // tolerantly too (null when absent — the reels response was not observed to
 // carry one).
+const REELS_ITEM = z.object({ media: MEDIA_ITEM });
+
+// items is z.unknown()[] — NOT z.array(REELS_ITEM) — for the same reason as POSTS_RESPONSE:
+// each item is strict-parsed (REELS_ITEM.parse) independently in normalizeReelsResponse via
+// mapPostsResilient, so a stray malformed item is dropped instead of nuking the paid page.
 const REELS_RESPONSE = z.object({
-  items: z.array(z.object({ media: MEDIA_ITEM })),
+  items: z.array(z.unknown()),
   paging_info: z
     .object({
       max_id: z.string().nullable().optional(),
@@ -225,10 +235,15 @@ export function mapItemToNormalizedPost(item: MediaItem, forceShort = false): No
 export function normalizePostsResponse(json: unknown): ProviderPage {
   const parsed = POSTS_RESPONSE.parse(json);
   return {
-    // Explicit lambda — NOT a bare `.map(mapItemToNormalizedPost)`: Array.map
-    // passes the index as the 2nd arg, which would bind to `forceShort`. The
-    // posts path leaves forceShort false (product_type discriminates shorts).
-    posts: parsed.items.map((item) => mapItemToNormalizedPost(item)),
+    // Resilient per-item mapping: a stray malformed post is dropped, but a majority-drop
+    // (provider shape change) throws AdapterError(transient) instead of yielding a partial
+    // page that would read as a false end-of-feed. The explicit lambda passes ONE arg to
+    // mapItemToNormalizedPost, leaving forceShort false (product_type discriminates shorts).
+    posts: mapPostsResilient(
+      parsed.items,
+      (raw) => mapItemToNormalizedPost(MEDIA_ITEM.parse(raw)),
+      "instagram posts",
+    ),
     nextCursor: parsed.next_max_id ?? null,
     endOfFeed: parsed.more_available === false,
     creditsUsed: 1,
@@ -244,7 +259,16 @@ export function normalizePostsResponse(json: unknown): ProviderPage {
 export function normalizeReelsResponse(json: unknown): ProviderPage {
   const parsed = REELS_RESPONSE.parse(json);
   return {
-    posts: parsed.items.map((entry) => mapItemToNormalizedPost(entry.media, true)),
+    // Resilient per-item mapping (see normalizePostsResponse). forceShort=true is preserved:
+    // every reels-endpoint item is short-form by definition.
+    posts: mapPostsResilient(
+      parsed.items,
+      (raw) => {
+        const entry = REELS_ITEM.parse(raw);
+        return mapItemToNormalizedPost(entry.media, true);
+      },
+      "instagram reels",
+    ),
     nextCursor: parsed.paging_info?.max_id ?? null,
     endOfFeed: parsed.paging_info?.more_available === false,
     creditsUsed: 1,
