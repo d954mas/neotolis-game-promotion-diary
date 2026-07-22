@@ -12,6 +12,7 @@ import {
   normalizeRedditFeed,
   normalizeRedditPost,
 } from "$lib/sources/reddit/server/normalize.js";
+import { AdapterError } from "$lib/sources/errors.js";
 
 const authorFixture = JSON.parse(
   readFileSync(
@@ -157,5 +158,92 @@ describe("reddit normalize (D-09 mapping — Phase 12)", () => {
     expect(subPage.posts.length).toBe(4);
     expect(subPage.nextCursor).toBe("t3_1v1w68h");
     expect(subPage.endOfFeed).toBe(false);
+  });
+
+  it("[review-P2] created_utc absent → falls back to created_at_iso (NOT epoch 1970)", () => {
+    const post = normalizeRedditPost({
+      name: "t3_iso",
+      id: "iso",
+      // created_utc deliberately absent — the schema permits it (.optional())
+      created_at_iso: "2026-03-01T12:00:00Z",
+    });
+    expect(post.publishedAt.toISOString()).toBe("2026-03-01T12:00:00.000Z");
+  });
+
+  it("[review-P2] NO resolvable timestamp → THROWS (honest drop, not a fabricated 'now')", () => {
+    // A fabricated 'now' mis-tiers the post as freshly-active, re-orders chronology, and
+    // can MASK the real newest post (tier + frontier key on published_at). Throwing makes
+    // mapPostsResilient DROP the row instead — safe now that a dropped page suppresses the
+    // disappearance reconcile (droppedCount), so a dropped-but-alive post is never
+    // false-flagged deleted. NEITHER epoch 1970 (halts the walk) NOR now (poisons tiering).
+    expect(() => normalizeRedditPost({ name: "t3_none", id: "none" })).toThrow();
+  });
+
+  it("[review-P1] droppedCount reports rows the resilient map dropped (drives reconcile suppression)", () => {
+    const good1 = { name: "t3_a", id: "a", created_utc: 1_700_000_000 };
+    const noTs = { name: "t3_b", id: "b" }; // unresolvable published_at → dropped
+    const good2 = { name: "t3_c", id: "c", created_utc: 1_700_000_100 };
+    const page = normalizeRedditFeed({ success: true, posts: [good1, noTs, good2], after: "t3_x" });
+    // The bad row is dropped from posts[], and the loss is reported so the walker can
+    // suppress the Variant-A disappearance reconcile on this (lossy) coverage pass.
+    expect(page.posts.map((p) => p.id)).toEqual(["t3_a", "t3_c"]);
+    expect(page.droppedCount).toBe(1);
+  });
+
+  it("[review-P1] a clean page reports droppedCount 0 (lossless coverage)", () => {
+    const page = normalizeRedditFeed({
+      success: true,
+      posts: [{ name: "t3_a", id: "a", created_utc: 1_700_000_000 }],
+      after: null,
+    });
+    expect(page.droppedCount).toBe(0);
+  });
+
+  it("[review-P2] explicit success:false → AdapterError(transient), NOT a false empty feed", () => {
+    let thrown: unknown;
+    try {
+      normalizeRedditFeed({ success: false, posts: [], after: null });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(AdapterError);
+    expect((thrown as AdapterError).category).toBe("transient");
+    // success absent/null stays the ok/loose path (no throw).
+    expect(() => normalizeRedditFeed({ posts: [], after: null })).not.toThrow();
+  });
+
+  it("[review-P2] empty-string `after` collapses to end-of-feed (no page-1 re-fetch loop)", () => {
+    const page0 = authorFixture.pages[0]!;
+    const page = normalizeRedditFeed({ success: true, posts: page0.posts, after: "" });
+    expect(page.nextCursor).toBeNull();
+    expect(page.endOfFeed).toBe(true);
+  });
+
+  it("[review-P3] a stray malformed post is DROPPED; the rest of the page survives (no paid-page nuke)", () => {
+    const good1 = { name: "t3_a", id: "a", author: "u", created_utc: 1_700_000_000 };
+    const bad = { id: "b" }; // missing the REQUIRED `name` → REDDIT_POST.parse throws
+    const good2 = { name: "t3_c", id: "c", author: "u", created_utc: 1_700_000_100 };
+    const good3 = { name: "t3_d", id: "d", author: "u", created_utc: 1_700_000_200 };
+    const page = normalizeRedditFeed({
+      success: true,
+      posts: [good1, bad, good2, good3],
+      after: "t3_x",
+    });
+    // Only the bad row is dropped; the 3 good posts survive in order.
+    expect(page.posts.map((p) => p.id)).toEqual(["t3_a", "t3_c", "t3_d"]);
+    expect(page.owner?.username).toBe("u"); // owner still resolves from the first VALID post
+  });
+
+  it("[review-P3] a MAJORITY-unparseable page THROWS (shape drift), not a silent partial page", () => {
+    const good = { name: "t3_a", id: "a", created_utc: 1_700_000_000 };
+    const bad = [{ id: "b" }, { foo: 1 }, {}]; // 3 posts with no required `name`
+    let thrown: unknown;
+    try {
+      normalizeRedditFeed({ success: true, posts: [good, ...bad], after: null });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(AdapterError);
+    expect((thrown as AdapterError).category).toBe("transient");
   });
 });

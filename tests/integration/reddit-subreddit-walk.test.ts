@@ -15,7 +15,14 @@ import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normali
 
 const provider = { pages: [] as RedditFeedPage[] };
 function emptyPage(): RedditFeedPage {
-  return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null };
+  return {
+    posts: [],
+    nextCursor: null,
+    endOfFeed: true,
+    creditsUsed: 1,
+    owner: null,
+    droppedCount: 0,
+  };
 }
 
 vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
@@ -49,6 +56,7 @@ const { handleBackfillSubreddit } =
   await import("../../src/lib/sources/reddit/server/handlers/backfill-subreddit.js");
 const { getRedditBackfillState } =
   await import("../../src/lib/sources/reddit/server/backfill-state.js");
+const { markChannelLastPolledAt } = await import("../../src/lib/server/services/channel-state.js");
 
 const DAY = 86_400_000;
 const uniq = (): string => Math.random().toString(36).slice(2, 8);
@@ -178,6 +186,52 @@ describe("reddit native-subreddit walker (Phase 12)", () => {
     expect((await readPost(P2))!.deletionDetectedAt, "present post → not flagged").toBeNull();
   });
 
+  it("[review-P2] clear-on-reappear is SUBJECT-SCOPED: a subreddit walk clears its OWN flag but NOT an author walk's (no clobber)", async () => {
+    const slug = `sub_${uniq()}`;
+    await seedSubredditSource(slug);
+    const S = `s${uniq()}`; // flagged by THIS subreddit walk (by = reddit_subreddit:<slug>)
+    const A = `a${uniq()}`; // flagged by an AUTHOR walk (by = reddit_account:<username>)
+    await seedTrackedPost(S, 1, slug);
+    await seedTrackedPost(A, 1, slug); // an author-deleted post still alive in this sub
+    const flaggedAt = new Date(Date.now() - 3_600_000);
+    // Deletion ownership is stored KIND-QUALIFIED (`${kind}:${channelKey}`) so u/foo and
+    // r/foo can't clear each other's GDPR clock — the subreddit walk clears only its own.
+    await db
+      .update(redditPosts)
+      .set({ deletionDetectedAt: flaggedAt, deletionDetectedBy: `reddit_subreddit:${slug}` })
+      .where(eq(redditPosts.postId, `t3_${S}`));
+    await db
+      .update(redditPosts)
+      .set({ deletionDetectedAt: flaggedAt, deletionDetectedBy: "reddit_account:someauthor" })
+      .where(eq(redditPosts.postId, `t3_${A}`));
+
+    // Both posts re-appear ALIVE in the subreddit walk this tick.
+    provider.pages = [walkPage([makePost(S, 1, slug), makePost(A, 1, slug)])];
+
+    await handleBackfillSubreddit({
+      data: {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
+    });
+
+    // THIS subject's own flag is self-corrected on re-sight…
+    expect(
+      (await readPost(S))!.deletionDetectedAt,
+      "own-subject flag cleared on re-sight",
+    ).toBeNull();
+    // …but the author walk's flag survives — a live sighting in the SUB is not evidence
+    // the deleted AUTHOR is back, so the 48h purge clock keeps running (the fix).
+    const a = await readPost(A);
+    expect(
+      a!.deletionDetectedAt,
+      "author walk's flag NOT clobbered by the subreddit walk",
+    ).not.toBeNull();
+    expect(a!.deletionDetectedBy, "author attribution preserved").toBe("reddit_account:someauthor");
+  });
+
   it("[12-05] the subreddit backfill audit tags metadata.platform = reddit_subreddit (QUOTA_PLATFORM)", async () => {
     const slug = `sub_${uniq()}`;
     const userId = await seedSubredditSource(slug);
@@ -197,5 +251,34 @@ describe("reddit native-subreddit walker (Phase 12)", () => {
     const backfill = rows.find((r) => r.action === "source.refresh_content_requested");
     expect(backfill, "a backfill audit row must exist for the trigger user").toBeDefined();
     expect((backfill!.metadata as { platform?: string }).platform).toBe("reddit_subreddit");
+  });
+
+  it("[review-P1] an AUTHORITATIVE EMPTY feed on an ESTABLISHED source flags the ENTIRE tracked subject set", async () => {
+    const slug = `sub_${uniq()}`;
+    await seedSubredditSource(slug);
+    // Establish the source (previously polled) so a now-empty feed reads as a mass
+    // deletion — NOT a brand-new bad handle (which flags needs_reconnect instead).
+    await markChannelLastPolledAt("reddit_subreddit", slug);
+    const P = `p${uniq()}`;
+    await seedTrackedPost(P, 2, slug); // tracked, alive, not yet flagged
+    expect((await readPost(P))!.deletionDetectedAt, "precondition: not flagged").toBeNull();
+
+    // The subject now returns ZERO posts (every post deleted). provider.pages empty ⇒ the
+    // mock yields emptyPage() — a complete, authoritative empty feed.
+    provider.pages = [];
+    await handleBackfillSubreddit({
+      data: {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
+    });
+
+    // The windowed reconcile can't fire (no oldestSeen) — the full-subject reconcile must,
+    // or a mass author-deletion would never set the GDPR clock on any row.
+    const p = await readPost(P);
+    expect(p!.deletionDetectedAt, "empty feed flags the whole tracked subject set").not.toBeNull();
+    expect(p!.deletionDetectedBy).toBe(`reddit_subreddit:${slug}`);
   });
 });

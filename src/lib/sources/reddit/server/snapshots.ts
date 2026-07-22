@@ -142,28 +142,31 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
           permalink: sql`COALESCE(${args.permalink ?? null}, ${redditPosts.permalink})`,
           thumbnailUrl: sql`COALESCE(${args.thumbnailUrl ?? null}, ${redditPosts.thumbnailUrl})`,
           publishedAt: sql`COALESCE(${args.publishedAt ?? null}, ${redditPosts.publishedAt})`,
-          author: sql`COALESCE(${args.author ?? null}, ${redditPosts.author})`,
-          authorFullname: sql`COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname})`,
-          // ★ Variant-A CLEAR-ON-REAPPEAR (12-SPIKE): the grace clock is touched ONLY
-          //   on a confirmed-ALIVE poll (status "ok" — the post was actually fetched
-          //   back from the feed). A non-ok poll (not_found/private/rate_limited/
-          //   auth_error) is NOT evidence the post is alive, so it must LEAVE
-          //   deletion_detected_at UNTOUCHED. Gating the clear on !detectDeletion alone
-          //   was wrong: ScrapeCreators never returns removed_by_category, so
-          //   detectDeletion is always false, which meant a single "Refresh now" on an
-          //   already-flagged-removed post (user_post lane → not_found snapshot) wiped
-          //   the 48h grace the purge cron acts on — and the manual lane has no
-          //   deletion-detect guard (unlike the auto warm lane's isNull filter). On an
-          //   alive poll: a post the removed belt did NOT fire on is un-flagged back to
-          //   NULL (self-correcting a transient walk gap that reappears before the 48h
-          //   grace elapses); when the belt DID fire, COALESCE keeps the first-detect
-          //   timestamp (idempotent — the grace clock never resets).
-          deletionDetectedAt:
-            args.status !== "ok"
-              ? sql`${redditPosts.deletionDetectedAt}`
-              : detectDeletion
-                ? sql`COALESCE(${redditPosts.deletionDetectedAt}, ${now})`
-                : sql`NULL`,
+          // ★ GDPR author FREEZE (review fix): once a post is flagged deleted
+          //   (deletion_detected_at set), the author identity is FROZEN — never
+          //   restored/overwritten by a later snapshot. Otherwise a CROSS-SUBJECT
+          //   write rehydrates the purged identity: an author-deleted post that is
+          //   still alive in some subreddit's feed carries a non-null author, and
+          //   the plain COALESCE would resurrect the `author`/`author_fullname` the
+          //   Plan-05 purge cron already nulled — while deletion_detected_at stays
+          //   set. The subject-scoped clearReappearedDeletions (walk-core) is the
+          //   ONLY un-flag path; only after IT clears the flag does the normal
+          //   COALESCE-preserve resume (next tick). During the grace window (flag
+          //   set, author still present) freezing is a no-op — the value is kept.
+          author: sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.author} ELSE COALESCE(${args.author ?? null}, ${redditPosts.author}) END`,
+          authorFullname: sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.authorFullname} ELSE COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname}) END`,
+          // ★ The write path NEVER CLEARS deletion_detected_at (12-SPIKE + review fix).
+          //   reddit_posts is ONE shared row per post, but "deleted" is subject-relative
+          //   (an author-deleted post is still alive in its subreddit's feed). A blanket
+          //   ok-write clear here let a subreddit walk wipe the author walk's 48h GDPR
+          //   purge clock. Clearing now lives ONLY in the subject-scoped reconcile
+          //   (walk-core clearReappearedDeletions), which un-flags a post ONLY when the
+          //   SAME subject that set the flag re-sights it. The write path only SETS
+          //   (first-detect) via the removed_by_category belt: COALESCE keeps the
+          //   earliest timestamp (idempotent); every other write leaves it untouched.
+          deletionDetectedAt: detectDeletion
+            ? sql`COALESCE(${redditPosts.deletionDetectedAt}, ${now})`
+            : sql`${redditPosts.deletionDetectedAt}`,
           lastPolledAt: now,
           lastPollStatus: args.status,
           pollFailureCount: args.status === "ok" ? 0 : sql`${redditPosts.pollFailureCount} + 1`,

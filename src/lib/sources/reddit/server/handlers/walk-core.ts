@@ -28,7 +28,7 @@
 //     — its hard ceiling is the inherited per-user LIMIT_SOCIAL_REQUESTS_PER_DAY + the
 //     operator 80/95% budget throttle (the real money stops).
 
-import { and, eq, gte, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
@@ -79,6 +79,16 @@ export interface RedditWalkConfig {
   queue: string;
 }
 
+/** Kind-qualified deletion-ownership key stored in reddit_posts.deletion_detected_by.
+ *  A post is shared across authors + subreddits, and an author username and a
+ *  subreddit slug can be the SAME string (u/foo vs r/foo), so the bare channelKey
+ *  would COLLIDE: r/foo's clear-on-reappear could wipe the GDPR purge clock u/foo's
+ *  walk set (and vice-versa). Namespacing by kind makes ownership unambiguous —
+ *  mirrors feed-enrichment's `${kind}:${channelKey}` paused-key namespacing. */
+function deletionSubjectKey(kind: RedditSourceKind, channelKey: string): string {
+  return `${kind}:${channelKey}`;
+}
+
 /** Daily incremental firehose bound (12-SPIKE cost caps: K=2). */
 const INCREMENTAL_PAGE_CAP = 2;
 /** Safety ceiling on the deep/initial loop (page count) — bounds the one-time pull
@@ -98,9 +108,12 @@ function postToRawEvent(post: NormalizedRedditPost): RawEvent {
     title,
     occurredAt: post.publishedAt,
     kind: "reddit_post",
+    // ONLY the intrinsic, rename-proof subreddit slug (part of the canonical URL — the
+    // safe denorm). media_type + thumbnail_url are MUTABLE values owned by reddit_posts
+    // (a post can be edited, a thumbnail re-derived): copying them here would leave a
+    // stale event-metadata copy that export/DTO could serve. feed-enrichment reads both
+    // fresh from reddit_posts via JOIN at render time (AGENTS.md no-denorm P0).
     metadata: {
-      media_type: post.mediaType,
-      thumbnail_url: post.thumbnailUrl,
       subreddit: post.subredditSlug,
     },
   };
@@ -151,8 +164,8 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   const channelState = await getChannelState(config.kind, channelKey);
   const wasNeverPolled = channelState === undefined || channelState.lastPolledAt === null;
 
-  const target = new Date(job.data.depthBoundIso);
-  if (Number.isNaN(target.getTime())) {
+  const jobTarget = new Date(job.data.depthBoundIso);
+  if (Number.isNaN(jobTarget.getTime())) {
     logger.warn(
       { jobId: job.id, depthBoundIso: job.data.depthBoundIso },
       `${config.queue}: invalid depthBoundIso; skipping`,
@@ -160,24 +173,50 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     return;
   }
 
+  const maxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
+  const state0 = readRedditBackfillState(channelState);
   const deepestWalked = channelState?.backfillOldestAt ?? null;
+
+  // A deep backfill that PAUSED before completing (budget/rate) leaves deepTargetIso
+  // set + collected < maxPosts. It must RESUME as deep to its ORIGINAL target — NOT be
+  // flipped to incremental by a poll-cron tick's 14-day window (which would wipe the
+  // cursor and strand the archive below the frontier). forceDeep + a fresh source with
+  // no deep-in-progress still take the deep branch below.
+  const deepResume =
+    !state0.complete && state0.deepTargetIso !== null && state0.collected < maxPosts;
+
   let branch: "exhausted" | "incremental" | "deep";
   if (job.data.forceDeep === true) branch = "deep";
+  else if (deepResume) branch = "deep";
   else if (channelState?.backfillComplete === true) branch = "exhausted";
-  else if (deepestWalked !== null && target.getTime() >= deepestWalked.getTime())
+  else if (deepestWalked !== null && jobTarget.getTime() >= deepestWalked.getTime())
     branch = "incremental";
   else branch = "deep";
 
   const isDeep = branch === "deep";
-  const maxPosts = env.SOCIAL_BACKFILL_MAX_POSTS;
   const pageCap = isDeep ? DEEP_PAGE_CAP : INCREMENTAL_PAGE_CAP;
   const origin: "cron" | "user" = triggerUserId ? "user" : "cron";
 
+  // A resumed deep walks to its PERSISTED target (set when the deep first started);
+  // every other pass uses the job's target. Fan-out still filters imports per-subscriber
+  // by backfill_target_since, so the depth bound is purely the cost/coverage boundary.
+  const target =
+    deepResume && state0.deepTargetIso !== null ? new Date(state0.deepTargetIso) : jobTarget;
+
   // Resumable single-feed state. Incremental/exhausted branches sweep from page 1
-  // (cursor null, count reset); deep resumes from the persisted cursor.
-  let state = readRedditBackfillState(channelState);
+  // (cursor null, count reset, deep target cleared); deep resumes from the persisted
+  // cursor and records the target it is walking to so a later pause resumes correctly.
+  let state = state0;
   if (!isDeep) {
-    state = { cursor: null, complete: false, collected: 0, operatorPaused: state.operatorPaused };
+    state = {
+      cursor: null,
+      complete: false,
+      collected: 0,
+      operatorPaused: state0.operatorPaused,
+      deepTargetIso: null,
+    };
+  } else {
+    state.deepTargetIso = target.toISOString();
   }
   // Only a pass that STARTED at the top of the feed (cursor null) has coverage that is
   // contiguous down from "now" to oldestSeen — the precondition Variant-A reconciliation
@@ -195,6 +234,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   let notFound = false;
   let walkedThisTick = false;
   let fetchedThisTick = 0;
+  let droppedThisTick = 0;
   let crossedBound = false;
 
   // ── Walk pages within this invocation to the branch's coverage boundary ──
@@ -211,6 +251,13 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       page = await fetchRedditFeedPage(config.mode, channelKey, state.cursor, { origin });
     } catch (err) {
       if (err instanceof AdapterError) {
+        // A paid HTTP request that was ISSUED still spent its reserved credit even when
+        // it then failed (404/429/5xx) — reserve-before-HTTP debits the budget the moment
+        // the request goes out, so it must count against the per-user cap. The HTTP-status
+        // throws carry a numeric `context.status`; a reserve-null DENIAL (budget exhausted
+        // / throttled) carries none — it issued no request and spent nothing. (1 credit /
+        // reddit page — http.ts reserves creditsUsed ?? 1.)
+        if (typeof err.context.status === "number") requestsUsed += 1;
         if (err.category === "rate-limited") {
           pausedByRateLimit = true;
         } else if (err.category === "operator-issue") {
@@ -228,6 +275,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
     requestsUsed += page.creditsUsed;
     fetchedThisTick += page.posts.length;
+    droppedThisTick += page.droppedCount;
 
     for (const post of page.posts) {
       // Frontier + reconciliation window bookkeeping BEFORE the bound break, so an
@@ -341,8 +389,26 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // branch bound). Scope to [oldestSeen, now] — the window we actually walked — so a
   // bounded incremental (K=2) never false-marks older-but-alive posts. A post absent
   // from this window that is tracked + not already flagged → set deletion_detected_at.
+  // Clear-on-reappear runs on EVERY tick that sighted posts (a live sighting is direct
+  // evidence, no full coverage needed) — subject-scoped so it never touches another
+  // walk's flag. Runs before the disappearance-set: they operate on disjoint id sets.
+  let clearedReappearances = 0;
+  if (seenIds.length > 0) {
+    clearedReappearances = await clearReappearedDeletions(config.kind, channelKey, seenIds);
+  }
+
+  // A pass that DROPPED any post (mapPostsResilient minority-drop) is NOT lossless
+  // coverage: a dropped-but-alive post is absent from seenIds and the disappearance
+  // reconcile would false-flag it deleted → purge. Suppress reconcile on a lossy pass;
+  // clearReappearedDeletions above stays safe (it only touches posts we DID see).
+  const lossyPass = droppedThisTick > 0;
   const coveragePassComplete =
-    !pausedThisTick && !notFound && walkedThisTick && state.complete && startedFromTop;
+    !pausedThisTick &&
+    !notFound &&
+    walkedThisTick &&
+    state.complete &&
+    startedFromTop &&
+    !lossyPass;
   let reconciledDeletions = 0;
   if (coveragePassComplete && seenIds.length > 0 && oldestSeenPublishedAt !== null) {
     reconciledDeletions = await reconcileDisappearances(
@@ -351,6 +417,14 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       seenIds,
       oldestSeenPublishedAt,
     );
+  } else if (coveragePassComplete && fetchedThisTick === 0 && !wasNeverPolled) {
+    // AUTHORITATIVE EMPTY feed on an ESTABLISHED source: the subject deleted ALL its
+    // posts (the feed is newest-first, so a complete empty page-1 = zero posts exist).
+    // The windowed reconcile above can't fire (no oldestSeen), so the entire tracked
+    // subject set must be reconciled — otherwise a mass author-deletion never sets the
+    // GDPR clock on ANY row. A brand-new empty source (wasNeverPolled) already returned
+    // via the needs_reconnect branch above (a typo, not a mass deletion).
+    reconciledDeletions = await reconcileAllDisappeared(config, channelKey);
   }
 
   // ── Persist state + channel bookkeeping ──
@@ -409,6 +483,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       collected: state.collected,
       walkComplete,
       reconciledDeletions,
+      clearedReappearances,
       pausedByBudget,
       pausedByRateLimit,
     },
@@ -433,7 +508,9 @@ async function seedSubject(
 
 /** Variant-A reconcile: mark tracked posts absent from the walked window as deleted.
  *  Scope = the subject (author=handle / subreddit_slug=handle) AND deletion not yet
- *  flagged AND within [oldestSeen, now] AND not in the seen set. */
+ *  flagged AND STRICTLY newer than oldestSeen AND not in the seen set. The bound is
+ *  `gt` (not `gte`): a still-alive post sharing oldestSeen's exact publish SECOND that
+ *  fell just past the maxPosts cut must not be false-flagged as deleted. */
 async function reconcileDisappearances(
   config: RedditWalkConfig,
   channelKey: string,
@@ -451,18 +528,78 @@ async function reconcileDisappearances(
 
   const updated = await db
     .update(redditPosts)
-    .set({ deletionDetectedAt: sql`NOW()`, updatedAt: new Date() })
+    // deletion_detected_by = the KIND-QUALIFIED subject key ATTRIBUTES the flag to THIS
+    // subject, so only this subject's own re-sighting may later clear it
+    // (clearReappearedDeletions) — a different walk that still sees the post alive can
+    // no longer clobber the clock, AND u/foo can't clear r/foo's clock (name collision).
+    .set({
+      deletionDetectedAt: sql`NOW()`,
+      deletionDetectedBy: deletionSubjectKey(config.kind, channelKey),
+      updatedAt: new Date(),
+    })
     .where(
       and(
         subjectFilter,
         isNull(redditPosts.deletionDetectedAt),
         isNotNull(redditPosts.publishedAt),
-        gte(redditPosts.publishedAt, oldestSeen),
+        gt(redditPosts.publishedAt, oldestSeen),
         notInArray(redditPosts.postId, seenIds),
       ),
     )
     .returning({ postId: redditPosts.postId });
   return updated.length;
+}
+
+/** Full-subject reconcile for an AUTHORITATIVE EMPTY feed (the subject deleted ALL
+ *  posts). No oldestSeen window exists, so mark EVERY tracked, not-yet-flagged post of
+ *  the subject as deleted with the kind-qualified subject key. Only invoked on a
+ *  complete, unpaused, lossless, empty pass over an established source (walk-core) —
+ *  never on a brand-new source (that path flags needs_reconnect instead). */
+async function reconcileAllDisappeared(
+  config: RedditWalkConfig,
+  channelKey: string,
+): Promise<number> {
+  const subjectFilter =
+    config.kind === "reddit_account"
+      ? sql`LOWER(${redditPosts.author}) = ${channelKey}`
+      : eq(redditPosts.subredditSlug, channelKey);
+
+  const updated = await db
+    .update(redditPosts)
+    .set({
+      deletionDetectedAt: sql`NOW()`,
+      deletionDetectedBy: deletionSubjectKey(config.kind, channelKey),
+      updatedAt: new Date(),
+    })
+    .where(and(subjectFilter, isNull(redditPosts.deletionDetectedAt)))
+    .returning({ postId: redditPosts.postId });
+  return updated.length;
+}
+
+/** Clear-on-reappear (subject-scoped self-correction). Un-flags posts THIS subject
+ *  previously flagged as deleted (deletion_detected_by = `${kind}:${channelKey}`) that
+ *  were re-sighted ALIVE this tick (post_id in seenIds). Matching on the KIND-QUALIFIED
+ *  deletion_detected_by — NOT a blanket ok-write — is the whole cross-walker fix: a
+ *  subreddit walk seeing an author-deleted post still live in the sub feed carries a
+ *  different subject key, so it can no longer wipe the author walk's 48h GDPR purge
+ *  clock — and u/foo and r/foo no longer collide. Runs on ANY tick with sightings (a
+ *  live re-sighting is direct evidence — no full-coverage needed). */
+async function clearReappearedDeletions(
+  kind: RedditSourceKind,
+  channelKey: string,
+  seenIds: string[],
+): Promise<number> {
+  const cleared = await db
+    .update(redditPosts)
+    .set({ deletionDetectedAt: null, deletionDetectedBy: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(redditPosts.deletionDetectedBy, deletionSubjectKey(kind, channelKey)),
+        inArray(redditPosts.postId, seenIds),
+      ),
+    )
+    .returning({ postId: redditPosts.postId });
+  return cleared.length;
 }
 
 async function fanOut(

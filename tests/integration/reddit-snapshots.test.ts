@@ -153,6 +153,61 @@ describe("reddit snapshots write path (Phase 12)", () => {
     expect(snaps).toHaveLength(1);
   });
 
+  it("[review-P1] a PURGED author is FROZEN — a later cross-subject snapshot never restores it", async () => {
+    const postId = `t3_${uniq()}`;
+    // A live post, tracked with its author.
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      author: "gallowboob",
+      authorFullname: "t2_boob",
+      metrics: { likes: 3, comments: 1 },
+      raw: {
+        score: 3,
+        upvoteRatio: 0.9,
+        numComments: 1,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
+      status: "ok",
+    });
+    // The author-walk flagged it deleted and the Plan-05 purge cron nulled author* after
+    // the 48h grace window.
+    await db
+      .update(redditPosts)
+      .set({
+        deletionDetectedAt: new Date(Date.now() - 72 * 3_600_000),
+        author: null,
+        authorFullname: null,
+      })
+      .where(eq(redditPosts.postId, postId));
+
+    // The SAME post is STILL ALIVE in some subreddit's feed, so a cross-subject
+    // writeSnapshot carries the (public) author again. Pre-fix the plain COALESCE
+    // resurrected the purged identity while deletion_detected_at stayed set — a GDPR leak.
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      author: "gallowboob",
+      authorFullname: "t2_boob",
+      metrics: { likes: 4, comments: 2 },
+      raw: {
+        score: 4,
+        upvoteRatio: 0.9,
+        numComments: 2,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
+      status: "ok",
+    });
+
+    const post = await readPost(postId);
+    expect(post!.author, "purged author stays null while deletion_detected_at is set").toBeNull();
+    expect(post!.authorFullname).toBeNull();
+    // The flag itself is untouched (the write path never clears it).
+    expect(post!.deletionDetectedAt).not.toBeNull();
+  });
+
   it("[12-04] (post_id, polled_at) UNIQUE → within-the-minute retries idempotent (ON CONFLICT DO NOTHING)", async () => {
     const postId = `t3_${uniq()}`;
     const args = {

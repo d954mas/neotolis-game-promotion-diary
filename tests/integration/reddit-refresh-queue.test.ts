@@ -11,8 +11,13 @@
 // `!detectDeletion` (always true — ScrapeCreators never returns removed_by_category)
 // instead of on status. A single manual "Refresh now" on an already-flagged-removed
 // post returns not_found → wiped the 48h GDPR grace clock the purge cron acts on, and
-// the auto warm lane's deletion-detect exclusion does NOT protect the manual lane. The
-// fix touches deletion_detected_at ONLY on a confirmed-alive (status "ok") poll.
+// the auto warm lane's deletion-detect exclusion does NOT protect the manual lane.
+//
+// review-P2 follow-up: the write path now NEVER clears deletion_detected_at (not even
+// on an "ok" poll). "deleted" is subject-relative on the shared reddit_posts row, and
+// the per-post lane is subject-agnostic (it fetches via the subreddit feed), so an ok
+// re-sighting here must not clobber a flag an author walk set. Clearing is now
+// subject-scoped inside the walk (see reddit-subreddit-walk).
 //
 // Integration test — real Postgres. getSocialProvider (fetch) + getSocialSpendToday
 // (claimGate throttle) are mocked; writeSnapshot + the DB are REAL (so the regression
@@ -49,7 +54,14 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
           return single.next;
         },
         async fetchPosts() {
-          return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null };
+          return {
+            posts: [],
+            nextCursor: null,
+            endOfFeed: true,
+            creditsUsed: 1,
+            owner: null,
+            droppedCount: 0,
+          };
         },
         async resolveAccount() {
           return { accountId: "acct-rq-rdt", displayName: "RQ" };
@@ -236,11 +248,17 @@ describe("reddit per-post refresh lane", () => {
     expect(await snapshotCount(s)).toBe(0);
   });
 
-  it("[12-05] an ok refresh (post alive again) DOES clear deletion_detected_at (self-correcting)", async () => {
+  it("[review-P2] an ok per-post refresh does NOT clear deletion_detected_at (no cross-mechanism clobber)", async () => {
     const u = await seedUserDirectly({ email: `rdtrq-alive-${uniq()}@t.io` });
     const s = uniq().slice(0, 6);
     const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
-    await seedCachedPost(s, url, { deletionDetectedAt: new Date(Date.now() - 3_600_000) });
+    const flaggedAt = new Date(Date.now() - 3_600_000);
+    // Flag ATTRIBUTED to the author walk (channelKey "d954mas"). The per-post lane is
+    // subject-agnostic AND fetches via the subreddit feed, so an alive re-sighting here
+    // is NOT evidence the deleted author is back — clearing it would re-introduce the
+    // cross-mechanism clobber the subject-scoped model removes. Only the flagging
+    // subject's OWN walk may un-flag it (reddit-subreddit-walk covers that).
+    await seedCachedPost(s, url, { deletionDetectedAt: flaggedAt, deletionDetectedBy: "d954mas" });
     const evId = await seedEvent(u.id, s, url);
     single.next = singlePost({ id: `t3_${s}`, shortcode: s }); // alive
     await enqueue(evId, u.id, `t3_${s}`);
@@ -249,9 +267,14 @@ describe("reddit per-post refresh lane", () => {
 
     const post = await readPost(s);
     expect(post!.lastPollStatus).toBe("ok");
-    // A confirmed-alive poll clears the transient flag (the intended clear-on-reappear).
-    expect(post!.deletionDetectedAt, "an alive post is un-flagged").toBeNull();
+    // Metrics refreshed (snapshot written)…
     expect(await snapshotCount(s)).toBe(1);
+    // …but the 48h GDPR grace clock is PRESERVED — the per-post lane never clears it.
+    expect(
+      post!.deletionDetectedAt,
+      "per-post refresh must not clobber a walk-set flag",
+    ).not.toBeNull();
+    expect(post!.deletionDetectedAt!.getTime()).toBe(flaggedAt.getTime());
   });
 
   it("[12-05] a no-cache-row event recovers the permalink from the event URL (self-heal)", async () => {

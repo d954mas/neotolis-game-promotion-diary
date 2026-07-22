@@ -65,6 +65,17 @@ export const redditPosts = pgTable(
     author: text("author"),
     authorFullname: text("author_fullname"),
     deletionDetectedAt: timestamp("deletion_detected_at", { withTimezone: true }),
+    // The KIND-QUALIFIED SUBJECT (`${kind}:${channelKey}` — e.g.
+    // "reddit_account:foo" / "reddit_subreddit:foo") whose Variant-A walk detected the
+    // disappearance that set deletion_detected_at. A post is shared across authors +
+    // subreddits, so "deleted" is subject-relative: only the SAME subject's re-sighting
+    // (clear-on-reappear) may un-flag it — otherwise a subreddit walk that still sees an
+    // author-deleted post alive in the sub feed would clobber the author's 48h GDPR
+    // purge clock. The kind prefix is load-bearing: an author username and a subreddit
+    // slug can be the same string (u/foo vs r/foo), so a bare channelKey would let one
+    // clear the other's clock. NULL for the dormant write-path removed_by_category belt
+    // (an explicit removal is sticky — no clear).
+    deletionDetectedBy: text("deletion_detected_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

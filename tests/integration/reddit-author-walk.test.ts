@@ -16,7 +16,14 @@ import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normali
 const provider = { pages: [] as RedditFeedPage[] };
 
 function emptyPage(): RedditFeedPage {
-  return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null };
+  return {
+    posts: [],
+    nextCursor: null,
+    endOfFeed: true,
+    creditsUsed: 1,
+    owner: null,
+    droppedCount: 0,
+  };
 }
 
 vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
@@ -48,9 +55,12 @@ const { redditPosts } = await import("../../src/lib/server/db/schema/index.js");
 const { normalizeRedditFeed } = await import("../../src/lib/sources/reddit/server/normalize.js");
 const { handleBackfillAccount } =
   await import("../../src/lib/sources/reddit/server/handlers/backfill-account.js");
-const { getRedditBackfillState } =
+const { getRedditBackfillState, writeRedditBackfillState } =
   await import("../../src/lib/sources/reddit/server/backfill-state.js");
+const { markChannelBackfillFrontier, markChannelLastPolledAt } =
+  await import("../../src/lib/server/services/channel-state.js");
 
+const DAY = 86_400_000;
 const FIXTURE_PAGES = (authorFixture as { pages: unknown[] }).pages;
 const ALL_FIXTURE_POSTS = FIXTURE_PAGES.flatMap((p) => (p as { posts: unknown[] }).posts);
 
@@ -127,6 +137,60 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       expect(id.startsWith("t3_")).toBe(true);
       expect(cachedIds.has(id)).toBe(true);
     }
+  });
+
+  it("[review-P2] a budget-PAUSED deep backfill RESUMES to its original target — a poll-cron 14d tick must not truncate it", async () => {
+    const handle = `d954mas_${Math.random().toString(36).slice(2, 7)}`;
+    await seedAccountSource(handle);
+    // Simulate a deep backfill that walked to a 30-day frontier, then PAUSED by budget
+    // (complete=false, cursor persisted, collected<max, deepTargetIso = the EPOCH target
+    // the deep was pulling to).
+    await writeRedditBackfillState("reddit_account", handle, {
+      cursor: "resume-cursor",
+      complete: false,
+      collected: 5,
+      operatorPaused: true,
+      deepTargetIso: "1970-01-01T00:00:00Z",
+    });
+    await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 30 * DAY));
+    await markChannelLastPolledAt("reddit_account", handle);
+
+    // The provider returns one page carrying a 40-DAY-OLD post (older than a 14d window).
+    const oldPost = {
+      name: "t3_oldie",
+      id: "oldie",
+      author: handle,
+      author_fullname: "t2_oldie",
+      subreddit: "gamedev",
+      title: "Ancient devlog",
+      selftext: "old body",
+      score: 3,
+      num_comments: 1,
+      created_utc: Math.floor((Date.now() - 40 * DAY) / 1000),
+      permalink: "/r/gamedev/comments/oldie/x/",
+    };
+    provider.pages = [normalizeRedditFeed({ success: true, posts: [oldPost], after: null })];
+
+    // A poll-cron auto_passive tick arrives with the 14-DAY incremental window.
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 14 * DAY).toISOString(),
+        flow: "auto_passive",
+      },
+    });
+
+    // The 40-day-old post WAS imported: the walk resumed DEEP to the persisted EPOCH
+    // target, not the 14d window (which would have crossed-bound + dropped it). A
+    // regression that flips to incremental imports nothing here.
+    const imported = await db.select().from(events).where(eq(events.kind, "reddit_post"));
+    expect(
+      imported.some((e) => e.externalId === "t3_oldie"),
+      "old post imported via deep resume",
+    ).toBe(true);
+    const st = await getRedditBackfillState("reddit_account", handle);
+    expect(st.complete).toBe(true); // the resumed deep reached end-of-feed
   });
 
   it("[12-05] the backfill audit tags metadata.platform = reddit_account (QUOTA_PLATFORM, NOT reddit)", async () => {

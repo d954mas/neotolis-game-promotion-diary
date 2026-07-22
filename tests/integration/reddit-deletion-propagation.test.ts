@@ -5,9 +5,10 @@
 //      gets it CLEARED (self-correcting, so a transient walk gap never purges); a post
 //      OLDER than the walked window is NOT marked.
 //   2. PURGE: the daily zero-HTTP cron NULLs author/author_fullname after the 48h grace
-//      and writes the reddit.deletion_propagated audit IN-TX (tx.insert, not writeAudit);
-//      within-grace is not purged; already-purged is idempotent (no re-audit); the
-//      title/body diary context survives.
+//      and writes the reddit.deletion_propagated audit IN-TX via writeAuditTx (the
+//      tx-aware audit.ts API, NOT the db-bound writeAudit — pool-deadlock); within-grace
+//      is not purged; already-purged is idempotent (no re-audit); the title/body diary
+//      context survives.
 //
 // Requirements: PLAT-04 / T-12-05-I / T-12-05-Tx.
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -17,7 +18,14 @@ import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normali
 
 const provider = { pages: [] as RedditFeedPage[] };
 function emptyPage(): RedditFeedPage {
-  return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null };
+  return {
+    posts: [],
+    nextCursor: null,
+    endOfFeed: true,
+    creditsUsed: 1,
+    owner: null,
+    droppedCount: 0,
+  };
 }
 
 vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
@@ -243,6 +251,7 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       complete: false,
       collected: 2,
       operatorPaused: false,
+      deepTargetIso: null,
     });
 
     // Tick 2 resumes deep + returns only an OLDER page (C@10d), reaching end-of-feed.

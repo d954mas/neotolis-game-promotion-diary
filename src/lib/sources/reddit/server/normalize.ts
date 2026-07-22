@@ -29,6 +29,8 @@
 // defensively and live-confirmed at Plan 12-06 UAT.
 
 import { z } from "zod";
+import { AdapterError } from "$lib/sources/errors.js";
+import { mapPostsResilient } from "$lib/sources/feed-normalize.js";
 import type {
   NormalizedPost,
   NormalizedSinglePost,
@@ -86,9 +88,13 @@ type RedditPostRaw = z.infer<typeof REDDIT_POST>;
 // ---- The feed envelope (IDENTICAL for author-search + native subreddit) ----
 // { success, posts:[...], after }. End-of-feed = `after` absent/null (spike Q3:
 // the terminal page still carried posts) OR an empty posts[] (belt-and-suspenders).
+// posts is z.unknown()[] — NOT z.array(REDDIT_POST) — so ONE malformed post cannot
+// throw at the envelope parse and nuke the whole paid page. Each post is strict-parsed
+// (REDDIT_POST.parse) independently in normalizeRedditFeed via mapPostsResilient, which
+// drops a stray bad row but throws on a majority-drop shape change.
 const FEED_ENVELOPE = z.object({
   success: z.boolean().nullable().optional(),
-  posts: z.array(REDDIT_POST).nullable().optional(),
+  posts: z.array(z.unknown()).nullable().optional(),
   after: z.string().nullable().optional(),
 });
 
@@ -169,6 +175,28 @@ function pickPermalink(raw: RedditPostRaw): string | null {
   return null;
 }
 
+/** Resolve a post's publish time, or null when NEITHER source is valid. `created_utc`
+ *  (epoch SECONDS) is the live ScrapeCreators field (always present in 12-SPIKE);
+ *  `created_at_iso` is the documented fallback for the schema's `.optional()` shape.
+ *  The neither-present branch is forward-compat only.
+ *
+ *  Returns null (NOT epoch 0, NOT `now`) when unresolvable. Two rejected fallbacks:
+ *    - epoch 0 → the newest-first walker reads 1970 as older-than-target and HALTS
+ *      the pass, silently dropping every remaining older post (breaks D-02).
+ *    - `now` → fabricates a timestamp that mis-tiers the post as freshly-active AND
+ *      re-orders chronology, and can MASK the real newest post (the tier + frontier
+ *      key on published_at). The caller drops the row instead (mapPostsResilient) —
+ *      safe now that a dropped page suppresses the disappearance reconcile
+ *      (droppedCount), so a dropped-but-alive post is never false-flagged deleted. */
+function resolveRedditPublishedAt(raw: RedditPostRaw): Date | null {
+  if (typeof raw.created_utc === "number") return new Date(raw.created_utc * 1000);
+  if (typeof raw.created_at_iso === "string" && raw.created_at_iso !== "") {
+    const iso = new Date(raw.created_at_iso);
+    if (!Number.isNaN(iso.getTime())) return iso;
+  }
+  return null;
+}
+
 /** D-09 event/preview title = the FIRST non-empty line of the given text, capped
  *  at ~100 chars (the Add Event form title). One spelling for the walker + the
  *  paste preview — callers pass the post title (falling back to selftext). */
@@ -215,11 +243,19 @@ export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
   const selftext =
     typeof post.selftext === "string" && post.selftext.trim() !== "" ? post.selftext : null;
   const title = typeof post.title === "string" && post.title !== "" ? post.title : null;
+  // Timestamp is load-bearing (tier + frontier + newest-first walk boundary). A post
+  // with no resolvable published_at is malformed → THROW so mapPostsResilient DROPS it
+  // (a minority-drop is tolerated; a majority-drop throws transient). Better an honest
+  // drop than a fabricated "now" that mis-tiers + re-orders + masks the real newest.
+  const publishedAt = resolveRedditPublishedAt(post);
+  if (publishedAt === null) {
+    throw new Error(`reddit post ${post.name}: unresolvable published_at (no created_utc)`);
+  }
 
   return {
     id: post.name, // t3_<base36> fullname — the rename-proof externalId (NOT post.id)
     kind: toPortKind(mediaType, post),
-    publishedAt: new Date((post.created_utc ?? 0) * 1000),
+    publishedAt,
     metrics: {
       // D-09 metrics-by-presence: absent → null, never 0.
       views: null, // Reddit exposes no view count
@@ -284,14 +320,16 @@ export function normalizeRedditOwner(raw: unknown): ResolvedAccount | null {
 }
 
 /** The FREE feed owner (the account/subreddit the page belongs to) — read off the
- *  first post's author. Reddit's feed carries no top-level owner object, so we
- *  anchor on the post author (author-search: one author for the whole page). */
-function pickFeedOwner(post: RedditPostRaw | undefined): FeedOwner | null {
+ *  first SUCCESSFULLY-PARSED post's author. Reddit's feed carries no top-level owner
+ *  object, so we anchor on the post author (author-search: one author for the whole
+ *  page). Taking the first MAPPED post (not the first raw one) means a dropped
+ *  malformed lead post doesn't blank the owner. */
+function pickFeedOwner(post: NormalizedRedditPost | undefined): FeedOwner | null {
   if (post === undefined) return null;
-  const username = post.author ?? null;
+  const username = post.author;
   if (username === null) return null;
   return {
-    accountId: post.author_fullname ?? null,
+    accountId: post.authorFullname,
     username,
     avatarUrl: null,
   };
@@ -301,21 +339,54 @@ function pickFeedOwner(post: RedditPostRaw | undefined): FeedOwner | null {
  *  consumes: `posts` carry the reddit-specific columns for the snapshot writer. */
 export interface RedditFeedPage extends ProviderPage {
   posts: NormalizedRedditPost[];
+  /** How many raw posts on this page failed to parse and were DROPPED by
+   *  mapPostsResilient (minority-drop — a majority-drop throws instead). Load-bearing
+   *  for Variant-A deletion reconciliation: a dropped-but-alive post is absent from the
+   *  walker's seenIds, so a pass that dropped ANY row is NOT lossless coverage and must
+   *  NOT drive the disappearance reconcile (it would false-flag the dropped post as
+   *  deleted → purge). The walker skips reconcile when the pass dropped anything. */
+  droppedCount: number;
 }
 
 /** Validate + map a feed envelope (author-search OR subreddit) → RedditFeedPage.
- *  nextCursor = `after ?? null`; endOfFeed = null-`after` (spike Q3 terminal
- *  signal) OR empty posts[]. 1 credit/page (spike Q5). */
+ *  Throws AdapterError(transient) on an explicit success:false soft-error page.
+ *  nextCursor = `after` (null/absent/"" all collapse to null = end-of-feed);
+ *  endOfFeed = no-more-pages OR empty posts[]. 1 credit/page (spike Q5). */
 export function normalizeRedditFeed(json: unknown): RedditFeedPage {
   const parsed = FEED_ENVELOPE.parse(json);
+  // A well-formed envelope that EXPLICITLY reports success:false is a provider-side
+  // soft error served as HTTP 200 (a failed/empty page) — NOT a genuinely exhausted
+  // feed. Treat it as transient so the walker RETRIES rather than marking the source
+  // end-of-feed / backfill-complete / needs_reconnect on a transient upstream hiccup.
+  // `success` absent or null is the older/looser shape → treated as ok. The paste
+  // path maps this AdapterError to a graceful "unreachable" preview (index.ts).
+  if (parsed.success === false) {
+    throw new AdapterError("ScrapeCreators reddit feed returned success:false", {
+      category: "transient",
+      context: { after: parsed.after ?? null },
+    });
+  }
   const rawPosts = parsed.posts ?? [];
-  const posts = rawPosts.map((p) => normalizeRedditPost(p));
-  const nextCursor = parsed.after ?? null;
+  // Resilient per-post mapping: a stray malformed post is dropped, but a majority-drop
+  // (provider shape change) throws AdapterError(transient) instead of yielding a partial
+  // page that would read as a false end-of-feed.
+  const posts = mapPostsResilient(rawPosts, normalizeRedditPost, "reddit feed");
+  // mapPostsResilient pushes one output per SUCCESSFUL parse and drops failures (and
+  // throws on a majority-drop), so the minority-drop count is exactly input − output.
+  // The walker reads this to suppress the disappearance reconcile on a lossy page.
+  const droppedCount = rawPosts.length - posts.length;
+  // Treat an empty-string `after` as end-of-feed. The fetch layer sends no `after`
+  // param for "" (it guards `cursor !== "" `, same as null), so a non-null "" cursor
+  // would otherwise re-request PAGE 1 every loop iteration until the page cap —
+  // burning one paid credit per loop and falsely tripping backfill-complete on the
+  // re-counted posts. `after` null/absent/"" all mean the same thing: no more pages.
+  const nextCursor = parsed.after != null && parsed.after !== "" ? parsed.after : null;
   return {
     posts,
     nextCursor,
     endOfFeed: nextCursor === null || posts.length === 0,
     creditsUsed: 1,
-    owner: pickFeedOwner(rawPosts[0]),
+    owner: pickFeedOwner(posts[0]),
+    droppedCount,
   };
 }

@@ -12,7 +12,14 @@ import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normali
 
 const provider = { pages: [] as RedditFeedPage[] };
 function emptyPage(): RedditFeedPage {
-  return { posts: [], nextCursor: null, endOfFeed: true, creditsUsed: 1, owner: null };
+  return {
+    posts: [],
+    nextCursor: null,
+    endOfFeed: true,
+    creditsUsed: 1,
+    owner: null,
+    droppedCount: 0,
+  };
 }
 
 vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
