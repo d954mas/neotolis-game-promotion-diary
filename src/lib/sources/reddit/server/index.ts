@@ -48,7 +48,12 @@ import { getBoss } from "$lib/server/queue-client.js";
 import { db } from "$lib/server/db/client.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { backfillWindowToDate } from "$lib/server/services/data-sources.js";
-import { enforceAdapterUserQuota } from "$lib/server/services/quota.js";
+import {
+  enforceAdapterUserQuota,
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+} from "$lib/server/services/quota.js";
+import { getChannelState } from "$lib/server/services/channel-state.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
@@ -60,6 +65,11 @@ import { buildRedditTitle } from "./normalize.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import { writeSnapshot } from "./snapshots.js";
+import {
+  resetRedditBackfillState,
+  redditWalkSingletonKey,
+  type RedditSourceKind,
+} from "./backfill-state.js";
 import { handleBackfillAccount } from "./handlers/backfill-account.js";
 import { handleBackfillSubreddit } from "./handlers/backfill-subreddit.js";
 import { handleRedditPollCron } from "./handlers/poll-cron.js";
@@ -171,7 +181,7 @@ async function backfillSource(
       flow: ctx.origin === "user" ? "incremental" : "auto_passive",
     },
     {
-      singletonKey: `reddit-backfill-${kind}-${channelKey}`,
+      singletonKey: redditWalkSingletonKey(kind, channelKey),
       priority: ctx.origin === "user" ? 1 : 0,
     },
   );
@@ -205,6 +215,20 @@ async function normalizeSourceOnCreate(
       "reddit_source_unresolvable",
       422,
       { handle_url: input.handleUrl },
+    );
+  }
+  // Reject a kind/URL mismatch at the EARLIEST boundary (before duplicate/quota
+  // prechecks). A `reddit_account` request with a `/r/<sub>` URL (or vice-versa) would
+  // otherwise persist metadata.slug on an account-kind row: onSourceCreated branches on
+  // source.kind → the AUTHOR queue, while backfillSource discriminates on metadata.slug
+  // → the SUBREDDIT queue, so the initial walk and every later refresh dispatch to
+  // DIFFERENT queues on inconsistent state. 422 here keeps kind and URL in lockstep.
+  if (parsed.kind !== input.kind) {
+    throw new AppError(
+      `That URL is a ${parsed.kind === "reddit_subreddit" ? "subreddit" : "user profile"} but the source kind is ${input.kind}. Paste the matching URL.`,
+      "reddit_kind_url_mismatch",
+      422,
+      { requested_kind: input.kind, url_kind: parsed.kind, handle_url: input.handleUrl },
     );
   }
   const metadata =
@@ -257,23 +281,106 @@ async function onSourceCreated(
   opts: { backfillWindow: BackfillWindow; tx: Tx },
 ): Promise<void> {
   if (!source.autoImport) return;
+  // This hook only ever fires for reddit sources; narrow SourceKind → RedditSourceKind
+  // (the queue branch already discriminates on it) so redditWalkSingletonKey type-checks.
+  const kind: RedditSourceKind =
+    source.kind === "reddit_subreddit" ? "reddit_subreddit" : "reddit_account";
   const md = (source.metadata ?? {}) as { handle?: string; slug?: string };
   const channelKey = source.channelId ?? md.handle ?? md.slug ?? source.id;
   const queue =
-    source.kind === "reddit_subreddit"
-      ? QUEUES.REDDIT_BACKFILL_SUBREDDIT
-      : QUEUES.REDDIT_BACKFILL_ACCOUNT;
+    kind === "reddit_subreddit" ? QUEUES.REDDIT_BACKFILL_SUBREDDIT : QUEUES.REDDIT_BACKFILL_ACCOUNT;
   await enqueueViaOutbox(
     opts.tx,
     queue,
     {
-      kind: source.kind,
+      kind,
       channelKey,
       triggerUserId: source.userId,
       depthBoundIso: depthBoundIsoForWindow(opts.backfillWindow, source.backfillTargetSince),
       flow: "initial",
     },
-    { singletonKey: `source-${source.id}` },
+    // Channel-scoped singleton (NOT per-source `source-${id}`): two tenants who add the
+    // SAME channel must dedupe to ONE initial walk, not double-spend on concurrent walks
+    // of the same feed. Shared across initial/manual/cron (redditWalkSingletonKey).
+    { singletonKey: redditWalkSingletonKey(kind, channelKey) },
+  );
+}
+
+/**
+ * resetWalkerStateOnWidening — fired by cross-source updateSource when the user widens
+ * backfillTargetSince past the recorded frontier on a COMPLETE Reddit source (e.g. "7
+ * days" → "everything"). Without it, the adapter omits the hook, updateSource's
+ * `adapter.resetWalkerStateOnWidening !== undefined` guard is false, and the widen is a
+ * silent no-op — the exhausted walker never re-opens, so the deeper history never loads
+ * (the very case data-sources.ts:855 documents Reddit handling). Clears the resumable
+ * sub-state + enqueues a forceDeep historical walk (BUDGET-02: the trigger user pays the
+ * per-user cap; subscribers free-ride). Runs inside the updateSource tx.
+ */
+async function resetWalkerStateOnWidening(
+  source: SourceCreatedHookSource,
+  ctx: {
+    previousTarget: Date | null;
+    newTarget: Date;
+    triggerUserId: string;
+    ipAddress: string;
+    tx: Tx;
+  },
+): Promise<void> {
+  if (source.kind !== "reddit_account" && source.kind !== "reddit_subreddit") return;
+  // Capture the narrowed kind: TS loses property narrowing on `source.kind` across the
+  // awaits below, and resetRedditBackfillState is strictly typed to RedditSourceKind.
+  const kind = source.kind;
+  const md = (source.metadata ?? {}) as { handle?: string; slug?: string };
+  const channelKey = source.channelId ?? md.handle ?? md.slug ?? null;
+  if (channelKey === null || channelKey === "") return;
+
+  // Defend-in-depth: only act on a genuine widen (updateSource already gates on this).
+  if (ctx.previousTarget !== null && ctx.newTarget.getTime() >= ctx.previousTarget.getTime()) {
+    return;
+  }
+  const state = await getChannelState(kind, channelKey);
+  if (!state) return;
+  if (state.backfillComplete !== true) return;
+  if (state.backfillOldestAt === null) return;
+  // Nothing deeper to fetch: the new target is not below the walked frontier.
+  if (ctx.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
+
+  // Per-user fair-share cap — a PATCH widen burns the same budget as a refresh-content
+  // click, so gate it here too (QUOTA_PLATFORM for Reddit IS the source kind — the
+  // per-kind keyspace; using "reddit" would read 0 forever, Phase 10 two-keyspace lesson).
+  const cap = redditAccountAdapterCore.observability.userQuotaCap;
+  if (cap?.requestsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(ctx.triggerUserId, kind);
+    const resetAt = nextPacificMidnight();
+    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+    if (used.requests >= cap.requestsPerDay) {
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        { cap: cap.requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+      );
+    }
+  }
+
+  // Clear the resumable sub-state so the forceDeep walk re-enters page 1 toward the new,
+  // deeper target (forceDeep overrides the "exhausted" branch in the walk core).
+  await resetRedditBackfillState(kind, channelKey, ctx.tx);
+
+  const queue =
+    kind === "reddit_subreddit" ? QUEUES.REDDIT_BACKFILL_SUBREDDIT : QUEUES.REDDIT_BACKFILL_ACCOUNT;
+  await enqueueViaOutbox(
+    ctx.tx,
+    queue,
+    {
+      kind,
+      channelKey,
+      triggerUserId: ctx.triggerUserId,
+      depthBoundIso: ctx.newTarget.toISOString(),
+      flow: "historical",
+      forceDeep: true,
+    },
+    { singletonKey: redditWalkSingletonKey(source.kind, channelKey) },
   );
 }
 
@@ -352,7 +459,9 @@ async function fetchEventPreviewMetadata(
 
   await writeSnapshot({
     postId: post.id,
-    mediaType: null,
+    // Persist the real Reddit FORM (image/gallery/self/link) the provider derived, so
+    // the feed card renders its media variant immediately (was hard-coded null → text).
+    mediaType: post.mediaType ?? null,
     title: post.caption,
     permalink: canonicalUrl,
     thumbnailUrl: post.thumbnailUrl,
@@ -442,6 +551,7 @@ export const redditAdapter: SourceAdapter & typeof redditAccountAdapterCore = {
   normalizeSourceOnCreate,
   canonicalizeOnCreate,
   onSourceCreated,
+  resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
   resolveCachedExternalId,
   validateEventInput,

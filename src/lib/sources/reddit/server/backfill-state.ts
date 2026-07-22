@@ -36,6 +36,21 @@ import type { ChannelStateRow } from "$lib/server/services/channel-state.js";
 /** The two Reddit source kinds a channel-state row anchors on. */
 export type RedditSourceKind = "reddit_account" | "reddit_subreddit";
 
+/** The ONE channel-scoped singleton key EVERY Reddit walk producer uses — initial
+ *  create (onSourceCreated), manual refresh (backfillSource), the poll-cron ticks, and
+ *  the widening reset. So at most ONE paid walk per (kind, channelKey) is queued/active
+ *  at a time regardless of which tenant or producer triggered it: two tenants tracking
+ *  the same channel, or manual+cron overlapping across worker replicas, dedupe to a
+ *  single walk instead of double-spending the shared prepaid budget + racing channel
+ *  state. Plain singletonKey ONLY (never paired with singletonSeconds): pg-boss keys
+ *  singleton uniqueness on (queue, singletonKey, singleton_on), and a throttled send
+ *  carries a non-null singleton_on while a plain send carries NULL — so mixing the two
+ *  styles on one key would NOT dedupe against each other, re-opening the concurrent-walk
+ *  gap this closes. */
+export function redditWalkSingletonKey(kind: RedditSourceKind, channelKey: string): string {
+  return `reddit-walk-${kind}-${channelKey}`;
+}
+
 export interface RedditBackfillState {
   /** The single feed's resume cursor (ProviderPage.nextCursor = the opaque base64
    *  `after` blob). null at end of feed / before the first page. */
@@ -51,6 +66,12 @@ export interface RedditBackfillState {
    *  paused by budget, false on a successful unpaused tick — so the badge is not
    *  sticky after the budget is restored. */
   operatorPaused: boolean;
+  /** The depth-bound target (ISO) of the IN-PROGRESS deep backfill, persisted so a
+   *  paused deep RESUMES to its ORIGINAL target rather than being truncated to the
+   *  daily poll-cron's 14-day incremental window. Set when a fresh deep starts,
+   *  carried across resume ticks, and cleared to null once the deep completes / a
+   *  non-deep (incremental/exhausted) pass runs. null ⇒ no deep in progress. */
+  deepTargetIso: string | null;
 }
 
 const EMPTY: RedditBackfillState = {
@@ -58,6 +79,7 @@ const EMPTY: RedditBackfillState = {
   complete: false,
   collected: 0,
   operatorPaused: false,
+  deepTargetIso: null,
 };
 
 /** Read the Reddit backfill sub-state from a channel-state row's metadata, with
@@ -72,6 +94,7 @@ export function readRedditBackfillState(
     complete: r?.complete === true,
     collected: typeof r?.collected === "number" ? r.collected : 0,
     operatorPaused: r?.operatorPaused === true,
+    deepTargetIso: typeof r?.deepTargetIso === "string" ? r.deepTargetIso : null,
   };
 }
 

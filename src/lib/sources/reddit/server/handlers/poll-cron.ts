@@ -22,6 +22,8 @@ import { redditPosts } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { getSocialThrottleState } from "../quota.js";
+import { getSocialProvider } from "../provider/registry.js";
+import { redditWalkSingletonKey } from "../backfill-state.js";
 import { TIER_BOUNDARY_COLD_MS } from "$lib/server/services/tier-resolver.js";
 import { handleRedditWarmRefresh } from "./warm-refresh.js";
 import type { MinimalBoss } from "$lib/sources/adapter.js";
@@ -52,6 +54,15 @@ interface PollCronJob {
 
 export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss): Promise<void> {
   const tier = job.data.tier;
+
+  // D-08 isolation: when Reddit is OFF (the default) skip ALL poll work — no candidate
+  // SELECT, no enqueue of walk jobs that would only degrade to no-ops. (The GDPR
+  // deletion-propagation cron is deliberately NOT gated: pending purges must still fire
+  // even after the operator disables Reddit.)
+  if (getSocialProvider("reddit") === null) {
+    logger.info({ jobId: job.id, tier }, "reddit.poll.cron: provider not configured; skipping");
+    return;
+  }
 
   if (tier === "warm") {
     await handleRedditWarmRefresh(job);
@@ -90,16 +101,24 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
       WHERE LOWER(${cfg.subject}) = ${dataSourceChannelState.channelKey}
     )`;
 
+    // Tier predicate lives in SQL, BEFORE ORDER BY/LIMIT — NOT a post-LIMIT JS filter.
+    // With the filter applied after `LIMIT 200`, an opposite-tier prefix (200 rows of
+    // the other tier, oldest-polled first) could starve the requested tier forever: the
+    // wanted rows never enter the 200-row window. Pushing the predicate into WHERE means
+    // the LIMIT counts only the requested tier. active = newest post recent OR unknown
+    // (null published_at); cold = a known-older newest post.
+    const tierPredicate =
+      tier === "active"
+        ? sql`(${newestPostExpr} IS NULL OR ${newestPostExpr} >= ${activeBoundary})`
+        : sql`(${newestPostExpr} IS NOT NULL AND ${newestPostExpr} < ${activeBoundary})`;
+
     // CROSS-TENANT BY DESIGN — channel state is global; the walker re-applies
     // per-subscriber fan-out gating (auto_import + target_since).
     const candidates = await db
       .selectDistinct({
         channelKey: dataSourceChannelState.channelKey,
-        // MUST appear in the SELECT DISTINCT list — it is the ORDER BY key below, and
-        // Postgres rejects a DISTINCT whose ORDER BY expr is not projected (the twitter
-        // clone-source carries it; dropping it broke every active/cold tick).
+        // Projected because SELECT DISTINCT requires every ORDER BY expr in the list.
         lastPolledAt: dataSourceChannelState.lastPolledAt,
-        newestPost: newestPostExpr,
       })
       .from(dataSourceChannelState)
       .innerJoin(
@@ -112,23 +131,22 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
           eq(dataSources.needsReconnect, false),
         ),
       )
-      .where(sql`${dataSourceChannelState.kind} = ${cfg.kind}`)
+      .where(and(sql`${dataSourceChannelState.kind} = ${cfg.kind}`, tierPredicate))
       .orderBy(sql`${dataSourceChannelState.lastPolledAt} ASC NULLS FIRST`)
       .limit(MAX_PICK);
 
-    const picked = candidates.filter((c) => {
-      const isActive = c.newestPost === null || new Date(c.newestPost) >= activeBoundary;
-      return tier === "active" ? isActive : !isActive;
-    });
-
-    for (const ch of picked) {
+    for (const ch of candidates) {
       try {
         await boss.send(
           cfg.queue,
           { kind: cfg.kind, channelKey: ch.channelKey, depthBoundIso, flow: "auto_passive" },
           {
-            singletonKey: `reddit-poll-${tier}-${cfg.kind}-${ch.channelKey}`,
-            singletonSeconds: 3600,
+            // Channel-scoped singleton shared with initial/manual/widening (NOT a
+            // per-tier `singletonSeconds` throttle): a plain key dedupes a cron tick
+            // against an already-running manual/initial walk of the same channel, so
+            // the two never double-spend. Mixing singletonSeconds here would defeat that
+            // (different singleton_on ⇒ no cross-producer dedup — see the helper).
+            singletonKey: redditWalkSingletonKey(cfg.kind, ch.channelKey),
             priority: 0,
           },
         );
