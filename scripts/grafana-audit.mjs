@@ -49,17 +49,16 @@ async function lokiLabelValues(page, label) {
   return status === 200 ? body.data : [];
 }
 
-async function lokiQuery(page, expr, rangeSeconds = 86400, limit = 100) {
+// Counts MATCHED lines via count_over_time. Do not report the query stats'
+// totalLinesProcessed — that is how many lines the engine scanned, not how
+// many matched, and it inflates with every broad line filter.
+async function lokiCount(page, expr, rangeSeconds = 86400) {
   const now = Math.floor(Date.now() / 1000);
-  const start = now - rangeSeconds;
-  const url = `${GRAFANA_URL}/api/datasources/proxy/uid/loki/loki/api/v1/query_range?query=${encodeURIComponent(expr)}&start=${start}000000000&end=${now}000000000&limit=${limit}`;
-  const { status, body, nonJson } = await fetchJson(page, url);
-  if (status !== 200 || !body) return { error: status, nonJson };
-  return {
-    entries: body.data?.result?.length ?? 0,
-    totalLines: body.data?.stats?.summary?.totalLinesProcessed ?? 0,
-    totalBytes: body.data?.stats?.summary?.totalBytesProcessed ?? 0,
-  };
+  const q = `sum(count_over_time(${expr} [${rangeSeconds}s]))`;
+  const url = `${GRAFANA_URL}/api/datasources/proxy/uid/loki/loki/api/v1/query?query=${encodeURIComponent(q)}&time=${now}`;
+  const { status, body } = await fetchJson(page, url);
+  if (status !== 200) return { error: status };
+  return Number(body.data?.result?.[0]?.value?.[1] ?? 0);
 }
 
 // Per-service log volume over time — feeds the "Log Volume by Service" panel.
@@ -180,13 +179,14 @@ async function main() {
     ? '{service=~"' + report.loki.labels.service.join("|") + '"}'
     : '{service=~".+"}';
 
-  report.loki.errorLogs24h = await lokiQuery(
+  // __error__="" must come AFTER the numeric comparison: LogQL keeps lines whose
+  // label failed to parse as a number (nginx logs level:"info"), so without the
+  // trailing filter every nginx access-log line counts as an "error".
+  report.loki.errorLogs24h = await lokiCount(
     page,
-    `${serviceSelector} |= "level" | json | level >= 50`,
+    `${serviceSelector} |= "level" | json | level >= 50 | __error__=""`,
   );
-  console.log(
-    `  error logs (24h): ${report.loki.errorLogs24h.entries} matching entries (capped), scanned ${report.loki.errorLogs24h.totalLines} lines`,
-  );
+  console.log(`  error logs (24h): ${report.loki.errorLogs24h} lines`);
 
   // --- Log volume by service (spike detection) ---
   console.log("\n=== Log Volume by Service (24h) ===");
@@ -202,10 +202,16 @@ async function main() {
     console.log(`  error: ${JSON.stringify(report.loki.volumeByService)}`);
   }
 
-  report.loki.allLogs1h = await lokiQuery(page, `${serviceSelector}`, 3600, 5);
-  console.log(
-    `  all logs (1h): ${report.loki.allLogs1h.totalLines} lines, ${report.loki.allLogs1h.totalBytes} bytes`,
+  // ERR_HTTP_HEADERS_SENT is printed raw by @hono/node-server (bypasses Pino),
+  // so the level>=50 query never sees it — grep the raw line instead.
+  report.loki.escapedHeadersSent24h = await lokiCount(
+    page,
+    `${serviceSelector} |= "ERR_HTTP_HEADERS_SENT"`,
   );
+  console.log(`  ERR_HTTP_HEADERS_SENT (24h): ${report.loki.escapedHeadersSent24h} lines`);
+
+  report.loki.allLogs1h = await lokiCount(page, serviceSelector, 3600);
+  console.log(`  all logs (1h): ${report.loki.allLogs1h} lines`);
 
   // --- Alerts ---
   console.log("\n=== Alert State ===");
@@ -243,8 +249,10 @@ async function main() {
   const rssMB = rss?.[0]?.value ? (parseFloat(rss[0].value) / 1e6).toFixed(1) : "?";
   const p95 = report.prometheus.latency_p95;
   const p95ms = p95?.[0]?.value ? (parseFloat(p95[0].value) * 1000).toFixed(0) : "?";
+  // A zero-valued series still exists once any 5xx was ever counted — flag on
+  // the rate's value, not on the series' presence.
   const errRate = report.prometheus.error_rate_5m;
-  const hasErrors = Array.isArray(errRate) && errRate.length > 0;
+  const hasErrors = Array.isArray(errRate) && errRate.some((r) => parseFloat(r.value) > 0);
   const firingAlerts = Array.isArray(report.alerts)
     ? report.alerts.filter((a) => a.status?.state === "active").length
     : "?";
@@ -257,7 +265,7 @@ async function main() {
   console.log(`  Latency p95: ${p95ms} ms`);
   console.log(`  5xx errors:  ${hasErrors ? "YES" : "none"}`);
   console.log(`  Alerts:      ${firingAlerts} firing`);
-  console.log(`  Loki logs:   ${report.loki.allLogs1h.totalLines} lines (1h)`);
+  console.log(`  Loki logs:   ${report.loki.allLogs1h} lines (1h)`);
   if (report.memoryTrend.deltaMB) {
     console.log(
       `  Memory 24h:  ${report.memoryTrend.deltaMB > 0 ? "+" : ""}${report.memoryTrend.deltaMB} MB (${report.memoryTrend.deltaPercent}%)`,
