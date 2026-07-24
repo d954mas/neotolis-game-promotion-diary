@@ -15,6 +15,7 @@ export {
   reserveSocialCredits,
   getSocialThrottleState,
   getSocialSpendToday,
+  getSocialProviderSpendToday,
   resetSocialDailyCap,
   markSocialThrottleTransition,
   markSocialBudgetExhausted,

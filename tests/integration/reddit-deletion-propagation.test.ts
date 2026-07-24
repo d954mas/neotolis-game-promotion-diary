@@ -291,27 +291,50 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     try {
       const handle = `del_${uniq()}`;
       const past = `p${uniq()}`,
-        grace = `g${uniq()}`;
-      // `past` detected >48h ago (eligible); `grace` detected 1h ago (within grace).
+        grace = `g${uniq()}`,
+        bare = `f${uniq()}`;
+      // `past` detected >48h ago (eligible); `grace` detected 1h ago (within grace);
+      // `bare` past-grace with author ALREADY null but author_fullname still set
+      // (review fix: the purge guard must cover every identity column independently).
       await seedTrackedPost(past, 5, handle);
       await seedTrackedPost(grace, 5, handle);
+      await seedTrackedPost(bare, 5, handle);
       await db
         .update(redditPosts)
-        .set({ deletionDetectedAt: new Date(Date.now() - 49 * 3_600_000) })
+        .set({
+          deletionDetectedAt: new Date(Date.now() - 49 * 3_600_000),
+          // The account-walk subject key IS the author's username — the purge must
+          // erase it too (review fix), not just author/author_fullname.
+          deletionDetectedBy: `reddit_account:${handle}`,
+        })
         .where(eq(redditPosts.postId, `t3_${past}`));
       await db
         .update(redditPosts)
         .set({ deletionDetectedAt: new Date(Date.now() - 3_600_000) })
         .where(eq(redditPosts.postId, `t3_${grace}`));
+      await db
+        .update(redditPosts)
+        .set({
+          deletionDetectedAt: new Date(Date.now() - 49 * 3_600_000),
+          author: null,
+        })
+        .where(eq(redditPosts.postId, `t3_${bare}`));
 
       const res = await handleDeletionPropagationCron();
-      expect(res.purged).toBeGreaterThanOrEqual(1);
+      expect(res.purged).toBeGreaterThanOrEqual(2);
 
       const purged = await readPost(past);
       expect(purged!.author, "past-grace author nulled").toBeNull();
       expect(purged!.authorFullname, "past-grace author_fullname nulled").toBeNull();
+      expect(purged!.deletionDetectedBy, "subject key (username) nulled").toBeNull();
       expect(purged!.title, "diary title survives the purge").toBe(`Devlog ${past}`);
       expect(purged!.caption, "diary body survives the purge").toBe("the body excerpt");
+
+      const fullnameOnly = await readPost(bare);
+      expect(
+        fullnameOnly!.authorFullname,
+        "author_fullname purged even when author was already null",
+      ).toBeNull();
 
       const within = await readPost(grace);
       expect(within!.author, "within-grace post NOT purged").not.toBeNull();

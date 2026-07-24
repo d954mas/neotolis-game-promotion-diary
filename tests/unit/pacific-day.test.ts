@@ -39,6 +39,16 @@ describe("pacificDayStart", () => {
     // 00:00 PT on 2026-07-14 = 07:00 UTC.
     expect(start.toISOString()).toBe("2026-07-14T07:00:00.000Z");
   });
+
+  it("uses the midnight offset on the spring-forward day", () => {
+    const now = new Date("2026-03-08T20:00:00Z"); // 13:00 PDT, but midnight was PST.
+    expect(pacificDayStart(now).toISOString()).toBe("2026-03-08T08:00:00.000Z");
+  });
+
+  it("uses the midnight offset on the fall-back day", () => {
+    const now = new Date("2026-11-01T20:00:00Z"); // 12:00 PST, but midnight was PDT.
+    expect(pacificDayStart(now).toISOString()).toBe("2026-11-01T07:00:00.000Z");
+  });
 });
 
 describe("nextPacificMidnight", () => {
@@ -73,5 +83,10 @@ describe("nextPacificMidnight", () => {
     expect(nextPacificMidnight(beforeDST).getTime()).toBeGreaterThan(beforeDST.getTime());
     expect(nextPacificMidnight(onDST).getTime()).toBeGreaterThan(onDST.getTime());
     expect(nextPacificMidnight(afterDST).getTime()).toBeGreaterThan(afterDST.getTime());
+  });
+
+  it("advances to the next calendar date across the 25-hour fall-back day", () => {
+    const now = new Date("2026-11-01T07:30:00Z"); // 00:30 PDT before the fallback.
+    expect(nextPacificMidnight(now).toISOString()).toBe("2026-11-02T08:00:00.000Z");
   });
 });

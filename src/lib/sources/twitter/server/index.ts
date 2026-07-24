@@ -584,6 +584,18 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
 // turns out CORP-blocked there, a proxy + registerRoutes is added then (the seam
 // mirrors TikTok's). Do NOT pre-build it (D-08).
 
+function validateEventInput(input: { kind: string; url?: string | null }): void {
+  if (input.kind !== "twitter_post") return;
+  if (!input.url || twitterParseUrl(input.url) === null) {
+    throw new AppError(
+      "url must be a recognized X/Twitter post URL when kind=twitter_post",
+      "kind_url_inconsistent",
+      422,
+      { reason: "url_not_twitter_post" },
+    );
+  }
+}
+
 // twitterAdapter — composes the core (./adapter.ts) with the infrastructure-touching
 // methods (registerQueues / scheduleCronTicks / backfillSource) and the create-time
 // hooks (canonicalizeOnCreate / onSourceCreated / resetWalkerStateOnWidening /
@@ -600,6 +612,7 @@ export const twitterAdapter: SourceAdapter & typeof twitterAccountAdapterCore = 
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
   resolveCachedExternalId,
+  validateEventInput,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "twitter_post",
     canRun: async () => {

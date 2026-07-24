@@ -16,12 +16,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { NormalizedSinglePost } from "../../src/lib/sources/social-provider.js";
+import type { DailyUserRequestAccounting } from "../../src/lib/server/daily-user-quota.js";
 
 interface ScriptedSinglePost {
   next: NormalizedSinglePost | null;
+  /** When set, fetchPostByUrl THROWS this instead of returning `next`. */
+  error: Error | null;
+  creditReserved: boolean;
+  beforeReserve: null | (() => Promise<void>);
   calls: Array<{ url: string; origin?: string }>;
+  requestCaps: Array<number | undefined>;
 }
-const single: ScriptedSinglePost = { next: null, calls: [] };
+const single: ScriptedSinglePost = {
+  next: null,
+  error: null,
+  creditReserved: true,
+  beforeReserve: null,
+  calls: [],
+  requestCaps: [],
+};
 // When false, getSocialProvider returns null (provider unconfigured) exactly as the
 // self-host default (REDDIT_IMPORT_ENABLED unset) does.
 let providerConfigured = true;
@@ -38,9 +51,35 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
         async fetchPostByUrl(
           _platform: string,
           url: string,
-          opts: { origin?: string },
+          opts: {
+            origin?: "cron" | "user";
+            userAccounting?: DailyUserRequestAccounting;
+          },
         ): Promise<NormalizedSinglePost | null> {
+          single.requestCaps.push(opts.userAccounting?.requestsPerDay);
+          await single.beforeReserve?.();
+          if (single.creditReserved) {
+            const { reserveSocialCredits } =
+              await import("../../src/lib/sources/reddit/server/quota.js");
+            const permit =
+              opts.origin === "user" && opts.userAccounting !== undefined
+                ? await reserveSocialCredits({
+                    platform: "reddit",
+                    provider: "scrapecreators",
+                    origin: "user",
+                    units: 1,
+                    userAccounting: opts.userAccounting,
+                  })
+                : await reserveSocialCredits({
+                    platform: "reddit",
+                    provider: "scrapecreators",
+                    origin: opts.origin ?? "user",
+                    units: 1,
+                  });
+            if (permit === null) throw new Error("scripted Reddit reservation denied");
+          }
           single.calls.push({ url, origin: opts.origin });
+          if (single.error !== null) throw single.error;
           return single.next;
         },
         async fetchPosts() {
@@ -99,11 +138,68 @@ function singlePost(overrides: Partial<NormalizedSinglePost> = {}): NormalizedSi
 
 beforeEach(() => {
   single.next = null;
+  single.error = null;
+  single.creditReserved = true;
+  single.beforeReserve = null;
   single.calls = [];
+  single.requestCaps = [];
   providerConfigured = true;
 });
 
 describe("reddit paste preview (single-post fetch, adapter seam)", () => {
+  it("[CR-01] concurrent previews at cap-1 admit exactly one paid request", async () => {
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
+    const user = await seedUserDirectly({ email: `rdt-preview-race-${uniq()}@t.io` });
+    const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
+    for (let i = 0; i < cap - 1; i++) {
+      await writeAuditStrict({
+        userId: user.id,
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: PLATFORM,
+          platform: PLATFORM,
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+
+    let arrivals = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    single.beforeReserve = async () => {
+      arrivals += 1;
+      if (arrivals === 2) release();
+      await barrier;
+    };
+    single.next = singlePost({ id: "t3_race01", shortcode: "race01" });
+
+    const results = await Promise.allSettled([
+      fetchEventPreviewMetadata("https://www.reddit.com/r/gamedev/comments/race01/a/", {
+        userId: user.id,
+        ipAddress: "127.0.0.1",
+      }),
+      fetchEventPreviewMetadata("https://www.reddit.com/r/gamedev/comments/race02/b/", {
+        userId: user.id,
+        ipAddress: "127.0.0.1",
+      }),
+    ]);
+
+    expect(single.requestCaps).toEqual([cap, cap]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const [loser] = results.filter((result) => result.status === "rejected");
+    expect(loser).toMatchObject({
+      reason: { code: "requests_quota_exhausted", status: 429 },
+    });
+    expect(single.calls, "only the transaction winner reaches provider HTTP").toHaveLength(1);
+    expect((await getUserQuotaUsedToday(user.id, PLATFORM)).requests).toBe(cap);
+  });
+
   it("[12-06] pasting a post URL returns an enriched reddit_post preview + UPSERTs cache + snapshot", async () => {
     const user = await seedUserDirectly({ email: `rdt-preview-ok-${uniq()}@t.io` });
     single.next = singlePost();
@@ -114,7 +210,8 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
       ipAddress: "127.0.0.1",
     });
 
-    expect(result.kind).toBe("ok");
+    if (result.kind === "unreachable") throw new Error(result.cause);
+    expect(result).toMatchObject({ kind: "ok" });
     if (result.kind !== "ok") throw new Error("unreachable");
     // Title = first line of the caption (buildRedditTitle).
     expect(result.title).toBe("My devlog post");
@@ -291,5 +388,52 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     ).toBe("t3_nocache");
     // A non-Reddit / unparseable URL → null (no id derivable).
     expect(await resolveCachedExternalId("https://example.com/not-a-reddit")).toBeNull();
+  });
+
+  it("[review-P1] an ISSUED-but-failed preview fetch still counts against the per-user cap", async () => {
+    const { AdapterError } = await import("../../src/lib/sources/errors.js");
+    const user = await seedUserDirectly({ email: `rdt-preview-err-${uniq()}@t.io` });
+    const before = (await getUserQuotaUsedToday(user.id, PLATFORM)).requests;
+
+    // A network/timeout AdapterError has no HTTP status, but reservation happened
+    // before fetch and therefore still counts.
+    single.error = new AdapterError("network timeout", {
+      category: "transient",
+    });
+    const failed = await fetchEventPreviewMetadata(
+      "https://www.reddit.com/r/gamedev/comments/qerr1/x/",
+      { userId: user.id, ipAddress: "127.0.0.1" },
+    );
+    expect(failed.kind).toBe("unreachable");
+    expect(
+      (await getUserQuotaUsedToday(user.id, PLATFORM)).requests - before,
+      "issued-error counts one request",
+    ).toBe(1);
+
+    // A resolved-null (post absent from the subreddit's page 1) ALSO issued the fetch.
+    single.error = null;
+    single.next = null;
+    const missed = await fetchEventPreviewMetadata(
+      "https://www.reddit.com/r/gamedev/comments/qmiss1/x/",
+      { userId: user.id, ipAddress: "127.0.0.1" },
+    );
+    expect(missed.kind).toBe("unavailable");
+    expect(
+      (await getUserQuotaUsedToday(user.id, PLATFORM)).requests - before,
+      "null-resolve counts one request too",
+    ).toBe(2);
+
+    // A reserve DENIAL does not invoke the reservation callback and must NOT count.
+    single.creditReserved = false;
+    single.error = new AdapterError("budget exhausted", { category: "operator-issue" });
+    const denied = await fetchEventPreviewMetadata(
+      "https://www.reddit.com/r/gamedev/comments/qdeny1/x/",
+      { userId: user.id, ipAddress: "127.0.0.1" },
+    );
+    expect(denied.kind).toBe("unreachable");
+    expect(
+      (await getUserQuotaUsedToday(user.id, PLATFORM)).requests - before,
+      "a no-issue denial stays uncounted",
+    ).toBe(2);
   });
 });

@@ -362,17 +362,6 @@ const RawSchema = z.object({
   // SCRAPECREATORS_API_KEY present, Reddit import stays OFF until the operator
   // explicitly sets "true" — the legally-hot platform never auto-enables.
   REDDIT_IMPORT_ENABLED: z.enum(["true", "false"]).default("false"),
-
-  // Reddit metric-refresh warm lane (Plans 12-04/12-05). Reddit posts stabilize
-  // in 1-2 days (unlike YouTube's long tail), so the window is SHORT (2, not the
-  // IG/TikTok/Twitter 7): recent posts refresh for free on the daily walk, with a
-  // single one-shot next-day catch for posts that fell off the walk. Staleness
-  // 26h stays just over the 24h free walk interval so a page-1 post never
-  // double-pays; 5 failures retires a post. These are env knobs (operator-tunable
-  // post-deploy); the lane machinery is wired in 12-04/12-05.
-  REDDIT_WARM_WINDOW_DAYS: z.coerce.number().int().positive().default(2),
-  REDDIT_WARM_STALENESS_HOURS: z.coerce.number().int().positive().default(26),
-  REDDIT_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -515,9 +504,6 @@ export const env = {
   TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: raw.TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS,
   REDDIT_PROVIDER: raw.REDDIT_PROVIDER,
   REDDIT_IMPORT_ENABLED: raw.REDDIT_IMPORT_ENABLED,
-  REDDIT_WARM_WINDOW_DAYS: raw.REDDIT_WARM_WINDOW_DAYS,
-  REDDIT_WARM_STALENESS_HOURS: raw.REDDIT_WARM_STALENESS_HOURS,
-  REDDIT_WARM_MAX_FAILURES: raw.REDDIT_WARM_MAX_FAILURES,
 } as const;
 
 export type Env = typeof env;

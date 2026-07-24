@@ -19,7 +19,7 @@
 // re-sighting here must not clobber a flag an author walk set. Clearing is now
 // subject-scoped inside the walk (see reddit-subreddit-walk).
 //
-// Integration test — real Postgres. getSocialProvider (fetch) + getSocialSpendToday
+// Integration test — real Postgres. getSocialProvider (fetch) + getSocialProviderSpendToday
 // (claimGate throttle) are mocked; writeSnapshot + the DB are REAL (so the regression
 // is exercised end-to-end).
 //
@@ -73,7 +73,7 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
 
 vi.mock("../../src/lib/sources/reddit/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, getSocialSpendToday: async () => spend };
+  return { ...actual, getSocialProviderSpendToday: async () => spend };
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
@@ -294,5 +294,46 @@ describe("reddit per-post refresh lane", () => {
     expect(await snapshotCount(s)).toBe(1);
     const post = await readPost(s);
     expect(post!.lastPollStatus).toBe("ok");
+  });
+
+  it("[review-P0] a service row's cache miss NEVER falls back to tenant events (skip, no fetch)", async () => {
+    const u = await seedUserDirectly({ email: `rdtrq-p0-${uniq()}@t.io` });
+    const s = uniq().slice(0, 6);
+    const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
+    // A tenant OWNS an event with this externalId, but there is NO public cache row.
+    // The service lane (user_id NULL) has no tenant to scope by — it must SKIP, not
+    // recover the permalink from some tenant's events row (P0 tenant-scope invariant:
+    // every events read is filtered by userId, with no public-data escape hatch).
+    await seedEvent(u.id, s, url);
+    single.next = singlePost({ id: `t3_${s}`, shortcode: s });
+    await db.insert(adapterRefreshQueue).values({
+      adapterKind: "reddit_account",
+      queueName: "service_post",
+      type: "post_stats",
+      payload: { post_id: `t3_${s}` },
+      userId: null,
+      priority: 0,
+      status: "pending",
+    });
+
+    await redditRefreshQueueTick();
+
+    expect(single.calls, "no provider fetch on a tenant-blind cache miss").toHaveLength(0);
+    expect(await snapshotCount(s)).toBe(0);
+  });
+
+  it("[review-P2] a refresh snapshot persists the provider-derived media_type", async () => {
+    const u = await seedUserDirectly({ email: `rdtrq-mt-${uniq()}@t.io` });
+    const s = uniq().slice(0, 6);
+    const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
+    await seedCachedPost(s, url, { mediaType: null });
+    const evId = await seedEvent(u.id, s, url);
+    single.next = singlePost({ id: `t3_${s}`, shortcode: s, kind: "image", mediaType: "image" });
+    await enqueue(evId, u.id, `t3_${s}`);
+
+    await redditRefreshQueueTick();
+
+    const post = await readPost(s);
+    expect(post!.mediaType, "refresh must not hard-null the derived FORM").toBe("image");
   });
 });

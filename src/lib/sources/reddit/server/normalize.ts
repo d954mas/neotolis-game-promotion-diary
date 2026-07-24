@@ -239,6 +239,12 @@ export interface NormalizedRedditPost extends NormalizedPost {
  *  test asserts the mapping directly without spinning up the provider. */
 export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
   const post = REDDIT_POST.parse(raw);
+  // Identity belt (review fix): only a t3_ (link/submission) fullname is a post. A
+  // non-t3 row (t1_ comment, t5_ subreddit — a provider mixing shapes) must not be
+  // cached / imported under a bogus externalId → THROW so mapPostsResilient drops it.
+  if (!/^[a-z0-9]+$/i.test(post.id) || post.name !== `t3_${post.id}`) {
+    throw new Error(`reddit post ${post.name}: fullname does not match id ${post.id}`);
+  }
   const mediaType = deriveMediaType(post);
   const selftext =
     typeof post.selftext === "string" && post.selftext.trim() !== "" ? post.selftext : null;
@@ -366,7 +372,18 @@ export function normalizeRedditFeed(json: unknown): RedditFeedPage {
       context: { after: parsed.after ?? null },
     });
   }
-  const rawPosts = parsed.posts ?? [];
+  // A success envelope MUST carry posts[] (review fix). An envelope with the field
+  // ABSENT/null is a provider shape anomaly, NOT an authoritative empty feed — treated
+  // as empty it would read as a complete zero-post coverage pass and (on an established
+  // source) trigger reconcileAllDisappeared → a mass false deletion-flag. A genuinely
+  // empty feed serves posts: [] (present, empty), which stays the authoritative path.
+  if (parsed.posts == null) {
+    throw new AdapterError("ScrapeCreators reddit feed envelope carried no posts[]", {
+      category: "transient",
+      context: { after: parsed.after ?? null },
+    });
+  }
+  const rawPosts = parsed.posts;
   // Resilient per-post mapping: a stray malformed post is dropped, but a majority-drop
   // (provider shape change) throws AdapterError(transient) instead of yielding a partial
   // page that would read as a false end-of-feed.

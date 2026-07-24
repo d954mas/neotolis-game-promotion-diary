@@ -364,9 +364,13 @@ export interface SocialRefreshLaneConfig {
   maxBatchSize: number;
   /** Tree-local getSocialProvider (so per-tree vi.mock intercepts). */
   getSocialProvider(platform: SocialPlatform): RefreshProvider | null;
-  /** Tree-local getSocialSpendToday (so per-tree vi.mock intercepts). */
-  getSocialSpendToday(
-    platform: string,
+  /** Tree-local PROVIDER-WIDE spend read (so per-tree vi.mock intercepts). The
+   *  claimGate's 95% defer must see the JOINT spend across every platform sharing
+   *  the provider's prepaid pool (D-01) — a platform-filtered read under-counts and
+   *  lets rows through to a reserve that then denies them (`rate_limited` snapshot
+   *  instead of a clean defer-to-reset). Per-platform reads stay in the UI /
+   *  attribution paths only. */
+  getSocialProviderSpendToday(
     provider: string,
   ): Promise<{ creditsUsed: number; dailyCap: number; prepaidBalance: number }>;
   /** OPTIONAL global QPS pacer acquire, run AFTER the budget gate passes (Twitter
@@ -378,8 +382,10 @@ export interface SocialRefreshLaneConfig {
    *  IG/TikTok/Reddit omit this (no QPS pacer) and keep their budget-only gate. */
   acquirePacerSlot?(tx: Tx): Promise<{ acquired: boolean; waitMs: number }>;
   /** Resolve the post's permalink from the public-data posts cache, or null on a
-   *  cache miss (e.g. a paste before the first account poll → graceful skip). */
-  resolvePermalink(postId: string): Promise<string | null>;
+   *  cache miss (e.g. a paste before the first account poll → graceful skip). The
+   *  claimed row rides along so a tenant-owned fallback (Reddit's events lookup)
+   *  can scope by row.userId — single-param implementations just ignore it. */
+  resolvePermalink(postId: string, row: AdapterLaneWorkerRow): Promise<string | null>;
   /** Resolve the MANUAL (user_post) row's post id from its event, TENANT-SCOPED. */
   resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | null>;
   /** Write a per-post snapshot. This is the ONE genuine per-platform delta: TikTok
@@ -430,7 +436,7 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
   //   - Daily cap >= 95% (balance still funded) resets at midnight Pacific — DEFER;
   //     it recovers on its own (mirrors the YouTube/Reddit "wait for reset" defer).
   //
-  // Two-pool coupling (#70 P2-B, accepted): getSocialSpendToday SUMS both pools, so
+  // Two-pool coupling (#70 P2-B, accepted): getSocialProviderSpendToday SUMS both pools, so
   // this coarse gate can defer a service_post tick on user-pool spend (or vice-versa).
   // That's fine — the real per-pool ceiling is the in-fetch origin-scoped reserve
   // (user_post→user pool, service_post→cron pool); this stays a cheap tick throttle.
@@ -439,9 +445,9 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
   ): Promise<AdapterLaneClaimGateResult<SocialRefreshPermit>> {
     // Budget gate FIRST — a budget-defer must NOT consume a pacer slot (it would pace
     // out unrelated twitter traffic by a slot interval without making any fetch). Only
-    // once budget passes do we touch the pacer.
-    const { creditsUsed, dailyCap, prepaidBalance } = await config.getSocialSpendToday(
-      platform,
+    // once budget passes do we touch the pacer. PROVIDER-WIDE spend (D-01 joint cap)
+    // — mirrors the reserve's own joint band math.
+    const { creditsUsed, dailyCap, prepaidBalance } = await config.getSocialProviderSpendToday(
       config.provider,
     );
     if (prepaidBalance > 0 && dailyCap > 0 && creditsUsed >= Math.floor(dailyCap * 0.95)) {
@@ -495,7 +501,7 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
           ? resolveServicePostId(row)
           : await config.resolveUserPostId(row);
       if (postId === null) return; // skip reasons are logged inside the resolvers
-      const permalink = await config.resolvePermalink(postId);
+      const permalink = await config.resolvePermalink(postId, row);
       if (permalink === null) {
         // Accepted wasted slot: the pacer slot was claimed in the claimGate but this
         // row no-ops on a cache miss. Rare, and a cache-miss row would no-op anyway.

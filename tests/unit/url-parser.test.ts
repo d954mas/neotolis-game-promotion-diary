@@ -89,9 +89,7 @@ describe("URL parser canonicalization", () => {
     expect(parseIngestUrl("https://x.com/AnnaIndie").kind).toBe("unsupported");
   });
 
-  // TODO(12-05): re-enable once redditAdapter is re-wired into the registry
-  // (unwired in 12-02 → parseIngestUrl returns unsupported for reddit URLs).
-  it.skip("parseIngestUrl returns reddit_post for reddit POST URLs (Phase 03.1 plan 09)", () => {
+  it("parseIngestUrl returns reddit_post for reddit POST URLs (re-enabled: 12-05 re-wired the adapter)", () => {
     // D-RDT-INGEST-REPLACE: redditAdapter.parseUrl matches POST URLs;
     // url-parser.ts now surfaces `reddit_post` directly (transitional
     // `reddit_deferred` variant removed in plan 09). services/ingest.ts

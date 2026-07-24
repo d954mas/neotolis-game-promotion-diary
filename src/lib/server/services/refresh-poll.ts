@@ -37,10 +37,11 @@ import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { writeAudit } from "../audit.js";
+import { writeAudit, writeAuditTx, type AuditEntry } from "../audit.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { enforceAdapterUserQuota } from "./quota.js";
+import { lockAndAssertDailyUserRequestQuota } from "../daily-user-quota.js";
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -175,7 +176,37 @@ export async function requestRefreshPoll(
   //       returns 0 rows. The 0-rows path treats the slot as "lost" and
   //       throws the same 429 as the in-window check above.
   const cutoffIso = new Date(now.getTime() - COOLDOWN_MS).toISOString();
+  const auditEntry: AuditEntry = {
+    userId,
+    action: "event.poll_refreshed",
+    ipAddress,
+    userAgent,
+    metadata: {
+      event_id: eventId,
+      kind: event.kind,
+      platform: sourceKindForPoll ?? event.kind,
+      external_id: externalId,
+      flow: "stats_refresh",
+      requests_used: 1,
+      events_inserted: 0,
+    },
+  };
+  const atomicQuotaPlatform =
+    sourceKindForPoll === "reddit_account" ? sourceKindForPoll : undefined;
+  const atomicDailyCap =
+    atomicQuotaPlatform === undefined
+      ? undefined
+      : pollableAdapter.observability.userQuotaCap?.requestsPerDay;
   const { queue, jobId: adapterJobId } = await db.transaction(async (tx) => {
+    if (atomicDailyCap !== undefined && atomicQuotaPlatform !== undefined) {
+      await lockAndAssertDailyUserRequestQuota(tx, {
+        userId,
+        platform: atomicQuotaPlatform,
+        units: 1,
+        requestsPerDay: atomicDailyCap,
+      });
+    }
+
     const updateRes = await tx
       .update(events)
       .set({
@@ -209,45 +240,24 @@ export async function requestRefreshPoll(
     // 6. Enqueue refresh — adapter-driven. Every adapter that can be
     //    refresh-polled exposes refreshQueue. YouTube and Reddit both INSERT
     //    into adapter-owned SQL queues; the response shape stays the same.
-    return refreshQueue.enqueue({
+    const queued = await refreshQueue.enqueue({
       eventId,
       userId,
       externalId,
       eventKind: event.kind,
       tx,
     });
+    if (atomicDailyCap !== undefined) {
+      await writeAuditTx(tx, auditEntry);
+    }
+    return queued;
   });
 
-  // 7. Audit row scoped to the event owner. Written OUTSIDE any tx
-  //    (pool-deadlock-safe pattern). Audit failures are swallowed by
-  //    audit.ts so they never break the user-facing path.
-  //
-  // Extended metadata for the per-user cap counter:
-  //   flow='stats_refresh' (capped) + requests_used=1 (one videos.list
-  //   call, 1 quota unit) + events_inserted=0 (no new event rows; this
-  //   refreshes stats on existing event/snapshot tables).
-  // Cap query (services/quota.ts:getUserQuotaUsedToday) sums these
-  // across user-initiated capped flows (incremental + historical +
-  // stats_refresh).
-  await writeAudit({
-    userId,
-    action: "event.poll_refreshed",
-    ipAddress,
-    userAgent,
-    metadata: {
-      event_id: eventId,
-      kind: event.kind,
-      // Explicit source-kind for cap query (services/quota.ts filters on
-      // metadata->>'platform'). `kind` keeps event-kind for forensic
-      // semantics; `platform` carries the cap-window dimension. See
-      // audit.ts AuditMetadata.platform.
-      platform: sourceKindForPoll ?? event.kind,
-      external_id: externalId,
-      flow: "stats_refresh",
-      requests_used: 1,
-      events_inserted: 0,
-    },
-  });
+  // Reddit's counted enqueue is part of the lock-protected transaction above.
+  // Other adapters retain the existing best-effort, post-enqueue audit semantics.
+  if (atomicDailyCap === undefined) {
+    await writeAudit(auditEntry);
+  }
 
   return adapterJobId === null
     ? { enqueued: true, queue, eventId }

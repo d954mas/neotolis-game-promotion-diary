@@ -25,7 +25,6 @@ import { getSocialThrottleState } from "../quota.js";
 import { getSocialProvider } from "../provider/registry.js";
 import { redditWalkSingletonKey } from "../backfill-state.js";
 import { TIER_BOUNDARY_COLD_MS } from "$lib/server/services/tier-resolver.js";
-import { handleRedditWarmRefresh } from "./warm-refresh.js";
 import type { MinimalBoss } from "$lib/sources/adapter.js";
 import type { PgColumn } from "drizzle-orm/pg-core";
 
@@ -65,7 +64,15 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
   }
 
   if (tier === "warm") {
-    await handleRedditWarmRefresh(job);
+    // Reddit warm lane DISABLED (review fix, operator call 2026-07-22):
+    // ScrapeCreators has no lookup-by-id, so the warm catch resolves a post from
+    // its subreddit's page 1 — and a post that fell off the daily walk is almost
+    // never there. Each attempt burned a credit for a not_found snapshot. The
+    // daily walk keeps recent posts fresh; manual Refresh-Now stays available.
+    // This branch stays as a defensive no-op against a stale pg-boss `warm`
+    // schedule persisted by a pre-disable deploy. Re-enable only if the provider
+    // ships a single-post-by-id endpoint.
+    logger.info({ jobId: job.id }, "reddit.poll.cron: warm lane disabled; no-op");
     return;
   }
 

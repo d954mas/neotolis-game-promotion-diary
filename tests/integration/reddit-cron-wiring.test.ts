@@ -62,10 +62,13 @@ describe("reddit cron wiring", () => {
     expect(purge).toHaveLength(1);
     expect(purge[0]!.cron).toBe("0 5 * * *");
 
-    // The three poll tiers collapse into one queue via distinct keys.
+    // The poll tiers collapse into one queue via distinct keys. NO warm tier: the
+    // per-post warm catch was disabled (no ScrapeCreators lookup-by-id — a warm
+    // attempt burned a credit on a page-1 miss); scheduling it again would resurrect
+    // that spend, so this assertion is load-bearing.
     const poll = byQueue(QUEUES.REDDIT_POLL_CRON);
     const tiers = poll.map((p) => (p.payload as { tier?: string }).tier).sort();
-    expect(tiers).toEqual(["active", "cold", "warm"]);
+    expect(tiers).toEqual(["active", "cold"]);
 
     // Daily per-user cap reset (never the shared prepaid balance).
     expect(byQueue(QUEUES.REDDIT_QUOTA_RESET)).toHaveLength(1);

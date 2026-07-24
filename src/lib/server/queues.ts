@@ -73,10 +73,13 @@ export const QUEUES = {
    *  or K=2 pages (incremental, the firehose bound — 12-SPIKE cost caps). Fans out
    *  INSERT events to all active subscribers; Variant-A disappearance reconciliation
    *  sets deletion_detected_at for tracked posts absent from a completed walk. */
-  REDDIT_BACKFILL_ACCOUNT: "reddit.backfill.account",
+  REDDIT_BACKFILL_ACCOUNT: "reddit.backfill.account.v2",
   /** Subreddit-scoped resumable walker (the native /v1/reddit/subreddit path). Same
    *  walk shape as the author walker, keyed on the subreddit slug. */
-  REDDIT_BACKFILL_SUBREDDIT: "reddit.backfill.subreddit",
+  REDDIT_BACKFILL_SUBREDDIT: "reddit.backfill.subreddit.v2",
+  /** Upgrade bridge: workers move pre-v2 jobs into the exclusive v2 queues. */
+  REDDIT_BACKFILL_ACCOUNT_LEGACY: "reddit.backfill.account",
+  REDDIT_BACKFILL_SUBREDDIT_LEGACY: "reddit.backfill.subreddit",
   /** Active + cold ongoing poll + warm per-post producer collapsed via pg-boss
    *  key-based schedules ({ tier } payload — active daily 06:00 UTC / cold daily /
    *  warm hourly). The poll-cron handler dispatches on job.data.tier. */
@@ -158,13 +161,19 @@ export const QUEUES = {
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
+export const REDDIT_WALK_QUEUE_OPTIONS = { policy: "exclusive" as const };
+
 interface MinimalBoss {
-  createQueue(name: string): Promise<unknown>;
+  createQueue(name: string, options?: { policy?: string }): Promise<unknown>;
 }
 
 export async function declareAllQueues(boss: MinimalBoss): Promise<void> {
   for (const name of Object.values(QUEUES)) {
     // pg-boss v10+ createQueue is idempotent — safe to call on every boot.
-    await boss.createQueue(name);
+    const options =
+      name === QUEUES.REDDIT_BACKFILL_ACCOUNT || name === QUEUES.REDDIT_BACKFILL_SUBREDDIT
+        ? REDDIT_WALK_QUEUE_OPTIONS
+        : undefined;
+    await boss.createQueue(name, options);
   }
 }

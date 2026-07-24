@@ -49,8 +49,10 @@ import { AppError } from "./errors.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import type { SourceAdapter } from "$lib/sources/adapter.js";
 import { pacificDayStart, nextPacificMidnight, todayPacific } from "../dates.js";
+import { getUserQuotaUsedToday } from "../daily-user-quota.js";
 
 export { pacificDayStart, nextPacificMidnight, todayPacific };
+export { getUserQuotaUsedToday } from "../daily-user-quota.js";
 
 /**
  * Adapter-driven quota counters.
@@ -270,36 +272,6 @@ export async function withQuotaGuard<T>(
  * omitted (or undefined), counts across all platforms (used by lifetime
  * stats).
  */
-export async function getUserQuotaUsedToday(
-  userId: string,
-  platform?: string,
-): Promise<{ requests: number; events: number }> {
-  const since = pacificDayStart();
-  // `platform` field carries source-kind explicitly. `kind` carries
-  // different semantics across audit verbs (event.poll_refreshed writes
-  // event-kind = 'youtube_video' while the cap query passes source-kind
-  // = 'youtube_channel' - would never match, leaking stats_refresh
-  // counts entirely). `platform` is a dedicated field across ALL
-  // capped-flow writers - see audit.ts AuditMetadata.platform jsdoc.
-  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
-  const result = await db.execute(sql`
-    SELECT
-      COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,
-      COALESCE(SUM((metadata->>'events_inserted')::int), 0)::bigint AS events
-    FROM audit_log
-    WHERE user_id = ${userId}
-      AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
-      AND metadata->>'flow' IN ('initial', 'incremental', 'historical', 'stats_refresh')
-      AND created_at >= ${since.toISOString()}::timestamptz
-      ${platformFilter}
-  `);
-  const row = result.rows[0] as { requests: string | number; events: string | number } | undefined;
-  return {
-    requests: Number(row?.requests ?? 0),
-    events: Number(row?.events ?? 0),
-  };
-}
-
 /**
  * Per-user lifetime usage - SUM since the user's signup (no time filter).
  * Includes ALL flows (initial + incremental + historical + stats_refresh +

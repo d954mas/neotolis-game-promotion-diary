@@ -5,9 +5,12 @@
 //   - "user_post"    — MANUAL "Refresh now" (enqueueRefreshNow). Payload
 //                      {event_id, post_id}, user_id SET. Resolved TENANT-SCOPED; the
 //                      fetch charges the USER pool.
-//   - "service_post" — CRON warm auto-refresh. Payload {post_id}, user_id NULL.
-//                      PUBLIC-DATA, NO event lookup; the fetch charges the OPERATOR
-//                      (cron) pool.
+//   - "service_post" — CRON warm auto-refresh slot. DORMANT for Reddit: the warm
+//                      producer was disabled (review fix — ScrapeCreators has no
+//                      lookup-by-id, so a warm catch of a post that fell off the walk
+//                      almost never resolves from the subreddit's page 1 and just
+//                      burns a credit). The slot stays wired defensively for rows a
+//                      pre-disable deploy may have left behind.
 //
 // NO QPS PACER (unlike Twitter): ScrapeCreators has no per-account QPS ceiling — the
 // shared prepaid-balance reserve + the 80/95 daily-cap throttle are the only rate
@@ -30,7 +33,7 @@ import {
 } from "$lib/sources/server/social-warm-lane.js";
 import type { AdapterLaneWorkerRow } from "$lib/server/services/adapter-lane-worker.js";
 import { getSocialProvider } from "../provider/registry.js";
-import { getSocialSpendToday } from "../quota.js";
+import { getSocialProviderSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
 import { redditParsePostUrl } from "../url.js";
 
@@ -58,10 +61,12 @@ async function resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | nu
 }
 
 // The single-post fetch takes a URL — recover the canonical permalink from the
-// public-data reddit_posts cache. On a cache miss recover it from the reddit_post
-// event's own URL (PUBLIC-DATA: the permalink is URL-intrinsic, identical across
-// every tenant who saved it, so no userId scope).
-async function resolvePermalink(postId: string): Promise<string | null> {
+// public-data reddit_posts cache. On a cache miss, recover it from the REQUESTING
+// user's own reddit_post event (TENANT-SCOPED by row.userId — the P0 tenant-scope
+// invariant admits no cross-tenant events read, even for URL-intrinsic data). A
+// service row (userId null) has no tenant to scope by → skip on a cache miss; its
+// post id came from the cache in the first place, so a miss means the row vanished.
+async function resolvePermalink(postId: string, row: AdapterLaneWorkerRow): Promise<string | null> {
   const [postRow] = await db
     .select({ permalink: redditPosts.permalink })
     .from(redditPosts)
@@ -69,12 +74,13 @@ async function resolvePermalink(postId: string): Promise<string | null> {
     .limit(1);
   if (postRow?.permalink != null) return postRow.permalink;
 
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- the permalink is URL-intrinsic public data (identical across every tenant's reddit_post event for this id); the cache-miss recovery is tenant-agnostic by construction.
+  if (row.userId === null) return null;
   const [eventRow] = await db
     .select({ url: events.url })
     .from(events)
     .where(
       and(
+        eq(events.userId, row.userId),
         eq(events.externalId, postId),
         eq(events.kind, "reddit_post"),
         isNotNull(events.url),
@@ -92,7 +98,7 @@ const redditRefreshLane = createSocialRefreshLane({
   provider: "scrapecreators",
   maxBatchSize: env.SOCIAL_REFRESH_LANE_CONCURRENCY,
   getSocialProvider,
-  getSocialSpendToday,
+  getSocialProviderSpendToday,
   resolvePermalink,
   resolveUserPostId,
   writeSnapshot: ({ postId, permalink, post, status }) =>
@@ -102,10 +108,12 @@ const redditRefreshLane = createSocialRefreshLane({
         : {
             postId,
             permalink,
-            // The single-post NormalizedSinglePost carries caption (the title) but no
-            // reddit-specific raw columns / selftext / media form — thread what it has
-            // and COALESCE-preserve the rest (mediaType null keeps the walk's value).
-            mediaType: null,
+            // The single-post NormalizedSinglePost carries the derived Reddit FORM —
+            // thread it (review fix: hard-coded null left an image/gallery card
+            // rendering as text until the next source walk cached the form). The
+            // reddit-specific raw columns / selftext stay absent on this path and
+            // COALESCE-preserve.
+            mediaType: post.mediaType ?? null,
             title: post.caption,
             thumbnailUrl: post.thumbnailUrl,
             publishedAt: post.publishedAt,

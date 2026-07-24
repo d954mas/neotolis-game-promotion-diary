@@ -13,7 +13,7 @@
 // The claimGate (prepaid-balance RUN vs daily-cap DEFER, #69 P1-B), the concurrent
 // Promise.allSettled dispatch, the per-row resolve/fetch/never-throw flow, and the
 // drained-tick observability all live in the shared factory. This file binds the IG
-// seams (getSocialProvider / getSocialSpendToday from the IG tree so the per-tree
+// seams (getSocialProvider / getSocialProviderSpendToday from the IG tree so the per-tree
 // vi.mock works), the IG posts-cache permalink lookup, the tenant-scoped user_post
 // event resolve, and the IG snapshot write. IG's single-post endpoint exposes no
 // share field, so the writeSnapshot mapping nulls `shares` by omission (the TikTok
@@ -31,7 +31,7 @@ import {
 import type { AdapterLaneWorkerRow } from "$lib/server/services/adapter-lane-worker.js";
 import { env } from "$lib/server/config/env.js";
 import { getSocialProvider } from "../provider/registry.js";
-import { getSocialSpendToday } from "../quota.js";
+import { getSocialProviderSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
 
 export const INSTAGRAM_REFRESH_SLOTS = REFRESH_SLOTS;
@@ -76,7 +76,7 @@ const instagramRefreshLane = createSocialRefreshLane({
   provider: "scrapecreators",
   maxBatchSize: env.SOCIAL_REFRESH_LANE_CONCURRENCY,
   getSocialProvider,
-  getSocialSpendToday,
+  getSocialProviderSpendToday,
   resolvePermalink,
   resolveUserPostId,
   writeSnapshot: ({ postId, permalink, post, status }) =>

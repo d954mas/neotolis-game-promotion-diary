@@ -619,6 +619,18 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
   app.route("/api", tiktokThumbnailRoutes);
 }
 
+function validateEventInput(input: { kind: string; url?: string | null }): void {
+  if (input.kind !== "tiktok_post") return;
+  if (!input.url || tiktokParseUrl(input.url) === null) {
+    throw new AppError(
+      "url must be a recognized TikTok post URL when kind=tiktok_post",
+      "kind_url_inconsistent",
+      422,
+      { reason: "url_not_tiktok_post" },
+    );
+  }
+}
+
 // tiktokAdapter — composes the core (./adapter.ts) with the infrastructure-touching
 // methods (registerQueues / scheduleCronTicks / backfillSource / registerRoutes) and
 // the create-time hooks (canonicalizeOnCreate / onSourceCreated /
@@ -641,6 +653,7 @@ export const tiktokAdapter: SourceAdapter & typeof tiktokAccountAdapterCore = {
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
   resolveCachedExternalId,
+  validateEventInput,
   registerRoutes,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "tiktok_post",

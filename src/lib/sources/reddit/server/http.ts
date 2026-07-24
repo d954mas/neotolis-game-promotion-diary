@@ -43,6 +43,7 @@ import {
   type SocialQuotaPool,
 } from "$lib/sources/instagram/server/quota.js";
 import type { SocialPlatform } from "$lib/sources/social-provider.js";
+import type { DailyUserRequestAccounting } from "$lib/server/daily-user-quota.js";
 
 /** Dollar cost of one ScrapeCreators reddit request. 1 request = 1 credit = 1
  *  page (12-SPIKE.md Q5: full 17-post author backfill = 3 credits ≈ $0.006 ⇒
@@ -67,7 +68,7 @@ export async function fetchWithTimeout(
   }
 }
 
-export interface RedditFetchContext {
+type RedditFetchContextBase = {
   platform: SocialPlatform;
   provider: string;
   logTag: string;
@@ -83,8 +84,20 @@ export interface RedditFetchContext {
    * the walker pauses + persists its cursor. Omitted origin leaves the request
    * unmetered.
    */
-  origin?: SocialQuotaPool;
-}
+};
+
+export type RedditFetchContext = RedditFetchContextBase &
+  (
+    | {
+        origin?: SocialQuotaPool;
+        userAccounting?: undefined;
+      }
+    | {
+        origin: "user";
+        /** Per-user cap + audit row committed atomically with the provider reservation. */
+        userAccounting: DailyUserRequestAccounting;
+      }
+  );
 
 /** Bucket an HTTP status (or a non-HTTP failure) into the `status` OBS label. */
 function statusLabel(httpStatus: number): string {
@@ -105,12 +118,21 @@ export async function redditFetch(url: URL, ctx: RedditFetchContext): Promise<Re
     // Reserve-before-HTTP (BUDGET-02): decrement the daily counter AND the
     // shared prepaid balance in one FOR-UPDATE tx before issuing the request. A
     // null permit means the spend would over-run the budget — refuse it.
-    const permit = await reserveSocialCredits({
-      platform: reservePlatform,
-      provider: reserveProvider,
-      origin: ctx.origin,
-      units: ctx.creditsUsed ?? 1,
-    });
+    const permit =
+      ctx.origin === "user" && ctx.userAccounting !== undefined
+        ? await reserveSocialCredits({
+            platform: reservePlatform,
+            provider: reserveProvider,
+            origin: "user",
+            units: ctx.creditsUsed ?? 1,
+            userAccounting: ctx.userAccounting,
+          })
+        : await reserveSocialCredits({
+            platform: reservePlatform,
+            provider: reserveProvider,
+            origin: ctx.origin,
+            units: ctx.creditsUsed ?? 1,
+          });
     if (permit === null) {
       // Disambiguate the two null causes so the caller maps the right
       // AdapterError category (mirrors IG/TikTok's two-branch null handling):

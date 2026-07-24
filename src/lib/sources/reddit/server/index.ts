@@ -12,7 +12,7 @@
 // Per-kind queue topology:
 //   reddit.backfill.account     (the author-search resumable walker, D-02)
 //   reddit.backfill.subreddit   (the native subreddit walker)
-//   reddit.poll.cron            (key=active daily 06:00 UTC / key=cold daily / key=warm hourly)
+//   reddit.poll.cron            (key=active daily 06:00 UTC / key=cold daily; NO warm — disabled)
 //   reddit.quota_reset          (midnight PT — daily-cap reset, never the shared prepaid balance)
 //   reddit.deletion_propagation (daily 05:00 UTC — the GDPR author purge, D-06/D-08)
 //
@@ -43,9 +43,10 @@ import type {
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
 import type { DbOrTx, Tx } from "$lib/server/db/client.js";
-import { QUEUES } from "$lib/server/queues.js";
-import { getBoss } from "$lib/server/queue-client.js";
+import { env } from "$lib/server/config/env.js";
+import { QUEUES, REDDIT_WALK_QUEUE_OPTIONS } from "$lib/server/queues.js";
 import { db } from "$lib/server/db/client.js";
+import { outbox } from "$lib/server/db/schema/outbox.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { backfillWindowToDate } from "$lib/server/services/data-sources.js";
 import {
@@ -56,7 +57,6 @@ import {
 import { getChannelState } from "$lib/server/services/channel-state.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { writeAudit } from "$lib/server/audit.js";
 import { eq, desc } from "drizzle-orm";
 import { redditPosts } from "$lib/server/db/schema/index.js";
 import { redditAccountAdapterCore } from "./adapter.js";
@@ -64,6 +64,7 @@ import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
 import { buildRedditTitle } from "./normalize.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
+import type { RedditSocialProvider } from "./provider/scrapecreators-reddit.js";
 import { writeSnapshot } from "./snapshots.js";
 import {
   resetRedditBackfillState,
@@ -102,8 +103,10 @@ function depthBoundIsoForWindow(window: BackfillWindow, targetSince: Date | null
 }
 
 async function registerQueues(boss: MinimalBoss): Promise<void> {
-  await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT);
-  await boss.createQueue(QUEUES.REDDIT_BACKFILL_SUBREDDIT);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT, REDDIT_WALK_QUEUE_OPTIONS);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_SUBREDDIT, REDDIT_WALK_QUEUE_OPTIONS);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT_LEGACY);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_SUBREDDIT_LEGACY);
   await boss.createQueue(QUEUES.REDDIT_POLL_CRON);
   await boss.createQueue(QUEUES.REDDIT_QUOTA_RESET);
   await boss.createQueue(QUEUES.REDDIT_DELETION_PROPAGATION);
@@ -113,6 +116,24 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   });
   await boss.work(QUEUES.REDDIT_BACKFILL_SUBREDDIT, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) await handleBackfillSubreddit(job as never);
+  });
+  await boss.work(QUEUES.REDDIT_BACKFILL_ACCOUNT_LEGACY, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await bridgeLegacyWalkJob(
+        boss,
+        QUEUES.REDDIT_BACKFILL_ACCOUNT,
+        job as { id: string; data: Record<string, unknown> },
+      );
+    }
+  });
+  await boss.work(QUEUES.REDDIT_BACKFILL_SUBREDDIT_LEGACY, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await bridgeLegacyWalkJob(
+        boss,
+        QUEUES.REDDIT_BACKFILL_SUBREDDIT,
+        job as { id: string; data: Record<string, unknown> },
+      );
+    }
   });
   await boss.work(QUEUES.REDDIT_POLL_CRON, { batchSize: 2 }, async (jobs) => {
     for (const job of jobs) {
@@ -133,6 +154,37 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   });
 }
 
+async function bridgeLegacyWalkJob(
+  boss: MinimalBoss,
+  queue: string,
+  job: { id: string; data: Record<string, unknown> },
+): Promise<void> {
+  const kind = job.data.kind;
+  const channelKey = job.data.channelKey;
+  if (
+    (kind !== "reddit_account" && kind !== "reddit_subreddit") ||
+    typeof channelKey !== "string" ||
+    channelKey === ""
+  ) {
+    return;
+  }
+  const singletonKey = redditWalkSingletonKey(kind, channelKey);
+  const sentId = await boss.send(queue, job.data, { id: job.id, singletonKey });
+  const alreadyForwarded =
+    boss.getJobById === undefined ? null : await boss.getJobById(queue, job.id);
+  if (sentId !== null || alreadyForwarded !== null) return;
+
+  await db
+    .insert(outbox)
+    .values({
+      id: job.id,
+      queue,
+      payload: job.data,
+      options: { singletonKey, retrySingletonConflict: true },
+    })
+    .onConflictDoNothing();
+}
+
 async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
   // Active tier — daily 06:00 UTC (one feed credit amortized over the newest posts).
   await boss.schedule(QUEUES.REDDIT_POLL_CRON, "0 6 * * *", { tier: "active" }, { key: "active" });
@@ -143,9 +195,11 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
     { tier: "cold" },
     { key: "cold", tz: "America/Los_Angeles" },
   );
-  // Warm per-post next-day catch — hourly (window=2 days; a post gets at most ~1 paid
-  // catch if it fell off the daily walk — 12-SPIKE "no long-lived warm lane").
-  await boss.schedule(QUEUES.REDDIT_POLL_CRON, "0 * * * *", { tier: "warm" }, { key: "warm" });
+  // NO warm per-post schedule (review fix): ScrapeCreators has no lookup-by-id, so
+  // the warm catch could only search the subreddit's page 1 — a post that fell off
+  // the daily walk is almost never there, and each attempt burned a credit for a
+  // not_found. poll-cron keeps a defensive tier=warm no-op branch for any stale
+  // pg-boss schedule a pre-disable deploy persisted.
   // Daily-cap reset — midnight Pacific (never the shared prepaid balance).
   await boss.schedule(QUEUES.REDDIT_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
   // ★ Deletion-propagation author purge — daily 05:00 UTC (D-06/D-08 GDPR control).
@@ -170,20 +224,19 @@ async function backfillSource(
   const kind = isSubreddit ? "reddit_subreddit" : "reddit_account";
   const channelKey = md.handle ?? md.slug ?? source.id;
   const queue = isSubreddit ? QUEUES.REDDIT_BACKFILL_SUBREDDIT : QUEUES.REDDIT_BACKFILL_ACCOUNT;
-  const boss = await getBoss();
-  const jobId = await boss.send(
-    queue,
-    {
-      kind,
-      channelKey,
-      triggerUserId: ctx.origin === "user" ? source.userId : undefined,
-      depthBoundIso: EPOCH_ISO,
-      flow: ctx.origin === "user" ? "incremental" : "auto_passive",
-    },
-    {
+  const payload = {
+    kind,
+    channelKey,
+    triggerUserId: ctx.origin === "user" ? source.userId : undefined,
+    depthBoundIso: EPOCH_ISO,
+    flow: ctx.origin === "user" ? "incremental" : "auto_passive",
+  };
+  const jobId = await db.transaction((tx) =>
+    enqueueViaOutbox(tx, queue, payload, {
       singletonKey: redditWalkSingletonKey(kind, channelKey),
       priority: ctx.origin === "user" ? 1 : 0,
-    },
+      retrySingletonConflict: true,
+    }),
   );
   return { jobId, queue };
 }
@@ -302,7 +355,10 @@ async function onSourceCreated(
     // Channel-scoped singleton (NOT per-source `source-${id}`): two tenants who add the
     // SAME channel must dedupe to ONE initial walk, not double-spend on concurrent walks
     // of the same feed. Shared across initial/manual/cron (redditWalkSingletonKey).
-    { singletonKey: redditWalkSingletonKey(kind, channelKey) },
+    {
+      singletonKey: redditWalkSingletonKey(kind, channelKey),
+      retrySingletonConflict: true,
+    },
   );
 }
 
@@ -380,7 +436,10 @@ async function resetWalkerStateOnWidening(
       flow: "historical",
       forceDeep: true,
     },
-    { singletonKey: redditWalkSingletonKey(source.kind, channelKey) },
+    {
+      singletonKey: redditWalkSingletonKey(source.kind, channelKey),
+      retrySingletonConflict: true,
+    },
   );
 }
 
@@ -430,7 +489,7 @@ async function fetchEventPreviewMetadata(
   canonicalUrl: string,
   ctx: { userId: string; ipAddress: string },
 ): Promise<EventPreviewMetadata> {
-  const provider = getSocialProvider(SOCIAL_PLATFORM);
+  const provider = getSocialProvider(SOCIAL_PLATFORM) as RedditSocialProvider | null;
   if (provider === null) return { kind: "unreachable", cause: "reddit_not_configured" };
 
   const parsed = redditParsePostUrl(canonicalUrl);
@@ -440,9 +499,33 @@ async function fetchEventPreviewMetadata(
     platform: QUOTA_PLATFORM,
   });
 
+  // A paid HTTP request that was ISSUED spent its credit even when it then failed or
+  // resolved no post — it must reach the per-user cap audit (review fix; mirrors
+  // walk-core). Issued-error discriminator: an HTTP-status AdapterError carries a
+  // numeric context.status; a reserve-null denial carries none (nothing was spent).
+  // The null-post path issued a request UNLESS the provider early-outed before HTTP
+  // (redd.it short-link — no subreddit in the URL, no fetch).
   let post;
   try {
-    post = await provider.fetchPostByUrl(SOCIAL_PLATFORM, canonicalUrl, { origin: "user" });
+    post = await provider.fetchPostByUrl(SOCIAL_PLATFORM, canonicalUrl, {
+      origin: "user",
+      userAccounting: {
+        requestsPerDay: env.LIMIT_SOCIAL_REQUESTS_PER_DAY,
+        auditEntry: {
+          userId: ctx.userId,
+          action: "event.poll_refreshed",
+          ipAddress: ctx.ipAddress,
+          metadata: {
+            external_id: `t3_${parsed.externalId}`,
+            kind: "reddit_post",
+            platform: QUOTA_PLATFORM,
+            flow: "stats_refresh",
+            requests_used: 1,
+            events_inserted: 0,
+          },
+        },
+      },
+    });
   } catch (err) {
     if (err instanceof AppError) throw err;
     if (err instanceof AdapterError) {
@@ -455,7 +538,9 @@ async function fetchEventPreviewMetadata(
     }
     return { kind: "unreachable", cause: String((err as Error)?.message ?? err) };
   }
-  if (post === null) return { kind: "unavailable" };
+  if (post === null) {
+    return { kind: "unavailable" };
+  }
 
   await writeSnapshot({
     postId: post.id,
@@ -471,20 +556,6 @@ async function fetchEventPreviewMetadata(
     metrics: { likes: post.metrics.likes, comments: post.metrics.comments },
     raw: null,
     status: "ok",
-  });
-
-  await writeAudit({
-    userId: ctx.userId,
-    action: "event.poll_refreshed",
-    ipAddress: ctx.ipAddress,
-    metadata: {
-      external_id: post.id,
-      kind: "reddit_post",
-      platform: QUOTA_PLATFORM,
-      flow: "stats_refresh",
-      requests_used: 1,
-      events_inserted: 0,
-    },
   });
 
   const ownerUrl =

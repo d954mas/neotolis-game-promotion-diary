@@ -40,6 +40,8 @@ export interface OutboxEnqueueOptions {
   /** pg-boss priority — higher runs first when the worker has multiple
    *  jobs in the queue. */
   priority?: number;
+  /** Retry when an exclusive pg-boss queue rejects a different job for an active key. */
+  retrySingletonConflict?: boolean;
   /** pg-boss SendOptions `startAfter` — delay before the job becomes
    *  visible, in SECONDS. Used to PACE a self-enqueued continuation under
    *  a per-account QPS ceiling (twitterapi.io 0.2 QPS): a deep-backfill
@@ -67,8 +69,8 @@ export interface OutboxEnqueueOptions {
  * "next tick / next NOTIFY". After MAX_ATTEMPTS (20) the row stays
  * pending forever and operator intervention is required.
  *
- * Returns nothing — the row id is auto-generated and not needed by
- * callers (the forwarder owns the lifecycle).
+ * Returns the durable outbox row id. Most callers ignore it; request paths
+ * may expose it as the eventual pg-boss job id.
  *
  * ⚠ SECRETS RULE (AGENTS.md Constraints — "Secrets at rest envelope-
  * encrypted"):
@@ -98,15 +100,17 @@ export async function enqueueViaOutbox(
   queue: string,
   payload: Record<string, unknown>,
   options: OutboxEnqueueOptions = {},
-): Promise<void> {
-  await tx
+): Promise<string> {
+  const [row] = await tx
     .insert(outbox)
     .values({
       queue,
       payload,
       options: options as Record<string, unknown>,
     })
+    .returning({ id: outbox.id })
     .execute();
+  return row!.id;
 }
 
 /**

@@ -69,6 +69,10 @@ export interface ProviderPage {
  *  seam so EVERY page counts against the operator budget. */
 export type ProviderOrigin = "cron" | "user";
 
+export interface ProviderPostFetchOptions {
+  origin?: ProviderOrigin;
+}
+
 /**
  * Single-post lookup result (paste-preview path). The provider issues ONE
  * by-URL request (1 credit) and maps the vendor's single-media shape into this
@@ -180,7 +184,7 @@ export interface SocialProvider {
   fetchPostByUrl(
     platform: SocialPlatform,
     url: string,
-    opts: { origin?: ProviderOrigin },
+    opts: ProviderPostFetchOptions,
   ): Promise<NormalizedSinglePost | null>;
   /** D-23 additive-only; NEVER depended on. */
   getCreditBalance?(): Promise<number | null>;

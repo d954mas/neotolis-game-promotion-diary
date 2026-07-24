@@ -62,7 +62,7 @@ vi.mock("../../src/lib/sources/tiktok/server/provider/registry.js", async (impor
 
 vi.mock("../../src/lib/sources/tiktok/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, getSocialSpendToday: async () => spend };
+  return { ...actual, getSocialProviderSpendToday: async () => spend };
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
@@ -270,6 +270,44 @@ describe("tiktok per-post refresh lane", () => {
     await tiktokRefreshQueueTick();
 
     expect(single.calls).toHaveLength(0); // event not resolvable under attacker → no fetch
+    expect(await snapshotCount(id)).toBe(0);
+  });
+
+  it("[CR-03] a cache miss never resolves another tenant's event URL", async () => {
+    const requester = await seedUserDirectly({ email: `tkrq-requester-${uniq()}@t.io` });
+    const other = await seedUserDirectly({ email: `tkrq-other-${uniq()}@t.io` });
+    const id = awemeId();
+    const otherUrl = `https://www.tiktok.com/@other/video/${id}`;
+
+    await createEvent(
+      other.id,
+      {
+        kind: "tiktok_post",
+        title: "other tenant",
+        externalId: id,
+        url: otherUrl,
+        occurredAt: new Date("2026-06-02T00:00:00Z").toISOString(),
+        gameIds: [],
+      },
+      "127.0.0.1",
+    );
+    const requesterEvent = await createEvent(
+      requester.id,
+      {
+        kind: "tiktok_post",
+        title: "requester without URL",
+        externalId: id,
+        occurredAt: new Date("2026-06-02T00:00:00Z").toISOString(),
+        gameIds: [],
+      },
+      "127.0.0.1",
+    );
+    single.next = singlePost(id);
+    await enqueue(requesterEvent.id, requester.id, id);
+
+    await tiktokRefreshQueueTick();
+
+    expect(single.calls, "another tenant's URL must never be used").toHaveLength(0);
     expect(await snapshotCount(id)).toBe(0);
   });
 });

@@ -12,7 +12,7 @@
 // The claimGate (prepaid-balance RUN vs daily-cap DEFER), the concurrent
 // Promise.allSettled dispatch, the per-row resolve/fetch/never-throw flow, and the
 // drained-tick observability all live in the shared factory. This file binds the
-// Twitter seams (getSocialProvider / getSocialSpendToday from the Twitter tree so
+// Twitter seams (getSocialProvider / getSocialProviderSpendToday from the Twitter tree so
 // the per-tree vi.mock works), the twitter_posts permalink lookup, the
 // tenant-scoped user_post event resolve, and the Twitter snapshot write.
 //
@@ -43,7 +43,7 @@ import {
 } from "$lib/sources/server/social-warm-lane.js";
 import type { AdapterLaneWorkerRow } from "$lib/server/services/adapter-lane-worker.js";
 import { getSocialProvider } from "../provider/registry.js";
-import { getSocialSpendToday } from "../quota.js";
+import { getSocialProviderSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
 import { twitterParseUrl } from "../url.js";
 import { acquireTwitterPacerSlot } from "../pacer.js";
@@ -79,7 +79,10 @@ async function resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | nu
 // /<handle>/status/<id> slug, so twitterParseUrl yields the same canonical
 // permalink the endpoint needs). On a successful fetch writeSnapshot UPSERTs the
 // twitter_posts row, self-healing the cache so subsequent refreshes hit the fast path.
-async function resolvePermalink(tweetId: string): Promise<string | null> {
+async function resolvePermalink(
+  tweetId: string,
+  row: AdapterLaneWorkerRow,
+): Promise<string | null> {
   const [postRow] = await db
     .select({ permalink: twitterPosts.permalink })
     .from(twitterPosts)
@@ -91,12 +94,13 @@ async function resolvePermalink(tweetId: string): Promise<string | null> {
   // tweet id (the URL slug IS the id, so external_id == tweet id). PUBLIC-DATA: the
   // permalink is intrinsic to the URL, identical across every tenant who saved it, so
   // no userId scope (any tenant's row yields the same canonical permalink).
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- the permalink is URL-intrinsic public data (the tweet id IS the /<handle>/status/<id> slug); any tenant's twitter_post event for this id parses to the SAME canonical permalink, so the cache-miss recovery is tenant-agnostic by construction.
+  if (row.userId === null) return null;
   const [eventRow] = await db
     .select({ url: events.url })
     .from(events)
     .where(
       and(
+        eq(events.userId, row.userId),
         eq(events.externalId, tweetId),
         eq(events.kind, "twitter_post"),
         isNotNull(events.url),
@@ -119,7 +123,7 @@ const twitterRefreshLane = createSocialRefreshLane({
   // and instantly provoke the per-account 429).
   maxBatchSize: 1,
   getSocialProvider,
-  getSocialSpendToday,
+  getSocialProviderSpendToday,
   // Acquire the global twitter_pacer slot in the claimGate (Plan 11 P1), AFTER the
   // budget gate and on the claim tx so a rollback rolls the slot back too. A denied
   // slot DEFERS the row (stays pending → retried) instead of letting it reach the seam,

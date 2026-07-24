@@ -14,6 +14,46 @@ const sentJobs: Array<{
   options: Record<string, unknown>;
 }> = [];
 
+const quotaRace = vi.hoisted(() => {
+  let release: (() => void) | null = null;
+  let wait = Promise.resolve();
+  return {
+    enabled: false,
+    arrivals: 0,
+    begin(): void {
+      this.enabled = true;
+      this.arrivals = 0;
+      wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    },
+    async arrive(): Promise<void> {
+      if (!this.enabled) return;
+      this.arrivals += 1;
+      if (this.arrivals === 2) release?.();
+      await wait;
+    },
+    end(): void {
+      this.enabled = false;
+      release?.();
+    },
+  };
+});
+
+vi.mock("../../src/lib/server/services/quota.js", async (importOriginal) => {
+  const actual =
+    (await importOriginal()) as typeof import("../../src/lib/server/services/quota.js");
+  return {
+    ...actual,
+    async enforceAdapterUserQuota(
+      ...args: Parameters<typeof actual.enforceAdapterUserQuota>
+    ): Promise<void> {
+      await actual.enforceAdapterUserQuota(...args);
+      await quotaRace.arrive();
+    },
+  };
+});
+
 vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -351,5 +391,65 @@ describe("refresh-poll cooldown service", () => {
     const [row] = await db.select().from(events).where(eq(events.id, ev.id));
     const meta = (row!.metadata ?? {}) as { last_user_refresh_at?: string };
     expect(meta.last_user_refresh_at).toBeUndefined();
+  });
+
+  it("[CR-01] concurrent Reddit Refresh Now requests reserve one remaining daily slot", async () => {
+    sentJobs.length = 0;
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-race-${uniq()}@test.local` });
+    const first = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "abc_race_first",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_race_first/test/",
+    });
+    const second = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "abc_race_second",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_race_second/test/",
+    });
+    for (let i = 1; i < env.LIMIT_SOCIAL_REQUESTS_PER_DAY; i++) {
+      await writeAuditStrict({
+        userId: u.id,
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: "reddit_account",
+          platform: "reddit_account",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+
+    quotaRace.begin();
+    const results = await Promise.allSettled([
+      requestRefreshPoll(u.id, first.id, "127.0.0.1"),
+      requestRefreshPoll(u.id, second.id, "127.0.0.1"),
+    ]).finally(() => quotaRace.end());
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    expect(rejected?.reason).toMatchObject({
+      code: "requests_quota_exhausted",
+      status: 429,
+    });
+
+    const queued = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(
+        and(eq(adapterRefreshQueue.userId, u.id), eq(adapterRefreshQueue.queueName, "user_post")),
+      );
+    expect(queued).toHaveLength(1);
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.poll_refreshed")));
+    expect(audits).toHaveLength(1);
   });
 });

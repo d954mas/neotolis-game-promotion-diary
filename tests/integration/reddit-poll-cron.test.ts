@@ -143,4 +143,15 @@ describe("reddit.poll.cron enqueue + throttle skip-gate", () => {
       "active still runs at 80%",
     ).toContain(act);
   });
+
+  it("[review-P1] tier=warm is a NO-OP (lane disabled — no lookup-by-id endpoint); a stale schedule enqueues nothing", async () => {
+    throttle = "ok";
+    const act = `wrm${uniq()}`;
+    await seedChannel(act, 1);
+    const sent: SentJob[] = [];
+
+    await handleRedditPollCron({ id: "j7", data: { tier: "warm" } }, stubBoss(sent));
+
+    expect(sent, "a warm tick must not enqueue anything").toHaveLength(0);
+  });
 });

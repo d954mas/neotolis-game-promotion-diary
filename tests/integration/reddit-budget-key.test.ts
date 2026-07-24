@@ -16,6 +16,7 @@
 
 import { afterAll, describe, it, expect, vi, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
+import type { DailyUserRequestAccounting } from "../../src/lib/server/daily-user-quota.js";
 
 // Configure the operator provider BEFORE any import resolves env — isRedditConfigured
 // checks REDDIT_IMPORT_ENABLED (the D-08 kill-switch) FIRST, then the shared key.
@@ -135,5 +136,38 @@ describe("reddit budget key (review P0)", () => {
     // No HTTP on the denied reserve; the balance stayed exhausted (no negative spend).
     expect(http.calls).toBe(1);
     expect(await balanceFor(PROVIDER)).toBe(0);
+  });
+
+  it("[CR-01] an accounting INSERT failure rolls back the reservation and issues no HTTP", async () => {
+    await seedBalance(1000);
+    const balanceBefore = await balanceFor(PROVIDER);
+    const spendBefore = await poolSpend("user");
+    const invalidAudit = {
+      userId: "accounting-failure-user",
+      action: "source.refresh_content_requested",
+      ipAddress: "127.0.0.1",
+      metadata: {
+        platform: "reddit_account",
+        // Force the DB audit-flow CHECK to fail after the credit updates. The cast
+        // keeps this a runtime rollback test rather than a compile-time fixture test.
+        flow: "invalid_flow" as "initial",
+        requests_used: 1,
+        events_inserted: 0,
+      },
+    } satisfies DailyUserRequestAccounting["auditEntry"];
+
+    await expect(
+      fetchRedditFeedPage("author", "accounting_failure", null, {
+        origin: "user",
+        userAccounting: {
+          auditEntry: invalidAudit,
+          requestsPerDay: 50,
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(http.calls, "HTTP must not start when atomic accounting fails").toBe(0);
+    expect(await balanceFor(PROVIDER)).toBe(balanceBefore);
+    expect(await poolSpend("user")).toBe(spendBefore);
   });
 });

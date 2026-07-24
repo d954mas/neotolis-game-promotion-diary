@@ -22,7 +22,7 @@ interface ScriptedSinglePost {
   calls: Array<{ url: string; origin?: string }>;
 }
 const single: ScriptedSinglePost = { next: null, throwErr: null, calls: [] };
-// Controls the claimGate (getSocialSpendToday): default = funded + under cap → run.
+// Controls the claimGate (getSocialProviderSpendToday): default = funded + under cap → run.
 let spend = { creditsUsed: 0, dailyCap: 1000, prepaidBalance: 5000 };
 
 vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (importOriginal) => {
@@ -56,7 +56,7 @@ vi.mock("../../src/lib/sources/instagram/server/provider/registry.js", async (im
 
 vi.mock("../../src/lib/sources/instagram/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, getSocialSpendToday: async () => spend };
+  return { ...actual, getSocialProviderSpendToday: async () => spend };
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");

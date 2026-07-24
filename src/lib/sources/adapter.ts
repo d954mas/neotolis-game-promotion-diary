@@ -455,9 +455,15 @@ export interface MinimalBoss {
   send(
     name: string,
     payload: object,
-    options?: { singletonKey?: string; singletonSeconds?: number; priority?: number },
+    options?: {
+      id?: string;
+      singletonKey?: string;
+      singletonSeconds?: number;
+      priority?: number;
+    },
   ): Promise<string | null>;
-  createQueue(name: string): Promise<unknown>;
+  getJobById?(name: string, id: string): Promise<unknown | null>;
+  createQueue(name: string, options?: { policy?: string }): Promise<unknown>;
 }
 
 export interface RefreshQueueCapability {

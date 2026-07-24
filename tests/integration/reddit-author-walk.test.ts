@@ -8,12 +8,18 @@
 //
 // Requirements: PLAT-04 / behavior (A).
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import authorFixture from "../fixtures/reddit/author-search-page.json";
 import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normalize.js";
+import type { DailyUserRequestAccounting } from "../../src/lib/server/daily-user-quota.js";
 
-const provider = { pages: [] as RedditFeedPage[] };
+const provider = {
+  pages: [] as RedditFeedPage[],
+  errors: [] as Error[],
+  onFetch: null as null | (() => Promise<void>),
+  calls: 0,
+};
 
 function emptyPage(): RedditFeedPage {
   return {
@@ -42,8 +48,44 @@ vi.mock(
     const actual = (await importOriginal()) as Record<string, unknown>;
     return {
       ...actual,
-      fetchRedditFeedPage: async (): Promise<RedditFeedPage> =>
-        provider.pages.shift() ?? emptyPage(),
+      fetchRedditFeedPage: async (
+        _mode: string,
+        _handle: string,
+        _cursor: string | null,
+        opts: {
+          origin?: "cron" | "user";
+          userAccounting?: DailyUserRequestAccounting;
+        },
+      ): Promise<RedditFeedPage> => {
+        if (provider.onFetch !== null) {
+          const onFetch = provider.onFetch;
+          provider.onFetch = null;
+          await onFetch();
+        }
+        const { reserveSocialCredits } =
+          await import("../../src/lib/sources/reddit/server/quota.js");
+        const permit =
+          opts.origin === "user" && opts.userAccounting !== undefined
+            ? await reserveSocialCredits({
+                platform: "reddit",
+                provider: "scrapecreators",
+                origin: "user",
+                units: 1,
+                userAccounting: opts.userAccounting,
+              })
+            : await reserveSocialCredits({
+                platform: "reddit",
+                provider: "scrapecreators",
+                origin: opts.origin ?? "cron",
+                units: 1,
+              });
+        if (permit === null) throw new Error("scripted Reddit reservation denied");
+        provider.calls += 1;
+        const error = provider.errors.shift();
+        if (error !== undefined) throw error;
+        const page = provider.pages.shift() ?? emptyPage();
+        return page;
+      },
     };
   },
 );
@@ -64,11 +106,19 @@ const DAY = 86_400_000;
 const FIXTURE_PAGES = (authorFixture as { pages: unknown[] }).pages;
 const ALL_FIXTURE_POSTS = FIXTURE_PAGES.flatMap((p) => (p as { posts: unknown[] }).posts);
 
-function normalizedFixturePages(): RedditFeedPage[] {
-  return FIXTURE_PAGES.map((p) => normalizeRedditFeed(p));
+// The fixture is frozen from the u/d954mas spike, but each test isolates on a RANDOM
+// handle — stamp the fixture authors to the walked handle so the walker's
+// subject-identity belt (an author walk drops posts NOT by the searched author) sees
+// what a real author-search returns: pages where every post IS by the subject.
+function normalizedFixturePages(handle: string): RedditFeedPage[] {
+  return FIXTURE_PAGES.map((p) => {
+    const page = normalizeRedditFeed(p);
+    for (const post of page.posts) post.author = handle;
+    return page;
+  });
 }
 
-async function seedAccountSource(handle: string): Promise<string> {
+async function seedAccountSource(handle: string, backfillTargetSince?: Date): Promise<string> {
   const user = await seedUserDirectly({
     email: `rdt-walk-${Math.random().toString(36).slice(2)}@t.io`,
   });
@@ -81,6 +131,7 @@ async function seedAccountSource(handle: string): Promise<string> {
       channelId: handle,
       isOwnedByMe: true,
       autoImport: true,
+      backfillTargetSince,
       metadata: { handle },
     })
     .returning({ id: dataSources.id });
@@ -89,13 +140,109 @@ async function seedAccountSource(handle: string): Promise<string> {
 
 beforeEach(() => {
   provider.pages = [];
+  provider.errors = [];
+  provider.onFetch = null;
+  provider.calls = 0;
 });
 
 describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
+  it("[CR-01] a user walk starting at cap-1 never issues page two", async () => {
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
+    const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
+    const handle = `capwalk_${Math.random().toString(36).slice(2, 7)}`;
+    const sourceId = await seedAccountSource(handle);
+    const [source] = await db
+      .select({ userId: dataSources.userId })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId));
+    const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
+    for (let i = 0; i < cap - 1; i++) {
+      await writeAuditStrict({
+        userId: source!.userId,
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: "reddit_account",
+          platform: "reddit_account",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+    provider.pages = [{ ...emptyPage(), nextCursor: "page-2", endOfFeed: false }, emptyPage()];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        triggerUserId: source!.userId,
+        depthBoundIso: new Date(0).toISOString(),
+        flow: "initial",
+      },
+    });
+
+    expect(provider.calls).toBe(1);
+    expect((await getUserQuotaUsedToday(source!.userId, "reddit_account")).requests).toBe(cap);
+    const state = await getRedditBackfillState("reddit_account", handle);
+    expect(state.cursor).toBe("page-2");
+    expect(state.complete).toBe(false);
+  });
+
+  it("[CR-01] a reserved not-found page advances the user's request ledger exactly once", async () => {
+    const sourceId = await seedAccountSource(`missing_${Math.random().toString(36).slice(2, 7)}`);
+    const [source] = await db
+      .select({ userId: dataSources.userId, channelId: dataSources.channelId })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId));
+    const { AdapterError } = await import("../../src/lib/sources/errors.js");
+    const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
+    const before = await getUserQuotaUsedToday(source!.userId, "reddit_account");
+    provider.errors = [new AdapterError("missing", { category: "not-found" })];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: source!.channelId!,
+        triggerUserId: source!.userId,
+        depthBoundIso: new Date(0).toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const after = await getUserQuotaUsedToday(source!.userId, "reddit_account");
+    expect(after.requests - before.requests).toBe(1);
+  });
+
+  it("[CR-01] a reserved authoritative empty first page advances the user's ledger exactly once", async () => {
+    const sourceId = await seedAccountSource(`empty_${Math.random().toString(36).slice(2, 7)}`);
+    const [source] = await db
+      .select({ userId: dataSources.userId, channelId: dataSources.channelId })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId));
+    const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
+    const before = await getUserQuotaUsedToday(source!.userId, "reddit_account");
+    provider.pages = [emptyPage()];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: source!.channelId!,
+        triggerUserId: source!.userId,
+        depthBoundIso: new Date(0).toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const after = await getUserQuotaUsedToday(source!.userId, "reddit_account");
+    expect(after.requests - before.requests).toBe(1);
+  });
+
   it("[12-05] paged author-search accumulates ALL posts across pages + terminates on null-`after`", async () => {
     const handle = `d954mas_${Math.random().toString(36).slice(2, 7)}`;
     await seedAccountSource(handle);
-    provider.pages = normalizedFixturePages();
+    provider.pages = normalizedFixturePages(handle);
 
     await handleBackfillAccount({
       data: {
@@ -114,12 +261,23 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     // The walk terminated on the null-`after` terminal page (complete), not mid-feed.
     const st = await getRedditBackfillState("reddit_account", handle);
     expect(st.complete).toBe(true);
+
+    const [cronSpend] = (
+      await db.execute(sql`
+        SELECT credits_used
+        FROM social_provider_spend
+        WHERE platform = 'reddit'
+          AND provider = 'scrapecreators'
+          AND pool_kind = 'cron'
+      `)
+    ).rows as unknown as Array<{ credits_used: number }>;
+    expect(Number(cronSpend!.credits_used)).toBe(FIXTURE_PAGES.length);
   });
 
   it("[12-05] externalId = post.name (t3_...); every post cached under the t3 fullname", async () => {
     const handle = `d954mas_${Math.random().toString(36).slice(2, 7)}`;
     await seedAccountSource(handle);
-    provider.pages = normalizedFixturePages();
+    provider.pages = normalizedFixturePages(handle);
 
     await handleBackfillAccount({
       data: {
@@ -201,7 +359,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       .from(dataSources)
       .where(eq(dataSources.id, sourceId));
     const userId = ownerRows[0]!.userId;
-    provider.pages = normalizedFixturePages();
+    provider.pages = normalizedFixturePages(handle);
 
     // triggerUserId set → the trigger user pays the per-user cap (audit written).
     await handleBackfillAccount({
@@ -219,5 +377,406 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     const backfill = rows.find((r) => r.action === "source.refresh_content_requested");
     expect(backfill, "a backfill audit row must exist for the trigger user").toBeDefined();
     expect((backfill!.metadata as { platform?: string }).platform).toBe("reddit_account");
+  });
+
+  it("[review-P1] off-subject posts are DROPPED (broad-search fuzz) and the drop suppresses the disappearance reconcile", async () => {
+    const handle = `d954mas_${Math.random().toString(36).slice(2, 7)}`;
+    await seedAccountSource(handle);
+    const mine = `m${Math.random().toString(36).slice(2, 8)}`;
+    const foreign = `x${Math.random().toString(36).slice(2, 8)}`;
+    const tracked = `t${Math.random().toString(36).slice(2, 8)}`;
+
+    // An ESTABLISHED channel with one previously-tracked subject post that the page
+    // below does NOT re-sight — a lossless pass would flag it deleted; the lossy
+    // (off-subject-drop) pass must NOT.
+    await db.insert(redditPosts).values({
+      postId: `t3_${tracked}`,
+      author: handle,
+      subredditSlug: "gamedev",
+      title: "previously tracked",
+      publishedAt: new Date(Date.now() - 1 * DAY),
+      lastPolledAt: new Date(),
+      lastPollStatus: "ok",
+    });
+    await markChannelLastPolledAt("reddit_account", handle);
+
+    const post = (id: string, author: string) => ({
+      name: `t3_${id}`,
+      id,
+      author,
+      author_fullname: `t2_${author}`,
+      subreddit: "gamedev",
+      title: `Devlog ${id}`,
+      selftext: "body",
+      score: 1,
+      num_comments: 0,
+      created_utc: Math.floor((Date.now() - 1 * DAY) / 1000),
+      permalink: `/r/gamedev/comments/${id}/x/`,
+    });
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [post(mine, handle), post(foreign, "someone_else")],
+        after: null,
+      }),
+    ];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 14 * DAY).toISOString(),
+        flow: "auto_passive",
+      },
+    });
+
+    const imported = await db.select().from(events).where(eq(events.kind, "reddit_post"));
+    expect(
+      imported.some((e) => e.externalId === `t3_${mine}`),
+      "subject post imported",
+    ).toBe(true);
+    expect(
+      imported.some((e) => e.externalId === `t3_${foreign}`),
+      "off-subject post must NOT be imported",
+    ).toBe(false);
+    const [foreignCached] = await db
+      .select()
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, `t3_${foreign}`));
+    expect(foreignCached, "off-subject post must NOT be cached").toBeUndefined();
+    const [trackedRow] = await db
+      .select()
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, `t3_${tracked}`));
+    expect(
+      trackedRow!.deletionDetectedAt,
+      "lossy (dropped) pass must not flag disappearances",
+    ).toBeNull();
+  });
+
+  it("[review-P1] a NEW subscriber's DEEPER initial walk re-opens a COMPLETE channel (exhausted must not discard the target)", async () => {
+    const handle = `d954mas_${Math.random().toString(36).slice(2, 7)}`;
+    await seedAccountSource(handle);
+    // Channel already walked COMPLETE to a 7-day frontier.
+    await writeRedditBackfillState("reddit_account", handle, {
+      cursor: null,
+      complete: true,
+      collected: 4,
+      operatorPaused: false,
+      deepTargetIso: null,
+    });
+    await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 7 * DAY));
+    const { markChannelBackfillComplete } =
+      await import("../../src/lib/server/services/channel-state.js");
+    await markChannelBackfillComplete("reddit_account", handle);
+    await markChannelLastPolledAt("reddit_account", handle);
+
+    // THREE pages of history — the deep page cap (30) reaches page 3; the incremental
+    // cap (2) that the buggy `exhausted` branch used would stop before the 40-day post.
+    const mk = (id: string, daysAgo: number, cursor: string | null) =>
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: `t3_${id}`,
+            id,
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "gamedev",
+            title: `Devlog ${id}`,
+            selftext: "body",
+            score: 1,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - daysAgo * DAY) / 1000),
+            permalink: `/r/gamedev/comments/${id}/x/`,
+          },
+        ],
+        after: cursor,
+      });
+    const deepId = `d${Math.random().toString(36).slice(2, 8)}`;
+    provider.pages = [
+      mk(`a${Math.random().toString(36).slice(2, 8)}`, 2, "c2"),
+      mk(`b${Math.random().toString(36).slice(2, 8)}`, 20, "c3"),
+      mk(deepId, 40, null),
+    ];
+
+    // A new tenant's INITIAL walk requests 60 days of history — deeper than the frontier.
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 60 * DAY).toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const imported = await db.select().from(events).where(eq(events.kind, "reddit_post"));
+    expect(
+      imported.some((e) => e.externalId === `t3_${deepId}`),
+      "page-3 (40-day) post imported — the deep walk re-opened past the stale frontier",
+    ).toBe(true);
+  });
+
+  it("[CR-04] a subscriber added during an active walk widens the target without losing history", async () => {
+    const handle = `race_${Math.random().toString(36).slice(2, 7)}`;
+    const shallowTarget = new Date(Date.now() - 7 * DAY);
+    const deepTarget = new Date(Date.now() - 60 * DAY);
+    await seedAccountSource(handle, shallowTarget);
+
+    const mk = (id: string, daysAgo: number) =>
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: `t3_${id}`,
+            id,
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "gamedev",
+            title: `Devlog ${id}`,
+            selftext: "body",
+            score: 1,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - daysAgo * DAY) / 1000),
+            permalink: `/r/gamedev/comments/${id}/x/`,
+          },
+        ],
+        after: null,
+      });
+    const shallowStop = `s${Math.random().toString(36).slice(2, 8)}`;
+    const deepId = `d${Math.random().toString(36).slice(2, 8)}`;
+    provider.pages = [mk(shallowStop, 10), mk(deepId, 40)];
+    provider.onFetch = async () => {
+      await seedAccountSource(handle, deepTarget);
+    };
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: shallowTarget.toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const imported = await db.select().from(events).where(eq(events.kind, "reddit_post"));
+    expect(
+      imported.some((event) => event.externalId === `t3_${deepId}`),
+      "active walk follows the deepest subscriber target",
+    ).toBe(true);
+  });
+
+  it("[CR-01] real pg-boss defers a same-channel outbox intent and delivers it once after release", async () => {
+    const { PgBoss } = await import("pg-boss");
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { REDDIT_WALK_QUEUE_OPTIONS } = await import("../../src/lib/server/queues.js");
+    const { createSource } = await import("../../src/lib/server/services/data-sources.js");
+    const { drainOutboxOnce } = await import("../../src/worker/handlers/outbox-forwarder.js");
+    const queue = `reddit.test.exclusive.${Math.random().toString(36).slice(2, 10)}`;
+    const handle = `outbox_race_${Math.random().toString(36).slice(2, 7)}`;
+    const shallow = new Date(Date.now() - 7 * DAY);
+    const deep = new Date(Date.now() - 60 * DAY);
+    const first = await seedUserDirectly({ email: `rdt-outbox-a-${handle}@t.io` });
+    const second = await seedUserDirectly({ email: `rdt-outbox-b-${handle}@t.io` });
+    const boss = new PgBoss({ connectionString: env.DATABASE_URL });
+    boss.on("error", () => undefined);
+
+    await boss.start();
+    try {
+      await boss.createQueue(queue, REDDIT_WALK_QUEUE_OPTIONS);
+      expect((await boss.getQueue(queue))!.policy).toBe("exclusive");
+
+      await createSource(
+        first.id,
+        {
+          kind: "reddit_account",
+          handleUrl: `https://www.reddit.com/user/${handle}`,
+          autoImport: true,
+          backfillTargetSince: shallow,
+        },
+        "127.0.0.1",
+      );
+      await db.execute(sql`
+        UPDATE outbox SET queue = ${queue}
+        WHERE payload->>'channelKey' = ${handle} AND forwarded_at IS NULL
+      `);
+      await drainOutboxOnce(boss);
+
+      const [shallowOutbox] = (
+        await db.execute(sql`
+          SELECT id, forwarded_at
+          FROM outbox
+          WHERE payload->>'channelKey' = ${handle}
+        `)
+      ).rows as unknown as Array<{ id: string; forwarded_at: Date | null }>;
+      expect(
+        shallowOutbox!.forwarded_at,
+        "successful send clears the pending intent",
+      ).not.toBeNull();
+      const [shallowJob] = await boss.fetch(queue);
+      expect(shallowJob!.id, "outbox id is the crash-idempotent pg-boss id").toBe(
+        shallowOutbox!.id,
+      );
+
+      // Simulate a crash after boss.send succeeded but before forwarded_at was stored.
+      await db.execute(sql`
+        UPDATE outbox
+        SET forwarded_at = NULL, last_attempt_at = NOW() - interval '61 seconds'
+        WHERE id = ${shallowOutbox!.id}
+      `);
+      await drainOutboxOnce(boss);
+      const afterCrashRetry = await boss.findJobs(queue, { id: shallowOutbox!.id });
+      expect(afterCrashRetry, "crash retry must not create a duplicate active job").toHaveLength(1);
+
+      await createSource(
+        second.id,
+        {
+          kind: "reddit_account",
+          handleUrl: `https://www.reddit.com/user/${handle}`,
+          autoImport: true,
+          backfillTargetSince: deep,
+        },
+        "127.0.0.1",
+      );
+      await db.execute(sql`
+        UPDATE outbox SET queue = ${queue}
+        WHERE payload->>'channelKey' = ${handle} AND forwarded_at IS NULL
+      `);
+      await drainOutboxOnce(boss);
+
+      const [deepPending] = (
+        await db.execute(sql`
+          SELECT id, payload, forwarded_at, forwarder_attempt
+          FROM outbox
+          WHERE payload->>'channelKey' = ${handle}
+            AND payload->>'depthBoundIso' = ${deep.toISOString()}
+        `)
+      ).rows as unknown as Array<{
+        id: string;
+        payload: { depthBoundIso: string };
+        forwarded_at: Date | null;
+        forwarder_attempt: number;
+      }>;
+      expect(deepPending!.forwarded_at, "exclusive-key conflict stays durable").toBeNull();
+      expect(deepPending!.forwarder_attempt).toBe(0);
+      expect(await boss.fetch(queue), "no duplicate same-key job becomes active").toHaveLength(0);
+
+      await boss.complete(queue, shallowJob!.id);
+      await db.execute(sql`
+        UPDATE outbox
+        SET last_attempt_at = NOW() - interval '61 seconds'
+        WHERE id = ${deepPending!.id}
+      `);
+      await drainOutboxOnce(boss);
+
+      const [deepJob] = await boss.fetch<{ depthBoundIso: string }>(queue);
+      expect(deepJob!.id).toBe(deepPending!.id);
+      expect(deepJob!.data.depthBoundIso).toBe(deep.toISOString());
+      expect(await boss.fetch(queue), "the deeper intent is delivered exactly once").toHaveLength(
+        0,
+      );
+      await boss.complete(queue, deepJob!.id);
+    } finally {
+      await boss.deleteQueue(queue).catch(() => undefined);
+      await boss.stop({ graceful: false });
+    }
+  });
+
+  it("[certification] concurrent manual pulls remain durable for non-auto-import tenants", async () => {
+    const { getBoss } = await import("../../src/lib/server/queue-client.js");
+    const { QUEUES, REDDIT_WALK_QUEUE_OPTIONS } = await import("../../src/lib/server/queues.js");
+    const { redditAdapter } = await import("../../src/lib/sources/reddit/server/index.js");
+    const { drainOutboxOnce } = await import("../../src/worker/handlers/outbox-forwarder.js");
+    const handle = `manual_race_${Math.random().toString(36).slice(2, 7)}`;
+    const first = await seedUserDirectly({ email: `rdt-manual-a-${handle}@t.io` });
+    const second = await seedUserDirectly({ email: `rdt-manual-b-${handle}@t.io` });
+    const boss = await getBoss();
+    await boss.deleteQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT).catch(() => undefined);
+    await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT, REDDIT_WALK_QUEUE_OPTIONS);
+
+    const [firstSource, secondSource] = await db
+      .insert(dataSources)
+      .values([
+        {
+          userId: first.id,
+          kind: "reddit_account" as const,
+          handleUrl: `https://www.reddit.com/user/${handle}`,
+          channelId: handle,
+          autoImport: false,
+          metadata: { handle },
+        },
+        {
+          userId: second.id,
+          kind: "reddit_account" as const,
+          handleUrl: `https://www.reddit.com/user/${handle}`,
+          channelId: handle,
+          autoImport: false,
+          metadata: { handle },
+        },
+      ])
+      .returning({
+        id: dataSources.id,
+        userId: dataSources.userId,
+        metadata: dataSources.metadata,
+      });
+
+    const firstIntent = await redditAdapter.backfillSource(
+      {
+        id: firstSource!.id,
+        userId: firstSource!.userId,
+        metadata: firstSource!.metadata as Record<string, unknown>,
+      },
+      { userId: first.id, origin: "user" },
+    );
+    const secondIntent = await redditAdapter.backfillSource(
+      {
+        id: secondSource!.id,
+        userId: secondSource!.userId,
+        metadata: secondSource!.metadata as Record<string, unknown>,
+      },
+      { userId: second.id, origin: "user" },
+    );
+
+    expect(firstIntent.jobId).not.toBeNull();
+    expect(secondIntent.jobId, "exclusive conflict must be durably recorded").not.toBeNull();
+    expect(secondIntent.jobId).not.toBe(firstIntent.jobId);
+
+    await drainOutboxOnce(boss);
+    const [firstJob] = await boss.fetch<{ triggerUserId: string }>(QUEUES.REDDIT_BACKFILL_ACCOUNT);
+    const pendingIntent =
+      firstJob!.data.triggerUserId === first.id
+        ? { id: secondIntent.jobId!, userId: second.id }
+        : { id: firstIntent.jobId!, userId: first.id };
+
+    const [pendingSecond] = (
+      await db.execute(sql`
+        SELECT id, forwarded_at, forwarder_attempt
+        FROM outbox
+        WHERE id = ${pendingIntent.id}
+      `)
+    ).rows as unknown as Array<{
+      id: string;
+      forwarded_at: Date | null;
+      forwarder_attempt: number;
+    }>;
+    expect(pendingSecond!.forwarded_at).toBeNull();
+    expect(pendingSecond!.forwarder_attempt).toBe(0);
+
+    await boss.complete(QUEUES.REDDIT_BACKFILL_ACCOUNT, firstJob!.id);
+    await db.execute(sql`
+      UPDATE outbox
+      SET last_attempt_at = NOW() - interval '61 seconds'
+      WHERE id = ${pendingIntent.id}
+    `);
+    await drainOutboxOnce(boss);
+
+    const [secondJob] = await boss.fetch<{ triggerUserId: string }>(QUEUES.REDDIT_BACKFILL_ACCOUNT);
+    expect(secondJob!.id).toBe(pendingIntent.id);
+    expect(secondJob!.data.triggerUserId).toBe(pendingIntent.userId);
+    expect(
+      await boss.fetch(QUEUES.REDDIT_BACKFILL_ACCOUNT),
+      "manual intent is delivered exactly once",
+    ).toHaveLength(0);
+    await boss.complete(QUEUES.REDDIT_BACKFILL_ACCOUNT, secondJob!.id);
   });
 });

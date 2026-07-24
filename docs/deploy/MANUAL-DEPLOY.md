@@ -108,9 +108,6 @@ Add any new keys to `.env`. **Phase 12 (Reddit) added:**
 | `REDDIT_IMPORT_ENABLED` | yes to enable Reddit | Default `false` (import stays OFF). Set to the literal `true` to turn it on — the legally-hot platform never auto-enables just because a provider + key are present. |
 | `REDDIT_PROVIDER` | yes to enable Reddit | Set to `scrapecreators` (the only buildable value). Empty (default) => Reddit is "not configured": the add-source Reddit chip renders disabled and no scraper credits are spent. |
 | `SCRAPECREATORS_API_KEY` | shared | The SAME prepaid ScrapeCreators key you already use for Instagram + TikTok — Reddit draws from the ONE shared credit balance. No new key, no new budget vars. |
-| `REDDIT_WARM_WINDOW_DAYS` | no | Default `2`. Reddit posts stabilize in 1-2 days, so the metric-refresh warm window is short (vs IG/TikTok's 7). |
-| `REDDIT_WARM_STALENESS_HOURS` | no | Default `26` — just over the 24h free daily walk, so a page-1 post never double-pays for a refresh. |
-| `REDDIT_WARM_MAX_FAILURES` | no | Default `5` consecutive non-ok polls before a post retires from the warm lane. |
 
 > **Reddit is a paid ScrapeCreators adapter, default-OFF.** Phase 12 razed
 > the old free public-`.json` transport (whole datacenter proxy pools were
@@ -241,7 +238,7 @@ For Phase 12 (Reddit), also verify — only if you enabled it (`REDDIT_IMPORT_EN
 - `/admin/quota` → the shared ScrapeCreators budget (Instagram + TikTok +
   Reddit) is visible; Reddit spend draws it down.
 - `docker compose logs worker | grep -i reddit` — confirms the adapter
-  imports posts and the warm-refresh lane drains without errors.
+  imports posts and runs the active/cold subject walks without errors.
 
 ---
 

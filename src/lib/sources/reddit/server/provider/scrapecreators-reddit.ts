@@ -25,6 +25,7 @@ import { env } from "$lib/server/config/env.js";
 import { redditFetch } from "../http.js";
 import { normalizeRedditFeed, type RedditFeedPage } from "../normalize.js";
 import { redditParsePostUrl } from "../url.js";
+import type { DailyUserRequestAccounting } from "$lib/server/daily-user-quota.js";
 import type {
   NormalizedSinglePost,
   ProviderOrigin,
@@ -43,6 +44,24 @@ const SUBREDDIT_PATH = "/v1/reddit/subreddit";
  *  walker (Plan 12-05) calls `fetchRedditFeedPage` directly with the mode. */
 export type RedditFeedMode = "author" | "subreddit";
 
+export type RedditPostFetchOptions =
+  | {
+      origin?: ProviderOrigin;
+      userAccounting?: never;
+    }
+  | {
+      origin: "user";
+      userAccounting: DailyUserRequestAccounting;
+    };
+
+export type RedditSocialProvider = Omit<SocialProvider, "fetchPostByUrl"> & {
+  fetchPostByUrl(
+    platform: SocialPlatform,
+    url: string,
+    opts: RedditPostFetchOptions,
+  ): Promise<NormalizedSinglePost | null>;
+};
+
 /**
  * Fetch ONE page of a Reddit feed (author-search OR native subreddit) and map it
  * through the pure normalizer to the tree-local RedditFeedPage. This is the real
@@ -56,7 +75,7 @@ export async function fetchRedditFeedPage(
   mode: RedditFeedMode,
   handle: string,
   cursor: string | null,
-  opts: { origin?: ProviderOrigin },
+  opts: RedditPostFetchOptions,
 ): Promise<RedditFeedPage> {
   const url =
     mode === "author"
@@ -82,13 +101,13 @@ export async function fetchRedditFeedPage(
     platform: "reddit",
     provider: scrapeCreatorsRedditProvider.name,
     logTag: mode === "author" ? "reddit.search" : "reddit.subreddit",
-    origin: opts.origin,
+    ...opts,
   });
   const json: unknown = await resp.json();
   return normalizeRedditFeed(json);
 }
 
-export const scrapeCreatorsRedditProvider: SocialProvider = {
+export const scrapeCreatorsRedditProvider: RedditSocialProvider = {
   // BUDGET KEY, not a registry identity: `name` is the value the HTTP seam
   // (redditFetch) passes to reserveSocialCredits + the OBS metric as `provider`.
   // The prepaid ledger (social_provider_balance / social_provider_spend) + the
@@ -138,7 +157,7 @@ export const scrapeCreatorsRedditProvider: SocialProvider = {
   async fetchPostByUrl(
     platform: SocialPlatform,
     url: string,
-    opts: { origin?: ProviderOrigin },
+    opts: RedditPostFetchOptions,
   ): Promise<NormalizedSinglePost | null> {
     // Host-check-first parse (T-12-03-T): a non-Reddit URL can never reach the
     // provider. ScrapeCreators exposes no single-post-by-id endpoint (only
@@ -152,7 +171,7 @@ export const scrapeCreatorsRedditProvider: SocialProvider = {
     const subreddit = (parsed.metadata?.subreddit as string | null | undefined) ?? null;
     if (subreddit === null) return null; // redd.it short-link: sub not in URL (Plan 12-06)
 
-    const page = await fetchRedditFeedPage("subreddit", subreddit, null, { origin: opts.origin });
+    const page = await fetchRedditFeedPage("subreddit", subreddit, null, opts);
     void platform;
     const fullname = `t3_${parsed.externalId}`;
     const match = page.posts.find((p) => p.id === fullname);

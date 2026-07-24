@@ -31,19 +31,21 @@
 // for an operator-owned prepaid pool.
 
 import { and, eq, sql } from "drizzle-orm";
-import { db } from "$lib/server/db/client.js";
+import { db, type Tx } from "$lib/server/db/client.js";
 import { socialProviderSpend, socialProviderBalance } from "$lib/server/db/schema/index.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { user } from "$lib/server/db/schema/auth.js";
 import { env } from "$lib/server/config/env.js";
 import { todayPacific } from "$lib/server/dates.js";
-import { writeAudit } from "$lib/server/audit.js";
+import { writeAudit, writeAuditTx } from "$lib/server/audit.js";
+import {
+  getTransactionTimestamp,
+  lockAndAssertDailyUserRequestQuota,
+  type DailyUserRequestAccounting,
+} from "$lib/server/daily-user-quota.js";
 import { logger } from "$lib/server/logger.js";
 
 export { todayPacific };
-
-// Drizzle's transaction generic surface (same pattern as youtube/server/quota.ts).
-type DbCtx = typeof db | Parameters<Parameters<(typeof db)["transaction"]>[0]>[0];
 
 export type SocialThrottleState = "ok" | "eighty" | "ninetyfive";
 export type SocialQuotaPool = "cron" | "user";
@@ -54,6 +56,21 @@ export interface SocialCreditPermit {
   poolKind: SocialQuotaPool;
   units: number;
 }
+
+type SocialCreditReservationArgs = {
+  platform: string;
+  provider: string;
+  units: number;
+} & (
+  | {
+      origin: SocialQuotaPool;
+      userAccounting?: undefined;
+    }
+  | {
+      origin: "user";
+      userAccounting: DailyUserRequestAccounting;
+    }
+);
 
 // Thresholds + pool split are derived from env.SOCIAL_PROVIDER_DAILY_CAP_CREDITS
 // at CALL TIME (not as frozen module constants) so an operator setting the cap
@@ -111,18 +128,13 @@ let cachedOperatorId: string | null | undefined;
  *   - the chosen pool would exceed its daily limit, OR
  *   - total daily spend would cross the 95% throttle.
  */
-export async function reserveSocialCredits(args: {
-  platform: string;
-  provider: string;
-  origin: SocialQuotaPool;
-  units: number;
-  now?: Date;
-}): Promise<SocialCreditPermit | null> {
+export async function reserveSocialCredits(
+  args: SocialCreditReservationArgs,
+): Promise<SocialCreditPermit | null> {
   if (!Number.isInteger(args.units) || args.units <= 0) {
     throw new Error("Social provider credit units must be a positive integer");
   }
 
-  const datePacific = todayPacific(args.now ?? new Date());
   const { platform, provider, origin } = args;
   const poolLimit = origin === "cron" ? cronPoolDaily() : userPoolDaily();
   const eighty = throttleEighty();
@@ -136,7 +148,20 @@ export async function reserveSocialCredits(args: {
   let balanceExhausted = false;
   let totalAfterReserve = 0;
 
-  const run = async (tx: DbCtx): Promise<SocialCreditPermit | null> => {
+  const run = async (
+    tx: Tx,
+  ): Promise<{ permit: SocialCreditPermit | null; datePacific: string }> => {
+    const transactionNow = await getTransactionTimestamp(tx);
+    const datePacific = todayPacific(transactionNow);
+    if (args.userAccounting !== undefined) {
+      await lockAndAssertDailyUserRequestQuota(tx, {
+        userId: args.userAccounting.auditEntry.userId,
+        platform: args.userAccounting.auditEntry.metadata.platform,
+        units: args.units,
+        requestsPerDay: args.userAccounting.requestsPerDay,
+      });
+    }
+
     // Seed today's counter rows (both pools) + the prepaid balance row.
     await tx
       .insert(socialProviderSpend)
@@ -204,10 +229,10 @@ export async function reserveSocialCredits(args: {
     const totalUsed = cronUsed + userUsed;
 
     // Hard ceiling: never spend more than the funded prepaid balance (D-16).
-    if (prepaidBalance < args.units) return null;
+    if (prepaidBalance < args.units) return { permit: null, datePacific };
     // Pool envelope + 95% throttle gate (mirrors YouTube candidate filter).
-    if (poolUsed + args.units > poolLimit) return null;
-    if (totalUsed + args.units > ninetyfive) return null;
+    if (poolUsed + args.units > poolLimit) return { permit: null, datePacific };
+    if (totalUsed + args.units > ninetyfive) return { permit: null, datePacific };
 
     // Increment the daily counter AND decrement the prepaid balance in the
     // same tx — reserve-before-HTTP.
@@ -233,6 +258,16 @@ export async function reserveSocialCredits(args: {
       })
       .where(eq(socialProviderBalance.provider, provider));
 
+    if (args.userAccounting !== undefined) {
+      await writeAuditTx(tx, {
+        ...args.userAccounting.auditEntry,
+        metadata: {
+          ...args.userAccounting.auditEntry.metadata,
+          requests_used: args.units,
+        },
+      });
+    }
+
     // Compute the daily-cap throttle band crossing + prepaid-balance exhaustion
     // for THIS reservation (before vs after). Emitted after commit below.
     const totalBefore = totalUsed;
@@ -242,13 +277,17 @@ export async function reserveSocialCredits(args: {
     crossedNinetyfive = totalBefore < ninetyfive && totalAfter >= ninetyfive;
     balanceExhausted = prepaidBalance - args.units <= 0;
 
-    return { platform, provider, poolKind: origin, units: args.units };
+    return {
+      permit: { platform, provider, poolKind: origin, units: args.units },
+      datePacific,
+    };
   };
 
   // Own transaction always (never an external tx) so the operator audit below is
   // unambiguously post-commit: a caller's tx that later rolled back would persist
   // the audit + trip the in-memory once-per-cycle guards while the spend reverted.
-  const permit = await db.transaction(run);
+  const reservation = await db.transaction(run);
+  const permit = reservation.permit;
 
   // Operator audit AFTER commit (a denied reservation returns null and crosses
   // nothing → no-op). Each fn is idempotent per (date, state) / (platform,
@@ -260,7 +299,7 @@ export async function reserveSocialCredits(args: {
         provider,
         state: "eighty",
         creditsUsed: totalAfterReserve,
-        datePacific,
+        datePacific: reservation.datePacific,
       });
     }
     if (crossedNinetyfive) {
@@ -269,11 +308,15 @@ export async function reserveSocialCredits(args: {
         provider,
         state: "ninetyfive",
         creditsUsed: totalAfterReserve,
-        datePacific,
+        datePacific: reservation.datePacific,
       });
     }
     if (balanceExhausted) {
-      await markSocialBudgetExhausted({ platform, provider, datePacific });
+      await markSocialBudgetExhausted({
+        platform,
+        provider,
+        datePacific: reservation.datePacific,
+      });
     }
   }
 
@@ -355,6 +398,41 @@ export async function getSocialSpendToday(
     dailyCap: dailyCap(),
     // The funded balance. Absent row => the operator's configured envelope
     // (nothing has been spent yet).
+    prepaidBalance:
+      balanceRows.length > 0
+        ? Number(balanceRows[0]!.balance)
+        : env.SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS,
+  };
+}
+
+/**
+ * PROVIDER-WIDE spend read for GATE math — no platform filter. The daily cap +
+ * prepaid balance are provider-wide (one real ScrapeCreators account, D-01), so any
+ * gate comparing creditsUsed against the cap must sum ACROSS platforms — exactly the
+ * joint math reserveSocialCredits locks on. The platform-filtered getSocialSpendToday
+ * above stays for /admin attribution and per-platform observability only.
+ */
+export async function getSocialProviderSpendToday(
+  provider: string,
+  now: Date = new Date(),
+): Promise<{ creditsUsed: number; dailyCap: number; prepaidBalance: number }> {
+  const datePacific = todayPacific(now);
+  const spendRows = await db
+    .select({ credits: sql<number>`SUM(${socialProviderSpend.creditsUsed})::int` })
+    .from(socialProviderSpend)
+    .where(
+      and(
+        eq(socialProviderSpend.datePacific, datePacific),
+        eq(socialProviderSpend.provider, provider),
+      ),
+    );
+  const balanceRows = await db
+    .select({ balance: socialProviderBalance.prepaidBalanceCredits })
+    .from(socialProviderBalance)
+    .where(eq(socialProviderBalance.provider, provider));
+  return {
+    creditsUsed: Number(spendRows[0]?.credits ?? 0),
+    dailyCap: dailyCap(),
     prepaidBalance:
       balanceRows.length > 0
         ? Number(balanceRows[0]!.balance)

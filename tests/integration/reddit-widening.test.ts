@@ -15,6 +15,7 @@ import { seedUserDirectly } from "./helpers.js";
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { outbox } = await import("../../src/lib/server/db/schema/index.js");
+const { QUEUES } = await import("../../src/lib/server/queues.js");
 const { redditAdapter } = await import("../../src/lib/sources/reddit/server/index.js");
 const { getRedditBackfillState, writeRedditBackfillState } =
   await import("../../src/lib/sources/reddit/server/backfill-state.js");
@@ -91,7 +92,7 @@ describe("reddit resetWalkerStateOnWidening (review P1)", () => {
     const rows = await db
       .select({ payload: outbox.payload })
       .from(outbox)
-      .where(eq(outbox.queue, "reddit.backfill.account"));
+      .where(eq(outbox.queue, QUEUES.REDDIT_BACKFILL_ACCOUNT));
     const reopen = rows.find(
       (r) =>
         (r.payload as { channelKey?: string }).channelKey === handle &&
@@ -135,7 +136,7 @@ describe("reddit resetWalkerStateOnWidening (review P1)", () => {
     const rows = await db
       .select({ payload: outbox.payload })
       .from(outbox)
-      .where(eq(outbox.queue, "reddit.backfill.account"));
+      .where(eq(outbox.queue, QUEUES.REDDIT_BACKFILL_ACCOUNT));
     const reopen = rows.find((r) => (r.payload as { channelKey?: string }).channelKey === handle);
     expect(reopen).toBeUndefined();
   });

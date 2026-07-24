@@ -113,6 +113,12 @@ cannot be rolled back in place.
   dead in production; the rebuild starts from a clean schema), not a bug. Non-Reddit data
   (games, events, other sources) is untouched. If you never enabled Reddit import, you
   have nothing to lose here — but take the backup anyway.
+- **⚠️ Migration `0073` also deletes your registered Reddit *sources*.** The legacy
+  rows stored walk keys in an old metadata shape the rebuilt walker cannot use, so
+  they are removed rather than left permanently broken. **Re-add your Reddit
+  profile / subreddit sources after upgrading.** Diary events imported from them
+  survive — they detach from the deleted source (like manually-pasted events) and
+  re-gain live stats once the rebuilt importer re-caches the posts.
 
 ## Notes
 

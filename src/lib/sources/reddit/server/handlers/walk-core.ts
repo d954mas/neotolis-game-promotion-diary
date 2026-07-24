@@ -22,11 +22,11 @@
 //   - DAILY INCREMENTAL poll: bounded to K = INCREMENTAL_PAGE_CAP (2) pages — the
 //     firehose bound. A busy subreddit is capped to ~2 credits/poll; a legit
 //     low-traffic source hits end-of-feed / the window first.
-//   - A LEGIT low-traffic source lands at ≤~5 credits/day: K=2 daily walk + at most ~1
-//     warm one-shot catch per post that fell off the walk. A mistaken FIREHOSE source is
-//     NOT bounded to ~5/day by the per-tick warm cap (see warm-eligibility.ts SCOPE note)
-//     — its hard ceiling is the inherited per-user LIMIT_SOCIAL_REQUESTS_PER_DAY + the
-//     operator 80/95% budget throttle (the real money stops).
+//   - A LEGIT low-traffic source lands at ≤~2 credits/day (K=2 daily walk; the warm
+//     per-post catch lane was DISABLED — no lookup-by-id endpoint, see poll-cron.ts).
+//     A mistaken FIREHOSE source's hard ceiling is the inherited per-user
+//     LIMIT_SOCIAL_REQUESTS_PER_DAY + the operator 80/95% budget throttle (the real
+//     money stops).
 
 import { and, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -46,6 +46,7 @@ import {
   markChannelBackfillFrontier,
   markChannelBackfillComplete,
 } from "$lib/server/services/channel-state.js";
+import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { getSocialProvider } from "../provider/registry.js";
 import { fetchRedditFeedPage, type RedditFeedMode } from "../provider/scrapecreators-reddit.js";
@@ -134,17 +135,19 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
   // Active subscribers for this channel. CROSS-TENANT BY DESIGN — channel-scoped
   // fan-out (channelKey is the immutable username/slug, stored on channelId).
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out (see header)
-  const subscribers = await db
-    .select()
-    .from(dataSources)
-    .where(
-      and(
-        eq(dataSources.kind, config.kind),
-        eq(dataSources.channelId, channelKey),
-        isNull(dataSources.deletedAt),
-      ),
-    );
+  const loadSubscribers = async () =>
+    // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out (see header)
+    db
+      .select()
+      .from(dataSources)
+      .where(
+        and(
+          eq(dataSources.kind, config.kind),
+          eq(dataSources.channelId, channelKey),
+          isNull(dataSources.deletedAt),
+        ),
+      );
+  let subscribers = await loadSubscribers();
   if (subscribers.length === 0) {
     logger.info({ jobId: job.id, channelKey }, `${config.queue}: no active subscribers; skipping`);
     return;
@@ -188,14 +191,23 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   let branch: "exhausted" | "incremental" | "deep";
   if (job.data.forceDeep === true) branch = "deep";
   else if (deepResume) branch = "deep";
-  else if (channelState?.backfillComplete === true) branch = "exhausted";
-  else if (deepestWalked !== null && jobTarget.getTime() >= deepestWalked.getTime())
+  else if (channelState?.backfillComplete === true) {
+    // A COMPLETE channel is exhausted for every flow EXCEPT a new subscriber's
+    // `initial` walk whose target is DEEPER than the walked frontier (review fix):
+    // trusting `exhausted` there silently discards the new tenant's history request.
+    // Only `initial` re-opens — a manual "Pull new content" (flow incremental,
+    // EPOCH_ISO target) must stay the cheap newest-first sweep, and the PATCH-widen
+    // path re-opens via resetWalkerStateOnWidening + forceDeep.
+    branch =
+      flow === "initial" && deepestWalked !== null && jobTarget.getTime() < deepestWalked.getTime()
+        ? "deep"
+        : "exhausted";
+  } else if (deepestWalked !== null && jobTarget.getTime() >= deepestWalked.getTime())
     branch = "incremental";
   else branch = "deep";
 
   const isDeep = branch === "deep";
   const pageCap = isDeep ? DEEP_PAGE_CAP : INCREMENTAL_PAGE_CAP;
-  const origin: "cron" | "user" = triggerUserId ? "user" : "cron";
 
   // A resumed deep walks to its PERSISTED target (set when the deep first started);
   // every other pass uses the job's target. Fan-out still filters imports per-subscriber
@@ -216,6 +228,18 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       deepTargetIso: null,
     };
   } else {
+    // A deep pass RE-OPENED on a COMPLETED sub-state (initial-deeper / forceDeep
+    // without the widen hook's reset) must restart from the top with a fresh cursor
+    // — otherwise the `state.complete` short-circuit below no-ops the whole pass.
+    if (state0.complete) {
+      state = {
+        cursor: null,
+        complete: false,
+        collected: 0,
+        operatorPaused: state0.operatorPaused,
+        deepTargetIso: null,
+      };
+    }
     state.deepTargetIso = target.toISOString();
   }
   // Only a pass that STARTED at the top of the feed (cursor null) has coverage that is
@@ -231,12 +255,16 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   let requestsUsed = 0;
   let pausedByBudget = false;
   let pausedByRateLimit = false;
+  let pausedByUserQuota = false;
   let notFound = false;
   let walkedThisTick = false;
   let fetchedThisTick = 0;
   let droppedThisTick = 0;
   let crossedBound = false;
 
+  // Reserve the paid credit and write its per-user accounting row atomically before
+  // HTTP. A provider error therefore still counts exactly once, while an accounting
+  // failure rolls back the reservation and prevents the request from starting.
   // ── Walk pages within this invocation to the branch's coverage boundary ──
   for (let pageNo = 0; pageNo < pageCap; pageNo++) {
     if (state.complete) break;
@@ -248,16 +276,36 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
     let page: Awaited<ReturnType<typeof fetchRedditFeedPage>>;
     try {
-      page = await fetchRedditFeedPage(config.mode, channelKey, state.cursor, { origin });
+      const fetchOptions =
+        triggerUserId === undefined
+          ? ({ origin: "cron" } as const)
+          : ({
+              origin: "user",
+              userAccounting: {
+                requestsPerDay: env.LIMIT_SOCIAL_REQUESTS_PER_DAY,
+                auditEntry: {
+                  userId: triggerUserId,
+                  action: "source.refresh_content_requested",
+                  ipAddress: "0.0.0.0",
+                  metadata: {
+                    kind: config.kind,
+                    platform: config.kind,
+                    channel_key: channelKey,
+                    flow,
+                    queue: config.queue,
+                    job_id: job.id ?? null,
+                    requests_used: 1,
+                    events_inserted: 0,
+                    since_branch: branch,
+                  },
+                },
+              },
+            } as const);
+      page = await fetchRedditFeedPage(config.mode, channelKey, state.cursor, fetchOptions);
     } catch (err) {
-      if (err instanceof AdapterError) {
-        // A paid HTTP request that was ISSUED still spent its reserved credit even when
-        // it then failed (404/429/5xx) — reserve-before-HTTP debits the budget the moment
-        // the request goes out, so it must count against the per-user cap. The HTTP-status
-        // throws carry a numeric `context.status`; a reserve-null DENIAL (budget exhausted
-        // / throttled) carries none — it issued no request and spent nothing. (1 credit /
-        // reddit page — http.ts reserves creditsUsed ?? 1.)
-        if (typeof err.context.status === "number") requestsUsed += 1;
+      if (err instanceof AppError && err.code === "requests_quota_exhausted") {
+        pausedByUserQuota = true;
+      } else if (err instanceof AdapterError) {
         if (err.category === "rate-limited") {
           pausedByRateLimit = true;
         } else if (err.category === "operator-issue") {
@@ -277,7 +325,32 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     fetchedThisTick += page.posts.length;
     droppedThisTick += page.droppedCount;
 
-    for (const post of page.posts) {
+    // Subject-identity belt (review fix): the author walk is a broad
+    // `search?query=author:<handle>` — a page may carry posts NOT by the walked
+    // subject (fuzzy match / provider drift). An off-subject post must never be
+    // cached under this walk or fan out into diaries as the subject's own content.
+    // Dropped rows count as lossy coverage (droppedThisTick), which suppresses the
+    // disappearance reconcile this tick — a mismatch is never deletion evidence.
+    // Author mode is STRICT (the search endpoint is the fuzzy one); subreddit mode
+    // drops only a PRESENT-but-different slug — the native subreddit feed is scoped
+    // by construction and may omit the `subreddit` field (writeSnapshot below
+    // backfills it from channelKey).
+    const channelKeyLower = channelKey.toLowerCase();
+    const subjectPosts = page.posts.filter((post) =>
+      config.mode === "author"
+        ? post.author !== null && post.author.toLowerCase() === channelKeyLower
+        : post.subredditSlug === null || post.subredditSlug === channelKeyLower,
+    );
+    const offSubject = page.posts.length - subjectPosts.length;
+    if (offSubject > 0) {
+      droppedThisTick += offSubject;
+      logger.warn(
+        { jobId: job.id, channelKey, mode: config.mode, offSubject },
+        `${config.queue}: dropped off-subject posts from provider page`,
+      );
+    }
+
+    for (const post of subjectPosts) {
       // Frontier + reconciliation window bookkeeping BEFORE the bound break, so an
       // all-older page still records a non-null frontier + oldest-seen.
       if (oldestSeenPublishedAt === null || post.publishedAt < oldestSeenPublishedAt) {
@@ -317,7 +390,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
     // Seed the subject entity from the page (minimal — Reddit exposes no profile
     // endpoint; the username/slug IS the immutable key). Best-effort.
-    await seedSubject(config, channelKey, page.posts).catch((err) =>
+    await seedSubject(config, channelKey, subjectPosts).catch((err) =>
       logger.warn(
         { jobId: job.id, channelKey, err: String((err as Error)?.message ?? err) },
         `${config.queue}: subject upsert failed (non-fatal)`,
@@ -331,7 +404,29 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     }
   }
 
-  const pausedThisTick = pausedByBudget || pausedByRateLimit;
+  const pausedThisTick = pausedByBudget || pausedByRateLimit || pausedByUserQuota;
+
+  // RE-READ the subscriber set after the (potentially seconds-long) page walk
+  // (review fix): a tenant whose createSource committed mid-walk had their initial
+  // job deduped by the channel-scoped singleton — they must still ride THIS fan-out,
+  // or they see nothing until the next daily cron. Narrows the dedupe race window
+  // from the whole walk to milliseconds. (A mid-walk subscriber's DEEPER initial
+  // target can still be lost to the dedupe — accepted, rare; the PATCH-widen path
+  // re-opens the deep walk on demand.)
+  subscribers = await loadSubscribers();
+  const widenedSubscriber =
+    state.complete && !pausedThisTick
+      ? subscribers
+          .filter(
+            (subscriber) =>
+              subscriber.backfillTargetSince !== null &&
+              subscriber.backfillTargetSince.getTime() < target.getTime(),
+          )
+          .sort(
+            (left, right) =>
+              left.backfillTargetSince!.getTime() - right.backfillTargetSince!.getTime(),
+          )[0]
+      : undefined;
 
   // Empty first page on a brand-new source ⇒ probable bad/private handle → flag
   // needs_reconnect, do NOT mark complete (a typo would otherwise be swallowed).
@@ -355,7 +450,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         flow,
         channelKey,
         triggerUserId,
-        requestsUsed,
+        requestsUsed: 0,
         inserted: 0,
         branch,
       });
@@ -463,7 +558,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       flow,
       channelKey,
       triggerUserId,
-      requestsUsed,
+      requestsUsed: 0,
       inserted: insertedByUser.get(triggerUserId) ?? 0,
       branch,
     });
@@ -489,6 +584,23 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     },
     `${config.queue}: walk complete`,
   );
+
+  if (widenedSubscriber !== undefined && widenedSubscriber.backfillTargetSince !== null) {
+    await runRedditWalk(
+      {
+        id: job.id === undefined ? undefined : `${job.id}:widened-target`,
+        data: {
+          kind: config.kind,
+          channelKey,
+          triggerUserId: widenedSubscriber.userId,
+          depthBoundIso: widenedSubscriber.backfillTargetSince.toISOString(),
+          flow: "initial",
+          forceDeep: true,
+        },
+      },
+      config,
+    );
+  }
 }
 
 /** Seed the subject entity (account by username / subreddit by slug). Minimal —
@@ -638,6 +750,28 @@ async function fanOut(
   for (const r of existing)
     if (r.externalId) existingSet.add(`${r.userId}|${r.sourceId}|${r.externalId}`);
 
+  const detachedLegacy = await db
+    .select({
+      id: events.id,
+      userId: events.userId,
+      externalId: events.externalId,
+    })
+    .from(events)
+    .where(
+      and(
+        inArray(events.userId, userIds),
+        inArray(events.externalId, externalIds),
+        sql`${events.kind} = 'reddit_post'`,
+        isNull(events.sourceId),
+        isNotNull(events.externalId),
+        isNull(events.deletedAt),
+        sql`${events.metadata} @> '{"reddit_legacy_source_detached":true}'::jsonb`,
+      ),
+    );
+  const detachedByUserAndExternalId = new Map(
+    detachedLegacy.map((row) => [`${row.userId}|${row.externalId}`, row.id]),
+  );
+
   for (const ev of collectedEvents) {
     for (const sub of subscribers) {
       if (sub.backfillTargetSince && ev.occurredAt < sub.backfillTargetSince) continue;
@@ -648,6 +782,26 @@ async function fanOut(
         continue;
       }
       if (existingSet.has(`${sub.userId}|${sub.id}|${ev.externalId}`)) continue;
+
+      const detachedId = detachedByUserAndExternalId.get(`${sub.userId}|${ev.externalId}`);
+      if (detachedId !== undefined) {
+        const reattached = await db
+          .update(events)
+          .set({
+            sourceId: sub.id,
+            metadata: sql`${events.metadata} - 'reddit_legacy_source_detached'`,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(events.userId, sub.userId), eq(events.id, detachedId), isNull(events.sourceId)),
+          )
+          .returning({ id: events.id });
+        if (reattached.length > 0) {
+          existingSet.add(`${sub.userId}|${sub.id}|${ev.externalId}`);
+          detachedByUserAndExternalId.delete(`${sub.userId}|${ev.externalId}`);
+          continue;
+        }
+      }
 
       const inserted = await db
         .insert(events)
