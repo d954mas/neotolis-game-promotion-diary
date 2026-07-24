@@ -21,9 +21,10 @@ import { createServer } from "node:http";
 
 const PORT = Number(process.env.SCRAPECREATORS_MOCK_PORT || "0");
 
-// A single well-formed post. `name` (t3_ fullname) is the externalId; created_utc is a
-// fixed epoch so the walk is deterministic. The author/subreddit are echoed from the
-// request so both walk modes resolve a matching subject.
+// A single well-formed post. `name` (t3_ fullname) is the externalId; created_utc stays
+// inside the initial-backfill window so this long-lived smoke fixture cannot age out.
+// The author/subreddit are echoed from the request so both walk modes resolve a
+// matching subject.
 function post(author, subreddit) {
   return {
     name: "t3_smoke01",
@@ -36,7 +37,7 @@ function post(author, subreddit) {
     score: 21,
     num_comments: 3,
     upvote_ratio: 0.95,
-    created_utc: 1_780_000_000,
+    created_utc: Math.floor(Date.now() / 1000) - 60 * 60,
     permalink: `/r/${subreddit}/comments/smoke01/smoke_gate_mock_devlog/`,
   };
 }
