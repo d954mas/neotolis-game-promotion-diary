@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { inArray } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normalize.js";
+import type { DailyUserRequestAccounting } from "../../src/lib/server/daily-user-quota.js";
 
 const provider = { pages: [] as RedditFeedPage[] };
 function emptyPage(): RedditFeedPage {
@@ -28,7 +29,7 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
     ...actual,
     isRedditConfigured: () => true,
     getSocialProvider: (platform: string) =>
-      platform === "reddit" ? ({ name: "scrapecreators-reddit" } as never) : null,
+      platform === "reddit" ? ({ name: "scrapecreators" } as never) : null,
   };
 });
 vi.mock(
@@ -37,8 +38,38 @@ vi.mock(
     const actual = (await importOriginal()) as Record<string, unknown>;
     return {
       ...actual,
-      fetchRedditFeedPage: async (): Promise<RedditFeedPage> =>
-        provider.pages.shift() ?? emptyPage(),
+      fetchRedditFeedPage: async (
+        _mode: string,
+        _handle: string,
+        _cursor: string | null,
+        opts: {
+          origin?: "cron" | "user";
+          userAccounting?: DailyUserRequestAccounting;
+        },
+      ): Promise<RedditFeedPage> => {
+        // The real provider reserves before HTTP. This test replaces that
+        // provider boundary, so its mock must preserve the paid-request side
+        // effect instead of returning a free synthetic page.
+        const { reserveSocialCredits } =
+          await import("../../src/lib/sources/reddit/server/quota.js");
+        const permit =
+          opts.origin === "user" && opts.userAccounting !== undefined
+            ? await reserveSocialCredits({
+                platform: "reddit",
+                provider: "scrapecreators",
+                origin: "user",
+                units: 1,
+                userAccounting: opts.userAccounting,
+              })
+            : await reserveSocialCredits({
+                platform: "reddit",
+                provider: "scrapecreators",
+                origin: opts.origin ?? "cron",
+                units: 1,
+              });
+        if (permit === null) throw new Error("scripted Reddit reservation denied");
+        return provider.pages.shift() ?? emptyPage();
+      },
     };
   },
 );
