@@ -1,22 +1,38 @@
--- Phase 12 review fix — extends the D-05 raze (0070) to the LEGACY Reddit
--- data_sources rows the razed free-`.json` adapter created. Their metadata carries
--- the OLD walk keys ({username}/{subreddit}); the rebuilt walker reads
--- {handle}/{slug}, so a retained row would resolve a garbage channelKey (its own
--- row UUID), burn a credit on an empty author-search and flag needs_reconnect
--- forever. Operator call (2026-07-22): raze the rows — users re-add their Reddit
--- sources. Diary events SURVIVE: events.source_id is ON DELETE SET NULL, so the
--- rows detach and render like manual pastes (feed enrichment re-hydrates once the
--- rebuilt walker re-caches the posts).
--- The channel-state bookkeeping dies with the sources: a stale
--- backfill_complete / frontier written by the razed walker must not leak into the
--- rebuilt walker's exhausted/incremental branch math.
-UPDATE "events"
-SET "metadata" = COALESCE("events"."metadata", '{}'::jsonb)
-  || '{"reddit_legacy_source_detached":true}'::jsonb
-WHERE "source_id" IN (
-  SELECT "id" FROM "data_sources"
-  WHERE "kind"::text IN ('reddit_account', 'reddit_subreddit')
-)
-AND "kind"::text = 'reddit_post';--> statement-breakpoint
+-- Phase 12 review fix — complete the D-05 raze (0070 dropped the old free-`.json`
+-- CACHE tables; this finishes the job on the rows those tables fed).
+--
+-- DESTRUCTIVE RESET, EXPLICITLY APPROVED BY THE PROJECT OWNER (2026-07-26, review
+-- round 2): "old Reddit events / sources / cache can be deleted completely." Reddit
+-- auto-import has been dead in prod since the anonymous-`.json` 403 (see the
+-- reddit-proxy-403 finding), there are no external users, and users re-add their
+-- Reddit sources after deploy. ROLLBACK: restore from a pre-deploy backup — the
+-- deleted rows are not recoverable forward-only (AGENTS.md: no down-migrations).
+--
+-- WHY the events go too (the earlier detach-only version was not enough): the razed
+-- adapter keyed events on the BARE base36 post id while the rebuilt walker keys on the
+-- `t3_<id>` fullname, and it stored walk keys as metadata {username}/{subreddit} while
+-- the rebuilt walker reads {handle}/{slug}. A retained event therefore joins NOTHING in
+-- the new reddit_posts cache — no stats, no thumbnail, no media type, forever — while
+-- still occupying the (user_id, source_id, external_id) uniqueness slot the rebuilt
+-- walker needs. A source row would resolve a garbage channelKey (its own UUID), burn a
+-- credit on an empty author-search and flag needs_reconnect forever.
+--
+-- SCOPE: `kind = 'reddit_post'` events and `reddit_account`/`reddit_subreddit` sources
+-- ONLY. Every other platform's events, sources and channel-state rows are untouched —
+-- asserted by tests/integration/reddit-legacy-raze-migration.test.ts.
+--
+-- The old CACHE is already gone: 0070 ran `DROP TABLE reddit_posts / reddit_users_cache
+-- / reddit_subreddits_cache / reddit_post_snapshots / reddit_user_snapshots /
+-- reddit_subreddit_snapshots / reddit_subreddit_baselines / reddit_pacer CASCADE` and
+-- purged the `reddit_account` refresh-queue lanes; 0071 created the four fresh
+-- ScrapeCreators tables EMPTY. Nothing to delete here.
+--
+-- HAND-WRITTEN ON PURPOSE: this is a DATA migration (no schema change), which
+-- `drizzle-kit generate` cannot express — see the AGENTS.md "Forward-only migrations"
+-- clause covering hand-written data migrations (idempotent, test-covered, no DDL).
+-- Idempotent by construction: re-running deletes nothing (the rows are gone) and never
+-- touches rows the rebuilt tree created afterwards, because it runs exactly once at the
+-- deploy that introduces the rebuilt tree.
+DELETE FROM "events" WHERE "kind"::text = 'reddit_post';--> statement-breakpoint
 DELETE FROM "data_sources" WHERE "kind"::text IN ('reddit_account', 'reddit_subreddit');--> statement-breakpoint
 DELETE FROM "data_source_channel_state" WHERE "kind"::text IN ('reddit_account', 'reddit_subreddit');

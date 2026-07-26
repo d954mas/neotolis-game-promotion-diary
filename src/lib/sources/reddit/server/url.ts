@@ -4,10 +4,11 @@
 //
 // Two parsers:
 //   1. redditParsePostUrl   — event paste flow. Matches `/r/<sub>/comments/<id>/<slug?>`
-//                             on reddit.com / www / old / m AND the `redd.it/<id>`
-//                             short-link form. Returns null on foreign host
-//                             (host-check FIRST — a non-Reddit URL can never leak
-//                             into the events table as `kind=reddit_post`).
+//                             AND `/user/<name>/comments/<id>/<slug?>` on reddit.com /
+//                             www / old / m AND the `redd.it/<id>` short-link form.
+//                             Returns null on foreign host (host-check FIRST — a
+//                             non-Reddit URL can never leak into the events table as
+//                             `kind=reddit_post`).
 //   2. redditParseSourceUrl — source registration flow. Matches `/r/<sub>` AND
 //                             `/user/<handle>` (+ `/u/<handle>` short form) on the
 //                             Reddit host family AND the raw `r/X` / `u/X` prefix
@@ -34,11 +35,27 @@ const SHORT_LINK_HOST = "redd.it";
 // `/r/<sub>/comments/<id>/<slug?>` — the canonical post URL on every Reddit
 // subdomain. Sub names are `[A-Za-z0-9_-]` (Reddit allows hyphens despite the
 // docs); post ids are base36 lowercase alphanumeric. `/user/<u>/comments/<id>`
-// is the profile-self-post variant (spike fixture: `u_d954mas` posts render as
-// `/user/<u>/comments/<id>`) — accept both `/r/` and `/user/` roots.
-const POST_URL_RE = /^\/(?:r|user)\/([A-Za-z0-9_-]+)\/comments\/([a-z0-9]+)(?:\/.*)?$/i;
+// is the profile-self-post variant — accept both `/r/` and `/user/` roots, and
+// CAPTURE the root so the two can never be conflated (see PROFILE_SUB_PREFIX).
+const POST_URL_RE = /^\/(r|user)\/([A-Za-z0-9_-]+)\/comments\/([a-z0-9]+)(?:\/.*)?$/i;
+/** Reddit's pseudo-subreddit for a profile ("u/foo" posts live in "u_foo"). A
+ *  `/user/<name>/comments/<id>` URL therefore resolves its feed under `u_<name>`,
+ *  NOT `<name>`: the provider's subreddit endpoint keys on the SUBREDDIT slug, and
+ *  `?subreddit=<name>` either 404s or — worse — returns the unrelated r/<name>
+ *  community's posts (spike fixture: u/d954mas' posts carry `subreddit: "u_d954mas"`).
+ *  The same prefixed value is what the walker caches as reddit_posts.subreddit_slug,
+ *  so preview + walk + refresh all agree on one identity for a profile post. */
+const PROFILE_SUB_PREFIX = "u_";
 // `/<id>` on redd.it.
 const SHORT_LINK_RE = /^\/([a-z0-9]+)$/i;
+// `/comments/<id>` — Reddit's own subreddit-less canonical form (it redirects to the
+// full permalink). Three places produce it: the walker's fallback URL when a page
+// carried no permalink, the deletion-propagation purge (which strips `/user/<name>/`
+// out of a deleted post's URL — deletion-propagation-cron.ts), and users pasting the
+// share-menu link. It MUST parse: `validateEventInput` rejects any reddit_post whose
+// url does not parse, so an un-parsed form would 422 every later PATCH of that event.
+// Recognition-only, like redd.it — the subreddit is absent, so no feed can be searched.
+const BARE_COMMENTS_RE = /^\/comments\/([a-z0-9]+)(?:\/.*)?$/i;
 // `/user/<handle>` and `/u/<handle>` (short form).
 const SOURCE_USER_RE = /^\/u(?:ser)?\/([A-Za-z0-9_-]+)\/?$/i;
 // `/r/<sub>` (no /comments/ segment).
@@ -53,14 +70,19 @@ const RAW_USER_RE = /^u\/([A-Za-z0-9_-]+)\/?$/i;
  *
  * Recognized shapes:
  *   - https://{reddit.com|www|old|m}/r/<sub>/comments/<id>/<slug?>
- *   - https://{...}/user/<u>/comments/<id>/<slug?>   (profile self-post)
- *   - https://redd.it/<id>
+ *   - https://{...}/user/<u>/comments/<id>/<slug?>   (profile self-post → `u_<u>`)
+ *   - https://{...}/comments/<id>                    (RECOGNITION-ONLY, see below)
+ *   - https://redd.it/<id>                           (RECOGNITION-ONLY, see below)
  *
  * Foreign hosts (e.g. `example.com/r/IndieDev/comments/abc`) return null —
  * host-check FIRST avoids leaking non-Reddit URLs into the events table.
  *
- * For redd.it short-links the subreddit is not in the URL — `metadata.subreddit`
- * is null; the worker resolves it via a follow-up fetch on first poll.
+ * `metadata.subreddit` is the feed identity the provider needs. It is null for the two
+ * SUBREDDIT-LESS forms (`redd.it/<id>` and `/comments/<id>`): ScrapeCreators exposes no
+ * lookup-by-id and no redirect follower, so there is no feed to search. A null slug
+ * means RECOGNITION-ONLY — the event saves fine as `kind=reddit_post`, but the preview
+ * says so explicitly (index.ts `reddit_short_link_unsupported`) instead of burning a
+ * cap slot on a request that can never succeed.
  */
 export function redditParsePostUrl(input: string): ParsedUrl | null {
   let u: URL;
@@ -85,14 +107,24 @@ export function redditParsePostUrl(input: string): ParsedUrl | null {
   // Host-check FIRST.
   if (!REDDIT_HOSTS.has(host)) return null;
 
+  const bare = BARE_COMMENTS_RE.exec(u.pathname);
+  if (bare !== null) {
+    return {
+      kind: "reddit_post",
+      externalId: bare[1]!,
+      metadata: { subreddit: null },
+    };
+  }
+
   const m = POST_URL_RE.exec(u.pathname);
   if (m === null) return null;
-  const subreddit = m[1]!.toLowerCase();
-  const externalId = m[2]!;
+  const isProfilePost = m[1]!.toLowerCase() === "user";
+  const name = m[2]!.toLowerCase();
+  const externalId = m[3]!;
   return {
     kind: "reddit_post",
     externalId,
-    metadata: { subreddit },
+    metadata: { subreddit: isProfilePost ? `${PROFILE_SUB_PREFIX}${name}` : name },
   };
 }
 

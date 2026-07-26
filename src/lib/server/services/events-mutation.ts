@@ -473,6 +473,7 @@ export interface EnrichmentResult {
  * Error mapping (route layer preserves UX):
  *   - unsupported URL                → AppError 'unsupported_url' 422
  *   - reddit_post unreachable        → AppError 'reddit_unreachable' 502
+ *   - reddit_post redd.it short link → AppError 'reddit_short_link_unsupported' 422
  *   - reddit_post private/unavailable → AppError 'reddit_post_not_found' 404
  *   - telegram_post any failure      → soft-degrade to recognition-only (no 422
  *                                       dead-end; mirrors the IG branch — free
@@ -533,6 +534,18 @@ export async function enrichFromUrl(
         throw new AppError("Reddit rate-limited; try again shortly", "reddit_rate_limited", 429, {
           cause: preview.cause,
         });
+      }
+      // redd.it short link — RECOGNITION-ONLY (the subreddit is not in the URL and the
+      // provider has no lookup-by-id). 422, not 502: nothing is broken upstream and a
+      // retry cannot help — the user needs the full /r/<sub>/comments/<id> permalink.
+      // The UI maps this code to that instruction (AddEventForm).
+      if (preview.cause === "reddit_short_link_unsupported") {
+        throw new AppError(
+          "Paste the full Reddit post link (redd.it short links carry no subreddit)",
+          "reddit_short_link_unsupported",
+          422,
+          { cause: preview.cause },
+        );
       }
       throw new AppError("Reddit endpoint unreachable", "reddit_unreachable", 502, {
         cause: preview.cause,

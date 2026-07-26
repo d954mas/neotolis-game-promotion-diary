@@ -89,6 +89,8 @@ In `<kind>/server/handlers/`:
   - [ ] `flow` upgrade: if `oldSide !== null && flow === 'incremental'`, upgrade to `'historical'`.
   - [ ] Empty result → `markSourceBackfillComplete` + audit row with `unitsUsed`.
   - [ ] Non-empty: pre-INSERT SELECT for idempotency, INSERT events, update frontier, mark last_polled_at, audit row with adapter's reported `unitsUsed`.
+  - [ ] `events.author_is_me` comes from the POST's author, not from the source row, whenever a source can carry OTHER people's content (community/topic feeds — e.g. `reddit_subreddit`). `data_sources.is_owned_by_me` DEFAULTS TO TRUE, so inheriting it there tags every stranger's post "mine" and poisons the mine/others filter. Account-shaped sources (one identity per source) may inherit the flag; see `resolveOwnedUsernames` in `reddit/server/handlers/walk-core.ts`.
+  - [ ] If the walk is PAID and its queue intent is channel-scoped-singleton'd, decide what happens to a duplicate intent: `retrySingletonConflict` only DEFERS it (a second full paid pass once this job finishes). Merge the intents the pass already satisfies — re-run the fan-out over the in-memory page data with the merged intent's flow/trigger user (`coalescePendingIntents` in `reddit/server/handlers/walk-core.ts`), and leave uncovered ones (deeper archive, paused pass) pending.
   - [ ] Audit metadata MUST include `platform: '<kind>'` (cap query filter — see SOURCE-REFERENCE.md §9.1) AND `flow: AuditFlow` (closed enum — see `src/lib/server/audit.ts`).
 - [ ] **Auto-backfill cron handler** (if applicable). Picks incomplete sources, enqueues passive backfill jobs.
 - [ ] **Stats poll handlers** (if applicable). Tier-based (Active/Cold) for platforms with stable refresh windows.

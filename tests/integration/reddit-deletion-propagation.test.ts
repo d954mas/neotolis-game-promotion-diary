@@ -52,6 +52,7 @@ vi.mock(
 const { db } = await import("../../src/lib/server/db/client.js");
 const { env } = await import("../../src/lib/server/config/env.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
+const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { user } = await import("../../src/lib/server/db/schema/auth.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { redditPosts } = await import("../../src/lib/server/db/schema/index.js");
@@ -269,6 +270,121 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     expect((await readPost(A))!.deletionDetectedAt, "tick-1 alive A not false-purged").toBeNull();
     expect((await readPost(Bp))!.deletionDetectedAt, "tick-1 alive B not false-purged").toBeNull();
     expect((await readPost(C))!.deletionDetectedAt, "C alive → not flagged").toBeNull();
+  });
+
+  it("[review-P2] the purge leaves NO author-derivable residue: permalink, u_<name> slug, event url + event metadata are all scrubbed", async () => {
+    // The pre-fix purge nulled only author/author_fullname/deletion_detected_by, so for a
+    // PROFILE post the username stayed in plain sight in four derived places. The policy is
+    // "anonymize every author-derivable field, keep the diary content" — assert it end to
+    // end, including that the rewritten link still parses as a reddit_post URL (otherwise
+    // validateEventInput would 422 every later PATCH of that event).
+    const { redditParsePostUrl } = await import("../../src/lib/sources/reddit/server/url.js");
+    const u = await seedUserDirectly({ email: `rdt-scrub-${uniq()}@t.io` });
+    const author = `Scrub${uniq()}`;
+    const profileId = `pr${uniq()}`;
+    const communityId = `cm${uniq()}`;
+    const profileUrl = `https://www.reddit.com/user/${author}/comments/${profileId}/my_devlog/`;
+    const communityUrl = `https://www.reddit.com/r/gamedev/comments/${communityId}/my_devlog/`;
+
+    await db.insert(redditPosts).values([
+      {
+        postId: `t3_${profileId}`,
+        // A profile post lives in the pseudo-subreddit u_<name> — the slug IS the username.
+        subredditSlug: `u_${author.toLowerCase()}`,
+        permalink: profileUrl,
+        author,
+        authorFullname: `t2_${author}`,
+        title: "Profile devlog",
+        caption: "the body excerpt",
+        publishedAt: new Date(Date.now() - 5 * DAY),
+        lastPollStatus: "ok",
+        deletionDetectedAt: new Date(Date.now() - 49 * 3_600_000),
+        deletionDetectedBy: `reddit_account:${author.toLowerCase()}`,
+      },
+      {
+        postId: `t3_${communityId}`,
+        subredditSlug: "gamedev",
+        permalink: communityUrl,
+        author,
+        authorFullname: `t2_${author}`,
+        title: "Community devlog",
+        publishedAt: new Date(Date.now() - 5 * DAY),
+        lastPollStatus: "ok",
+        deletionDetectedAt: new Date(Date.now() - 49 * 3_600_000),
+        deletionDetectedBy: `reddit_subreddit:gamedev`,
+      },
+    ]);
+    const [profileEvent] = await db
+      .insert(events)
+      .values({
+        userId: u.id,
+        kind: "reddit_post",
+        occurredAt: new Date(Date.now() - 5 * DAY),
+        title: "Profile devlog",
+        url: profileUrl,
+        externalId: `t3_${profileId}`,
+        metadata: { subreddit: `u_${author.toLowerCase()}` },
+      })
+      .returning({ id: events.id });
+    const [communityEvent] = await db
+      .insert(events)
+      .values({
+        userId: u.id,
+        kind: "reddit_post",
+        occurredAt: new Date(Date.now() - 5 * DAY),
+        title: "Community devlog",
+        url: communityUrl,
+        externalId: `t3_${communityId}`,
+        metadata: { subreddit: "gamedev" },
+      })
+      .returning({ id: events.id });
+
+    const res = await handleDeletionPropagationCron();
+    expect(res.purged).toBeGreaterThanOrEqual(2);
+
+    const profilePost = await readPost(profileId);
+    expect(profilePost!.author).toBeNull();
+    expect(profilePost!.authorFullname).toBeNull();
+    expect(profilePost!.deletionDetectedBy).toBeNull();
+    expect(profilePost!.permalink, "the /user/<name>/ segment is gone").toBe(
+      `https://www.reddit.com/comments/${profileId}`,
+    );
+    expect(profilePost!.subredditSlug, "the u_<name> pseudo-slug is gone").toBeNull();
+    expect(profilePost!.title, "diary content survives").toBe("Profile devlog");
+    expect(profilePost!.caption).toBe("the body excerpt");
+
+    const [scrubbedEvent] = await db
+      .select({ url: events.url, metadata: events.metadata, title: events.title })
+      .from(events)
+      .where(eq(events.id, profileEvent!.id));
+    expect(scrubbedEvent!.url).toBe(`https://www.reddit.com/comments/${profileId}`);
+    expect((scrubbedEvent!.metadata as { subreddit?: unknown }).subreddit).toBeNull();
+    expect(scrubbedEvent!.title, "the user's own diary title is untouched").toBe("Profile devlog");
+    expect(
+      redditParsePostUrl(scrubbedEvent!.url!),
+      "the anonymized url still parses as a reddit_post (PATCH stays possible)",
+    ).not.toBeNull();
+
+    // Nothing in a COMMUNITY post's url/slug identifies the author, so those stay as-is.
+    const communityPost = await readPost(communityId);
+    expect(communityPost!.author, "author still nulled").toBeNull();
+    expect(communityPost!.permalink, "an /r/ permalink carries no author → untouched").toBe(
+      communityUrl,
+    );
+    expect(communityPost!.subredditSlug).toBe("gamedev");
+    const [keptEvent] = await db
+      .select({ url: events.url, metadata: events.metadata })
+      .from(events)
+      .where(eq(events.id, communityEvent!.id));
+    expect(keptEvent!.url).toBe(communityUrl);
+    expect((keptEvent!.metadata as { subreddit?: unknown }).subreddit).toBe("gamedev");
+
+    // Idempotent: a second tick finds no residue left to scrub.
+    expect((await handleDeletionPropagationCron()).purged).toBe(0);
+
+    // Belt: the username appears NOWHERE in the purged post's row or its event.
+    const residue = JSON.stringify([profilePost, scrubbedEvent]).toLowerCase();
+    expect(residue).not.toContain(author.toLowerCase());
   });
 
   it("[12-05] the purge cron NULLs author/author_fullname after 48h + writes the in-tx audit; title/body survive; within-grace + idempotent", async () => {

@@ -81,7 +81,7 @@ function walkPage(posts: unknown[]): RedditFeedPage {
   return normalizeRedditFeed({ success: true, posts, after: null });
 }
 
-async function seedSubredditSource(slug: string): Promise<string> {
+async function seedSubredditSource(slug: string, isOwnedByMe = false): Promise<string> {
   const u = await seedUserDirectly({ email: `rdt-sub-${uniq()}@t.io` });
   const [row] = await db
     .insert(dataSources)
@@ -90,12 +90,26 @@ async function seedSubredditSource(slug: string): Promise<string> {
       kind: "reddit_subreddit",
       handleUrl: `https://www.reddit.com/r/${slug}`,
       channelId: slug,
-      isOwnedByMe: false,
+      isOwnedByMe,
       autoImport: true,
       metadata: { slug },
     })
     .returning({ id: dataSources.id, userId: dataSources.userId });
   return row!.userId;
+}
+
+/** Register a reddit_account source the user declares as THEIR OWN identity — the only
+ *  place "this Reddit username is mine" is expressed. */
+async function seedOwnedAccountSource(userId: string, handle: string): Promise<void> {
+  await db.insert(dataSources).values({
+    userId,
+    kind: "reddit_account",
+    handleUrl: `https://www.reddit.com/user/${handle}`,
+    channelId: handle,
+    isOwnedByMe: true,
+    autoImport: false,
+    metadata: { handle },
+  });
 }
 
 async function seedTrackedPost(shortId: string, daysAgo: number, slug: string): Promise<void> {
@@ -251,6 +265,99 @@ describe("reddit native-subreddit walker (Phase 12)", () => {
     const backfill = rows.find((r) => r.action === "source.refresh_content_requested");
     expect(backfill, "a backfill audit row must exist for the trigger user").toBeDefined();
     expect((backfill!.metadata as { platform?: string }).platform).toBe("reddit_subreddit");
+  });
+
+  it("[review-P1] author_is_me is PER-POST: a stranger's post in a subreddit the user 'owns' is NOT mine; the user's own account's post IS", async () => {
+    const slug = `sub_${uniq()}`;
+    // is_owned_by_me DEFAULTS TO TRUE on data_sources, so this is the shipping default
+    // for a community source — pre-fix EVERY imported community post was tagged "mine".
+    const userId = await seedSubredditSource(slug, true);
+    const mine = `Me${uniq()}`; // mixed case — matching must be case-insensitive
+    await seedOwnedAccountSource(userId, mine.toLowerCase());
+    const strangerPostId = `st${uniq()}`;
+    const minePostId = `mi${uniq()}`;
+
+    provider.pages = [
+      walkPage([
+        { ...makePost(strangerPostId, 1, slug), author: `stranger_${uniq()}` },
+        { ...makePost(minePostId, 2, slug), author: mine },
+      ]),
+    ];
+
+    await handleBackfillSubreddit({
+      data: {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
+    });
+
+    const [stranger] = await db
+      .select({ authorIsMe: events.authorIsMe })
+      .from(events)
+      .where(eq(events.externalId, `t3_${strangerPostId}`));
+    expect(stranger, "the stranger's post was imported").toBeDefined();
+    expect(stranger!.authorIsMe, "a stranger's post is NOT mine").toBe(false);
+
+    const [own] = await db
+      .select({ authorIsMe: events.authorIsMe })
+      .from(events)
+      .where(eq(events.externalId, `t3_${minePostId}`));
+    expect(own!.authorIsMe, "a post by the user's OWN reddit account IS mine").toBe(true);
+  });
+
+  it("[review-P1] with no owned reddit_account, NOTHING in a subreddit is mine", async () => {
+    const slug = `sub_${uniq()}`;
+    await seedSubredditSource(slug, true);
+    const postId = `no${uniq()}`;
+    provider.pages = [walkPage([makePost(postId, 1, slug)])];
+
+    await handleBackfillSubreddit({
+      data: {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
+    });
+
+    const [row] = await db
+      .select({ authorIsMe: events.authorIsMe })
+      .from(events)
+      .where(eq(events.externalId, `t3_${postId}`));
+    expect(row!.authorIsMe).toBe(false);
+  });
+
+  it("[review-P2] a page whose posts omit `subreddit` gets the channelKey fallback in BOTH the cache row and the event metadata", async () => {
+    const slug = `sub_${uniq()}`;
+    await seedSubredditSource(slug);
+    const postId = `fb${uniq()}`;
+    // The native subreddit feed may omit the field entirely (it is scoped by
+    // construction). Pre-fix the cache got the channelKey fallback but the event's
+    // metadata.subreddit stayed null, so the card lost its r/<sub> line for these posts.
+    const bare = makePost(postId, 1, slug) as Record<string, unknown>;
+    delete bare.subreddit;
+    provider.pages = [walkPage([bare])];
+
+    await handleBackfillSubreddit({
+      data: {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        depthBoundIso: "1970-01-01T00:00:00Z",
+        flow: "auto_passive",
+      },
+    });
+
+    expect((await readPost(postId))!.subredditSlug, "cache row keeps the fallback").toBe(slug);
+    const [ev] = await db
+      .select({ metadata: events.metadata })
+      .from(events)
+      .where(eq(events.externalId, `t3_${postId}`));
+    expect(
+      (ev!.metadata as { subreddit?: unknown }).subreddit,
+      "event metadata gets the SAME fallback",
+    ).toBe(slug);
   });
 
   it("[review-P1] an AUTHORITATIVE EMPTY feed on an ESTABLISHED source flags the ENTIRE tracked subject set", async () => {

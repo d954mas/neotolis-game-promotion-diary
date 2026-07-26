@@ -190,11 +190,16 @@ export function youtubeChannelLabel(source: CardSourceLite | null): string {
 
 /** Read the subreddit slug from event metadata. SAFE per AGENTS.md —
  *  subreddit slug is intrinsic to the Reddit URL and Reddit forbids
- *  subreddit rename. The value cannot drift from the post. */
+ *  subreddit rename. The value cannot drift from the post.
+ *
+ *  A PROFILE post lives in Reddit's pseudo-subreddit `u_<name>` (that is the
+ *  literal slug the API returns and the walker caches), so render it the way
+ *  Reddit does — `u/<name>`, not `r/u_<name>`. */
 export function redditSubredditLabel(metadata: unknown): string {
   if (metadata === null || typeof metadata !== "object") return "";
   const md = metadata as { subreddit?: unknown };
-  return typeof md.subreddit === "string" && md.subreddit.length > 0 ? `r/${md.subreddit}` : "";
+  if (typeof md.subreddit !== "string" || md.subreddit.length === 0) return "";
+  return md.subreddit.startsWith("u_") ? `u/${md.subreddit.slice(2)}` : `r/${md.subreddit}`;
 }
 
 /** Read the Instagram account handle/display name from FK-joined

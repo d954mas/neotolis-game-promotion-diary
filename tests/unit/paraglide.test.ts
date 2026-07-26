@@ -105,6 +105,7 @@ describe("paraglide i18n", () => {
       "add_event_modal_title_placeholder",
       "add_event_modal_url_error_invalid",
       "add_event_modal_url_error_kind_mismatch",
+      "add_event_modal_url_error_reddit_short_link",
       "add_source_detected",
       "add_source_link_unrecognized",
       "add_source_modal_close_aria",

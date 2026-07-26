@@ -390,6 +390,28 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     expect(await resolveCachedExternalId("https://example.com/not-a-reddit")).toBeNull();
   });
 
+  it("[review-P2] a subreddit-less link (redd.it / reddit.com/comments) is recognition-only: explicit cause, NO fetch, NO cap slot", async () => {
+    const user = await seedUserDirectly({ email: `rdt-preview-short-${uniq()}@t.io` });
+    single.next = singlePost();
+
+    for (const url of ["https://redd.it/short1", "https://www.reddit.com/comments/short2"]) {
+      const result = await fetchEventPreviewMetadata(url, {
+        userId: user.id,
+        ipAddress: "127.0.0.1",
+      });
+      expect(result.kind).toBe("unreachable");
+      if (result.kind !== "unreachable") throw new Error("unreachable");
+      // NOT the generic "unavailable" (indistinguishable from a deleted post): the
+      // provider has no lookup-by-id and no subreddit to search, so this can never
+      // resolve and the user needs to be told to paste the full permalink.
+      expect(result.cause).toBe("reddit_short_link_unsupported");
+    }
+    // The early-out happens BEFORE both the provider call and the cap gate — pre-fix the
+    // cap-counter row was written for a request that never left the process.
+    expect(single.calls).toHaveLength(0);
+    expect((await getUserQuotaUsedToday(user.id, PLATFORM)).requests).toBe(0);
+  });
+
   it("[review-P1] an ISSUED-but-failed preview fetch still counts against the per-user cap", async () => {
     const { AdapterError } = await import("../../src/lib/sources/errors.js");
     const user = await seedUserDirectly({ email: `rdt-preview-err-${uniq()}@t.io` });
@@ -435,5 +457,135 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
       (await getUserQuotaUsedToday(user.id, PLATFORM)).requests - before,
       "a no-issue denial stays uncounted",
     ).toBe(2);
+  });
+});
+
+// ── HTTP CONTRACT (POST /api/events/preview-url) ──────────────────────────────
+//
+// The adapter-seam tests above prove the money path; these prove the WIRE contract the
+// Add-Event form actually consumes. Restored after a review found the route-level cover
+// missing: the adapter can be perfectly correct while enrichFromUrl's Reddit branch maps
+// the wrong status (a 429 served as 502 makes the form show "unreachable" for a quota
+// stop, and a lost occurredAt silently dates every pasted post "today").
+describe("reddit paste preview — HTTP contract (POST /api/events/preview-url)", () => {
+  async function previewViaHttp(
+    signedCookieValue: string,
+    url: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const res = await app.request("/api/events/preview-url", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${signedCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("[review-P2] a successful Reddit preview returns 200 with the enriched shape + occurredAt", async () => {
+    const user = await seedUserDirectly({ email: `rdt-http-ok-${uniq()}@t.io` });
+    single.next = singlePost({ id: "t3_http01", shortcode: "http01" });
+    const url = "https://www.reddit.com/r/gamedev/comments/http01/my_devlog/";
+
+    const { status, body } = await previewViaHttp(user.signedSessionCookieValue, url);
+
+    expect(status).toBe(200);
+    expect(body.kind).toBe("reddit_post");
+    expect(body.title).toBe("My devlog post");
+    expect(body.externalId).toBe("http01"); // URL-intrinsic id on the wire
+    expect(body.authorName).toBe("d954mas");
+    expect(body.authorUrl).toBe("https://www.reddit.com/user/d954mas");
+    expect(body.thumbnailUrl).toBe("https://i.redd.it/cover.png");
+    // The canonical permalink drops the human-readable title slug (parseIngestUrl); the
+    // form adopts this value, so the saved event stores the clean link.
+    expect(body.canonicalUrl).toBe("https://www.reddit.com/r/gamedev/comments/http01/");
+    // The form dates the event from this — a null would silently stamp "today" on a
+    // month-old post.
+    expect(body.occurredAt).toBe("2026-06-01T12:00:00.000Z");
+  });
+
+  it("[review-P2] a provider rate limit is served as HTTP 429 reddit_rate_limited (not 502)", async () => {
+    const { AdapterError } = await import("../../src/lib/sources/errors.js");
+    const user = await seedUserDirectly({ email: `rdt-http-429-${uniq()}@t.io` });
+    single.error = new AdapterError("ScrapeCreators rate-limited (429)", {
+      category: "rate-limited",
+    });
+
+    const { status, body } = await previewViaHttp(
+      user.signedSessionCookieValue,
+      "https://www.reddit.com/r/gamedev/comments/http429/x/",
+    );
+
+    expect(status).toBe(429);
+    expect(body.error).toBe("reddit_rate_limited");
+  });
+
+  it("[review-P2] an exhausted per-user daily quota is served as HTTP 429 requests_quota_exhausted with the reset hint", async () => {
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
+    const user = await seedUserDirectly({ email: `rdt-http-cap-${uniq()}@t.io` });
+    const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
+    for (let i = 0; i < cap; i++) {
+      await writeAuditStrict({
+        userId: user.id,
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: PLATFORM,
+          platform: PLATFORM,
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+    single.next = singlePost({ id: "t3_httpcap", shortcode: "httpcap" });
+
+    const { status, body } = await previewViaHttp(
+      user.signedSessionCookieValue,
+      "https://www.reddit.com/r/gamedev/comments/httpcap/x/",
+    );
+
+    expect(status).toBe(429);
+    expect(body.error).toBe("requests_quota_exhausted");
+    // The 429 envelope carries the structured hint the banner renders — the UI must not
+    // have to parse the human-readable message.
+    expect(body.metadata).toMatchObject({ cap, used: cap });
+    expect(typeof (body.metadata as { reset_in_seconds?: unknown }).reset_in_seconds).toBe(
+      "number",
+    );
+    expect(single.calls, "the cap gate stops the request before the provider").toHaveLength(0);
+  });
+
+  it("[review-P2] a subreddit-less redd.it link is served as HTTP 422 reddit_short_link_unsupported", async () => {
+    const user = await seedUserDirectly({ email: `rdt-http-short-${uniq()}@t.io` });
+    single.next = singlePost();
+
+    const { status, body } = await previewViaHttp(
+      user.signedSessionCookieValue,
+      "https://redd.it/httpsh1",
+    );
+
+    // 422, not 502: nothing upstream is broken and a retry cannot help — the user needs
+    // to paste the full /r/<sub>/comments/<id> permalink (the form explains exactly that).
+    expect(status).toBe(422);
+    expect(body.error).toBe("reddit_short_link_unsupported");
+    expect(single.calls).toHaveLength(0);
+  });
+
+  it("[review-P2] a deleted/absent post is served as HTTP 404 reddit_post_not_found", async () => {
+    const user = await seedUserDirectly({ email: `rdt-http-404-${uniq()}@t.io` });
+    single.next = null; // the provider matched no post
+
+    const { status, body } = await previewViaHttp(
+      user.signedSessionCookieValue,
+      "https://www.reddit.com/r/gamedev/comments/http404/x/",
+    );
+
+    expect(status).toBe(404);
+    expect(body.error).toBe("reddit_post_not_found");
   });
 });

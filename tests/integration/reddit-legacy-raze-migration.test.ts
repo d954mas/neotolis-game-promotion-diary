@@ -1,15 +1,20 @@
-// Migration 0073 (reddit legacy source raze) — behavior of the SHIPPED SQL file.
+// Migration 0073 (reddit legacy raze) — behavior of the SHIPPED SQL file.
 //
-// The legacy free-`.json` Reddit adapter stored walk keys as metadata
-// {username}/{subreddit}; the rebuilt walker reads {handle}/{slug}, so retained rows
-// would resolve a garbage channelKey (their own UUID), burn a credit on an empty
-// author-search and flag needs_reconnect forever. Operator call (2026-07-22): the
-// migration DELETEs the legacy sources + their channel-state; diary events SURVIVE by
-// detaching (events.source_id is ON DELETE SET NULL).
+// The legacy free-`.json` Reddit adapter keyed events on the BARE base36 post id and
+// stored walk keys as metadata {username}/{subreddit}; the rebuilt ScrapeCreators tree
+// keys events on the `t3_<id>` fullname and reads {handle}/{slug}. A retained legacy row
+// therefore joins nothing in the new cache (no stats/thumbnail/media-type, forever) and a
+// retained source resolves a garbage channelKey (its own UUID) that burns a credit on an
+// empty author-search and flags needs_reconnect forever.
 //
-// Executes the real drizzle/0073 SQL against seeded legacy-shaped rows (the suite DB
-// has already run it at boot, so re-running proves idempotency for free). Real
-// Postgres; never mocks the DB.
+// The project owner approved a FULL destructive reset (2026-07-26): the migration DELETEs
+// the legacy reddit_post events, the reddit sources and their channel-state. Users re-add
+// their Reddit sources; the rebuilt walker re-imports fresh, cache-joined events. The old
+// CACHE tables were already dropped by 0070 (nothing left to delete here).
+//
+// Executes the real drizzle/0073 SQL against seeded legacy-shaped rows (the suite DB has
+// already run it at boot, so re-running proves idempotency for free). Real Postgres;
+// never mocks the DB.
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -76,6 +81,8 @@ const { dataSources } = await import("../../src/lib/server/db/schema/data-source
 const { dataSourceChannelState } =
   await import("../../src/lib/server/db/schema/data-source-channel-state.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { games } = await import("../../src/lib/server/db/schema/games.js");
+const { eventGames } = await import("../../src/lib/server/db/schema/event-games.js");
 const { handleBackfillAccount } =
   await import("../../src/lib/sources/reddit/server/handlers/backfill-account.js");
 
@@ -93,8 +100,8 @@ async function runMigration(): Promise<void> {
 
 const uniq = (): string => Math.random().toString(36).slice(2, 8);
 
-describe("migration 0073 — legacy reddit source raze", () => {
-  it("deletes legacy reddit sources + channel-state; events detach (source_id NULL) and survive; non-reddit untouched; idempotent", async () => {
+describe("migration 0073 — legacy reddit raze (full destructive reset)", () => {
+  it("deletes legacy reddit events + sources + channel-state; other platforms untouched; idempotent", async () => {
     const u = await seedUserDirectly({ email: `rdt-raze-${uniq()}@t.io` });
     const legacyHandle = `legacy_${uniq()}`;
 
@@ -118,8 +125,9 @@ describe("migration 0073 — legacy reddit source raze", () => {
         channelId: `UC${uniq()}`,
       })
       .returning({ id: dataSources.id });
-    // A diary event imported from the legacy source (t3-prefixed — same as the new tree).
-    const externalId = `t3_${uniq()}`;
+    // A legacy diary event with the legacy BARE-id external_id (the shape that can never
+    // join the rebuilt t3_-keyed cache) + a game attachment (FK cascade must not error).
+    const legacyBareId = uniq();
     const [ev] = await db
       .insert(events)
       .values({
@@ -128,7 +136,39 @@ describe("migration 0073 — legacy reddit source raze", () => {
         kind: "reddit_post",
         occurredAt: new Date("2026-01-01T00:00:00Z"),
         title: "legacy import",
-        externalId,
+        externalId: legacyBareId,
+      })
+      .returning({ id: events.id });
+    const [game] = await db
+      .insert(games)
+      .values({ userId: u.id, title: `raze-game-${uniq()}` })
+      .returning({ id: games.id });
+    await db
+      .insert(eventGames)
+      .values({ userId: u.id, eventId: ev!.id, gameId: game!.id })
+      .onConflictDoNothing();
+    // A MANUALLY pasted reddit event (no source) — also razed: the owner approved the
+    // full reset, and a bare-id manual paste has the same never-joins-the-cache problem.
+    const [manualEv] = await db
+      .insert(events)
+      .values({
+        userId: u.id,
+        kind: "reddit_post",
+        occurredAt: new Date("2026-01-02T00:00:00Z"),
+        title: "manual legacy paste",
+        externalId: uniq(),
+      })
+      .returning({ id: events.id });
+    // A non-reddit event that MUST survive.
+    const [ytEv] = await db
+      .insert(events)
+      .values({
+        userId: u.id,
+        sourceId: ytSrc!.id,
+        kind: "youtube_video",
+        occurredAt: new Date("2026-01-01T00:00:00Z"),
+        title: "keep me",
+        externalId: `yt_${uniq()}`,
       })
       .returning({ id: events.id });
     // Legacy walker bookkeeping that must not leak into the rebuilt walker.
@@ -144,17 +184,31 @@ describe("migration 0073 — legacy reddit source raze", () => {
       .from(dataSources)
       .where(eq(dataSources.id, redditSrc!.id));
     expect(goneSrc, "legacy reddit source deleted").toBeUndefined();
+    const [goneEv] = await db.select({ id: events.id }).from(events).where(eq(events.id, ev!.id));
+    expect(goneEv, "legacy reddit event deleted (not merely detached)").toBeUndefined();
+    const [goneManual] = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(eq(events.id, manualEv!.id));
+    expect(goneManual, "manually pasted legacy reddit event deleted too").toBeUndefined();
+    const attachments = await db
+      .select({ eventId: eventGames.eventId })
+      .from(eventGames)
+      .where(eq(eventGames.userId, u.id));
+    expect(attachments, "event_games cascaded with the deleted event").toHaveLength(0);
+
     const [keptYt] = await db
       .select({ id: dataSources.id })
       .from(dataSources)
       .where(eq(dataSources.id, ytSrc!.id));
     expect(keptYt, "non-reddit source untouched").toBeDefined();
-    const [keptEv] = await db
-      .select({ sourceId: events.sourceId, title: events.title })
+    const [keptYtEv] = await db
+      .select({ id: events.id, sourceId: events.sourceId })
       .from(events)
-      .where(eq(events.id, ev!.id));
-    expect(keptEv, "diary event survives").toBeDefined();
-    expect(keptEv!.sourceId, "event detached via ON DELETE SET NULL").toBeNull();
+      .where(eq(events.id, ytEv!.id));
+    expect(keptYtEv, "non-reddit event untouched").toBeDefined();
+    expect(keptYtEv!.sourceId, "non-reddit event keeps its source").toBe(ytSrc!.id);
+
     const [goneState] = await db
       .select({ channelKey: dataSourceChannelState.channelKey })
       .from(dataSourceChannelState)
@@ -163,9 +217,14 @@ describe("migration 0073 — legacy reddit source raze", () => {
 
     // Forward-only migrations must be safe to re-run against an already-razed DB.
     await runMigration();
-    const [stillEv] = await db.select({ id: events.id }).from(events).where(eq(events.id, ev!.id));
-    expect(stillEv, "idempotent re-run keeps the detached event").toBeDefined();
+    const [stillYtEv] = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(eq(events.id, ytEv!.id));
+    expect(stillYtEv, "idempotent re-run keeps the non-reddit event").toBeDefined();
 
+    // After the reset, a re-added source + the first rebuilt walk import the post FRESH,
+    // keyed on the t3_ fullname the new cache joins on — one event, no legacy duplicate.
     const [rebuiltSource] = await db
       .insert(dataSources)
       .values({
@@ -173,11 +232,12 @@ describe("migration 0073 — legacy reddit source raze", () => {
         kind: "reddit_account",
         handleUrl: `https://www.reddit.com/user/${legacyHandle}`,
         channelId: legacyHandle,
+        isOwnedByMe: true,
         autoImport: true,
         metadata: { handle: legacyHandle },
       })
       .returning({ id: dataSources.id });
-    const shortId = externalId.slice(3);
+    const externalId = `t3_${legacyBareId}`;
     nextPage = {
       posts: [
         {
@@ -188,7 +248,7 @@ describe("migration 0073 — legacy reddit source raze", () => {
           metrics: { views: null, likes: 1, comments: 0, shares: null },
           caption: "legacy body",
           thumbnailUrl: null,
-          permalink: `/user/${legacyHandle}/comments/${shortId}/legacy/`,
+          permalink: `/user/${legacyHandle}/comments/${legacyBareId}/legacy/`,
           title: "legacy import",
           selftext: "legacy body",
           subredditSlug: null,
@@ -224,8 +284,7 @@ describe("migration 0073 — legacy reddit source raze", () => {
       .select({ id: events.id, sourceId: events.sourceId })
       .from(events)
       .where(eq(events.externalId, externalId));
-    expect(matching, "first rebuilt walk must reattach, not duplicate").toHaveLength(1);
-    expect(matching[0]!.id).toBe(ev!.id);
+    expect(matching, "the rebuilt walk imports exactly one t3_-keyed event").toHaveLength(1);
     expect(matching[0]!.sourceId).toBe(rebuiltSource!.id);
   });
 });

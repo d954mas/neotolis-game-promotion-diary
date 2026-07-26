@@ -27,11 +27,18 @@
 //     A mistaken FIREHOSE source's hard ceiling is the inherited per-user
 //     LIMIT_SOCIAL_REQUESTS_PER_DAY + the operator 80/95% budget throttle (the real
 //     money stops).
+//   - DUPLICATE INTENTS ARE MERGED, not re-walked (coalescePendingIntents): the
+//     channel-scoped singleton only DEFERS a conflicting job, so two tenants adding the
+//     same channel (or manual+cron overlapping) used to cost two full paid passes. The
+//     pass now settles the pending intents it already covers by re-running the fan-out
+//     over the SAME in-memory pages — free — and leaves the ones it does not cover
+//     (deeper archive request, paused/lossy pass) pending for a real walk.
 
 import { and, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
+import { outbox } from "$lib/server/db/schema/outbox.js";
 import { redditPosts } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
 import { env } from "$lib/server/config/env.js";
@@ -52,7 +59,11 @@ import { getSocialProvider } from "../provider/registry.js";
 import { fetchRedditFeedPage, type RedditFeedMode } from "../provider/scrapecreators-reddit.js";
 import { writeSnapshot, upsertRedditAccount, upsertRedditSubreddit } from "../snapshots.js";
 import { buildRedditTitle, type NormalizedRedditPost } from "../normalize.js";
-import { readRedditBackfillState, writeRedditBackfillState } from "../backfill-state.js";
+import {
+  readRedditBackfillState,
+  writeRedditBackfillState,
+  redditWalkSingletonKey,
+} from "../backfill-state.js";
 import type { RedditSourceKind } from "../backfill-state.js";
 import type { RawEvent } from "$lib/sources/adapter.js";
 
@@ -97,9 +108,25 @@ const INCREMENTAL_PAGE_CAP = 2;
  *  under this. */
 const DEEP_PAGE_CAP = 30;
 
+/** One collected post: the cross-source RawEvent plus the walk-local facts the
+ *  fan-out needs but the RawEvent contract does not carry (the post author, which
+ *  decides `author_is_me` per post — NOT per source). */
+interface CollectedPost {
+  event: RawEvent;
+  /** reddit_posts.author VERBATIM (case-preserving); null when the feed omitted it. */
+  author: string | null;
+}
+
 /** Map one NormalizedRedditPost → the cross-source RawEvent. Title = the post
- *  headline (falls back to the self-text body first line, then a date fallback). */
-function postToRawEvent(post: NormalizedRedditPost): RawEvent {
+ *  headline (falls back to the self-text body first line, then a date fallback).
+ *
+ *  `subredditSlug` is the EFFECTIVE slug the caller resolved (the post's own value,
+ *  falling back to the walked channelKey on a subreddit walk) — the SAME value
+ *  writeSnapshot persists. Passing it in rather than re-reading post.subredditSlug is
+ *  the review fix: the native subreddit feed may omit `subreddit`, and the two call
+ *  sites used to disagree (cache got the fallback, the event's metadata got null), so
+ *  the card lost its `r/<sub>` line for exactly those posts. */
+function postToRawEvent(post: NormalizedRedditPost, subredditSlug: string | null): RawEvent {
   const fallbackUrl = `https://www.reddit.com/comments/${post.id.replace(/^t3_/, "")}`;
   const title =
     buildRedditTitle(post.title) || buildRedditTitle(post.selftext) || `Reddit post · ${post.id}`;
@@ -115,7 +142,7 @@ function postToRawEvent(post: NormalizedRedditPost): RawEvent {
     // stale event-metadata copy that export/DTO could serve. feed-enrichment reads both
     // fresh from reddit_posts via JOIN at render time (AGENTS.md no-denorm P0).
     metadata: {
-      subreddit: post.subredditSlug,
+      subreddit: subredditSlug,
     },
   };
 }
@@ -249,7 +276,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // reconciling [oldestSeen, now] would false-mark them deleted. Skip reconcile in that case.
   const startedFromTop = state.cursor === null;
 
-  const collectedEvents: RawEvent[] = [];
+  const collected: CollectedPost[] = [];
   const seenIds: string[] = [];
   let oldestSeenPublishedAt: Date | null = null;
   let requestsUsed = 0;
@@ -357,9 +384,15 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         oldestSeenPublishedAt = post.publishedAt;
       }
 
+      // ONE effective slug for BOTH the cache row and the event metadata (review fix):
+      // the native subreddit feed may omit `subreddit`, and the walked channelKey IS
+      // the slug in that mode. The author feed cannot infer it, so it stays null there.
+      const effectiveSubredditSlug =
+        post.subredditSlug ?? (config.mode === "subreddit" ? channelKey : null);
+
       await writeSnapshot({
         postId: post.id,
-        subredditSlug: post.subredditSlug ?? (config.mode === "subreddit" ? channelKey : null),
+        subredditSlug: effectiveSubredditSlug,
         mediaType: post.mediaType,
         title: post.title,
         caption: post.selftext,
@@ -380,7 +413,10 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         crossedBound = true;
         break;
       }
-      collectedEvents.push(postToRawEvent(post));
+      collected.push({
+        event: postToRawEvent(post, effectiveSubredditSlug),
+        author: post.author,
+      });
       state.collected += 1;
       if (isDeep && state.collected >= maxPosts) {
         crossedBound = true;
@@ -406,13 +442,20 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
   const pausedThisTick = pausedByBudget || pausedByRateLimit || pausedByUserQuota;
 
+  // PENDING INTENTS for this exact channel (review fix, read BEFORE the subscriber
+  // re-read below — the ordering is load-bearing). enqueueViaOutbox writes the intent
+  // row in the SAME transaction as the createSource/refresh mutation, so an intent
+  // visible here has a COMMITTED subscriber row, and the re-read that follows is
+  // guaranteed to see it. That makes the intent safe to COLLAPSE into this walk (see
+  // coalescePendingIntents) instead of letting the forwarder replay it as a second
+  // PAID walk of the same feed once this job finishes.
+  const pendingIntents = await selectPendingIntents(config, channelKey);
+
   // RE-READ the subscriber set after the (potentially seconds-long) page walk
   // (review fix): a tenant whose createSource committed mid-walk had their initial
   // job deduped by the channel-scoped singleton — they must still ride THIS fan-out,
   // or they see nothing until the next daily cron. Narrows the dedupe race window
-  // from the whole walk to milliseconds. (A mid-walk subscriber's DEEPER initial
-  // target can still be lost to the dedupe — accepted, rare; the PATCH-widen path
-  // re-opens the deep walk on demand.)
+  // from the whole walk to milliseconds.
   subscribers = await loadSubscribers();
   const widenedSubscriber =
     state.complete && !pausedThisTick
@@ -462,12 +505,17 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     return;
   }
 
+  // Per-post author_is_me needs to know which Reddit usernames each subscriber CLAIMS
+  // AS THEIR OWN — one lookup for the whole fan-out (see resolveOwnedUsernames).
+  const ownedUsernames = await resolveOwnedUsernames(config, channelKey, subscribers);
+
   // ── Fan-out INSERT per subscriber ──
   const { insertedTotal, insertedByUser } = await fanOut(
-    collectedEvents,
+    collected,
     subscribers,
     flow,
     triggerUserId,
+    ownedUsernames,
   );
   if (
     flow === "incremental" &&
@@ -478,6 +526,27 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   ) {
     flow = "historical";
   }
+
+  // ── Collapse the pending intents this walk already satisfied (review fix) ──
+  // Each merged intent gets its OWN fan-out pass over the SAME in-memory page data —
+  // pure DB work, ZERO extra provider requests — so a duplicate walk becomes free
+  // instead of costing a second paid coverage pass. The intent's own flow +
+  // triggerUserId are threaded so trigger-user semantics (a manual refresh landing on
+  // an auto_import=false source) are preserved rather than silently dropped.
+  const coalesced = await coalescePendingIntents({
+    config,
+    job,
+    channelKey,
+    pendingIntents,
+    collected,
+    subscribers,
+    ownedUsernames,
+    coveredTarget: widenedSubscriber?.backfillTargetSince ?? target,
+    startedFromTop,
+    walkedComplete: state.complete,
+    paused: pausedThisTick || notFound,
+    branch,
+  });
 
   // ── Variant-A deletion reconciliation (12-SPIKE) ──
   // Only on a genuine COMPLETE coverage pass (unpaused; reached end-of-feed or the
@@ -572,8 +641,9 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       flow,
       triggerUserId: triggerUserId ?? null,
       subscribers: subscribers.length,
-      candidates: collectedEvents.length,
+      candidates: collected.length,
       insertedTotal,
+      coalescedIntents: coalesced,
       requestsUsed,
       collected: state.collected,
       walkComplete,
@@ -714,23 +784,81 @@ async function clearReappearedDeletions(
   return cleared.length;
 }
 
+interface WalkSubscriber {
+  id: string;
+  userId: string;
+  autoImport: boolean;
+  isOwnedByMe: boolean;
+  backfillTargetSince: Date | null;
+}
+
+/** The lowercase Reddit usernames each subscriber claims as THEIR OWN, keyed by
+ *  userId. Drives per-post `author_is_me` (see fanOut).
+ *
+ *  An ACCOUNT walk needs no query: the walked channelKey IS the author (the walk drops
+ *  off-subject posts), so the source's own is_owned_by_me answers it.
+ *
+ *  A SUBREDDIT walk must NOT inherit the source flag (the review P1): r/gamedev's
+ *  posts are written by thousands of strangers, and `is_owned_by_me` DEFAULTS TO TRUE
+ *  on data_sources — so every imported community post was landing in the diary tagged
+ *  "mine", poisoning the mine/others filter and the per-author counts. Ownership is a
+ *  property of the POST's author, so we resolve it from the tenant's OWN reddit_account
+ *  sources (the only place the user declares "this Reddit identity is mine") and match
+ *  case-insensitively (Reddit usernames are case-insensitive; `author` is stored
+ *  verbatim for display). No owned account ⇒ nothing in this subreddit is "mine". */
+async function resolveOwnedUsernames(
+  config: RedditWalkConfig,
+  channelKey: string,
+  subscribers: WalkSubscriber[],
+): Promise<Map<string, Set<string>>> {
+  const owned = new Map<string, Set<string>>();
+  if (subscribers.length === 0) return owned;
+
+  if (config.kind === "reddit_account") {
+    for (const sub of subscribers) {
+      if (sub.isOwnedByMe) owned.set(sub.userId, new Set([channelKey.toLowerCase()]));
+    }
+    return owned;
+  }
+
+  const userIds = [...new Set(subscribers.map((sub) => sub.userId))];
+  const rows = await db
+    .select({
+      userId: dataSources.userId,
+      channelId: dataSources.channelId,
+      metadata: dataSources.metadata,
+    })
+    .from(dataSources)
+    .where(
+      and(
+        inArray(dataSources.userId, userIds),
+        eq(dataSources.kind, "reddit_account"),
+        eq(dataSources.isOwnedByMe, true),
+        isNull(dataSources.deletedAt),
+      ),
+    );
+  for (const row of rows) {
+    const handle = row.channelId ?? (row.metadata as { handle?: unknown } | null)?.handle;
+    if (typeof handle !== "string" || handle === "") continue;
+    const set = owned.get(row.userId) ?? new Set<string>();
+    set.add(handle.toLowerCase());
+    owned.set(row.userId, set);
+  }
+  return owned;
+}
+
 async function fanOut(
-  collectedEvents: RawEvent[],
-  subscribers: Array<{
-    id: string;
-    userId: string;
-    autoImport: boolean;
-    isOwnedByMe: boolean;
-    backfillTargetSince: Date | null;
-  }>,
+  collected: CollectedPost[],
+  subscribers: WalkSubscriber[],
   flow: RedditWalkFlow,
   triggerUserId: string | undefined,
+  ownedUsernames: Map<string, Set<string>>,
 ): Promise<{ insertedTotal: number; insertedByUser: Map<string, number> }> {
   let insertedTotal = 0;
   const insertedByUser = new Map<string, number>();
-  if (collectedEvents.length === 0) return { insertedTotal, insertedByUser };
+  if (collected.length === 0) return { insertedTotal, insertedByUser };
 
-  const externalIds = collectedEvents.map((e) => e.externalId);
+  const externalIds = collected.map((c) => c.event.externalId);
   const userIds = subscribers.map((s) => s.userId);
   const sourceIds = subscribers.map((s) => s.id);
   const existing = await db
@@ -750,29 +878,8 @@ async function fanOut(
   for (const r of existing)
     if (r.externalId) existingSet.add(`${r.userId}|${r.sourceId}|${r.externalId}`);
 
-  const detachedLegacy = await db
-    .select({
-      id: events.id,
-      userId: events.userId,
-      externalId: events.externalId,
-    })
-    .from(events)
-    .where(
-      and(
-        inArray(events.userId, userIds),
-        inArray(events.externalId, externalIds),
-        sql`${events.kind} = 'reddit_post'`,
-        isNull(events.sourceId),
-        isNotNull(events.externalId),
-        isNull(events.deletedAt),
-        sql`${events.metadata} @> '{"reddit_legacy_source_detached":true}'::jsonb`,
-      ),
-    );
-  const detachedByUserAndExternalId = new Map(
-    detachedLegacy.map((row) => [`${row.userId}|${row.externalId}`, row.id]),
-  );
-
-  for (const ev of collectedEvents) {
+  for (const { event: ev, author } of collected) {
+    const authorKey = author === null ? null : author.toLowerCase();
     for (const sub of subscribers) {
       if (sub.backfillTargetSince && ev.occurredAt < sub.backfillTargetSince) continue;
       const isTriggerUser = triggerUserId === sub.userId;
@@ -783,33 +890,16 @@ async function fanOut(
       }
       if (existingSet.has(`${sub.userId}|${sub.id}|${ev.externalId}`)) continue;
 
-      const detachedId = detachedByUserAndExternalId.get(`${sub.userId}|${ev.externalId}`);
-      if (detachedId !== undefined) {
-        const reattached = await db
-          .update(events)
-          .set({
-            sourceId: sub.id,
-            metadata: sql`${events.metadata} - 'reddit_legacy_source_detached'`,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(eq(events.userId, sub.userId), eq(events.id, detachedId), isNull(events.sourceId)),
-          )
-          .returning({ id: events.id });
-        if (reattached.length > 0) {
-          existingSet.add(`${sub.userId}|${sub.id}|${ev.externalId}`);
-          detachedByUserAndExternalId.delete(`${sub.userId}|${ev.externalId}`);
-          continue;
-        }
-      }
-
       const inserted = await db
         .insert(events)
         .values({
           userId: sub.userId,
           sourceId: sub.id,
           kind: "reddit_post",
-          authorIsMe: sub.isOwnedByMe,
+          // PER-POST, never per-source: "mine" means THIS post's author is an identity
+          // the tenant declared as their own (resolveOwnedUsernames). An unknown author
+          // is never "mine".
+          authorIsMe: authorKey !== null && ownedUsernames.get(sub.userId)?.has(authorKey) === true,
           occurredAt: ev.occurredAt,
           title: ev.title,
           url: ev.url,
@@ -827,6 +917,146 @@ async function fanOut(
   return { insertedTotal, insertedByUser };
 }
 
+/** A queue intent for THIS channel that the forwarder has not delivered yet — either
+ *  because pg-boss refused it on the channel-scoped singleton (this very walk holds the
+ *  key) or because it landed while we were walking. */
+interface PendingWalkIntent {
+  id: string;
+  payload: Record<string, unknown>;
+}
+
+/** Pending intents for this (queue, channel). Read BEFORE the post-walk subscriber
+ *  re-read so every intent seen here has an already-committed subscriber row
+ *  (enqueueViaOutbox writes the intent inside the mutation's transaction). */
+async function selectPendingIntents(
+  config: RedditWalkConfig,
+  channelKey: string,
+): Promise<PendingWalkIntent[]> {
+  const singletonKey = redditWalkSingletonKey(config.kind, channelKey);
+  return db
+    .select({ id: outbox.id, payload: outbox.payload })
+    .from(outbox)
+    .where(
+      and(
+        eq(outbox.queue, config.queue),
+        isNull(outbox.forwardedAt),
+        sql`${outbox.options}->>'singletonKey' = ${singletonKey}`,
+      ),
+    );
+}
+
+/** Does THIS pass already deliver what the pending intent asked for? */
+function intentCoveredByPass(
+  payload: Record<string, unknown>,
+  args: { coveredTarget: Date; walkedComplete: boolean },
+): boolean {
+  const flow = payload.flow;
+  // A newest-first sweep (daily cron / manual "Pull new content"). The caller only
+  // invokes this on a pass that STARTED AT THE TOP of the feed, which is exactly the
+  // coverage such an intent wants — the page cap is irrelevant to it.
+  if (flow === undefined || flow === "auto_passive" || flow === "incremental") return true;
+  // An archive request (initial / historical, incl. forceDeep widen). Only collapse it
+  // when this pass reached its coverage boundary AND walked at least as deep as the
+  // intent asks — otherwise the tenant's history request would be silently dropped.
+  if (!args.walkedComplete) return false;
+  if (typeof payload.depthBoundIso !== "string") return false;
+  const depth = new Date(payload.depthBoundIso);
+  if (Number.isNaN(depth.getTime())) return false;
+  return depth.getTime() >= args.coveredTarget.getTime();
+}
+
+/**
+ * MERGE the pending intents this walk already satisfied instead of letting the
+ * forwarder replay them as additional PAID walks of the same feed (review P1).
+ *
+ * `retrySingletonConflict` alone never deduplicated anything: pg-boss refused the
+ * duplicate send while this job was active, the outbox row stayed pending, and the very
+ * next sweep re-sent it the moment this job completed — one extra full coverage pass per
+ * duplicate intent, on a SHARED prepaid balance.
+ *
+ * Merging is free and lossless because the expensive half (the provider pages) is
+ * already in memory: each merged intent gets its own fan-out over the same data with
+ * ITS flow + trigger user, so a mid-walk subscriber lands their events here, and a
+ * manual refresh on an auto_import=false source still imports for its trigger user.
+ * An intent this pass does NOT cover (deeper archive, or a paused/lossy pass) is left
+ * pending on purpose — the forwarder delivers it later and it walks for real.
+ */
+async function coalescePendingIntents(args: {
+  config: RedditWalkConfig;
+  job: RedditWalkJob;
+  channelKey: string;
+  pendingIntents: PendingWalkIntent[];
+  collected: CollectedPost[];
+  subscribers: WalkSubscriber[];
+  ownedUsernames: Map<string, Set<string>>;
+  coveredTarget: Date;
+  startedFromTop: boolean;
+  walkedComplete: boolean;
+  paused: boolean;
+  branch: string;
+}): Promise<number> {
+  if (args.pendingIntents.length === 0) return 0;
+  // A paused / not-found tick proves nothing about coverage, and a resumed deep tick
+  // (cursor already set) never fetched the newest page — leave every intent pending.
+  if (args.paused || !args.startedFromTop) return 0;
+
+  const merged = args.pendingIntents.filter((intent) => intentCoveredByPass(intent.payload, args));
+  if (merged.length === 0) return 0;
+
+  for (const intent of merged) {
+    const flow: RedditWalkFlow =
+      typeof intent.payload.flow === "string"
+        ? (intent.payload.flow as RedditWalkFlow)
+        : "auto_passive";
+    const intentTriggerUserId =
+      typeof intent.payload.triggerUserId === "string" ? intent.payload.triggerUserId : undefined;
+    const { insertedByUser } = await fanOut(
+      args.collected,
+      args.subscribers,
+      flow,
+      intentTriggerUserId,
+      args.ownedUsernames,
+    );
+    if (intentTriggerUserId !== undefined) {
+      // The merged intent's trigger user gets their cap-counter row with
+      // requests_used=0: they spent NO provider request (that is the whole point), but
+      // the diary still owes them the "your refresh landed N events" trail.
+      await writeWalkAudit({
+        config: args.config,
+        job: args.job,
+        flow,
+        channelKey: args.channelKey,
+        triggerUserId: intentTriggerUserId,
+        requestsUsed: 0,
+        inserted: insertedByUser.get(intentTriggerUserId) ?? 0,
+        branch: args.branch,
+        coalesced: true,
+      });
+    }
+  }
+
+  await db
+    .update(outbox)
+    .set({
+      forwardedAt: new Date(),
+      lastError: "coalesced into the active reddit walk (no second paid pass)",
+    })
+    .where(
+      and(
+        inArray(
+          outbox.id,
+          merged.map((intent) => intent.id),
+        ),
+        isNull(outbox.forwardedAt),
+      ),
+    );
+  logger.info(
+    { jobId: args.job.id, channelKey: args.channelKey, coalesced: merged.length },
+    `${args.config.queue}: merged pending walk intents into this pass`,
+  );
+  return merged.length;
+}
+
 /** STRICT backfill audit — the per-user cap counter (getUserQuotaUsedToday) SUMs
  *  requests_used from this row. metadata.platform = the SOURCE KIND (QUOTA_PLATFORM
  *  = reddit_account | reddit_subreddit), NOT the social-budget label "reddit" — the
@@ -841,6 +1071,9 @@ async function writeWalkAudit(args: {
   requestsUsed: number;
   inserted: number;
   branch: string;
+  /** This row belongs to an intent MERGED into another walk (coalescePendingIntents) —
+   *  no provider request of its own. */
+  coalesced?: boolean;
 }): Promise<void> {
   await writeAuditStrict({
     userId: args.triggerUserId,
@@ -856,6 +1089,7 @@ async function writeWalkAudit(args: {
       requests_used: args.requestsUsed,
       events_inserted: args.inserted,
       since_branch: args.branch,
+      coalesced: args.coalesced === true,
     },
   });
 }

@@ -57,14 +57,38 @@ describe("reddit url parsing (Phase 12 rebuild)", () => {
     expect(parsed!.kind).toBe("reddit_post");
     expect(parsed!.externalId).toBe("1ubhppn");
     expect(parsed!.metadata?.subreddit).toBe("gamedev"); // lowercase
+  });
 
-    // profile self-post form (spike fixture: /user/<u>/comments/<id>)
+  it("[review-P1] /user/<name>/comments/<id> resolves the PROFILE pseudo-subreddit u_<name>, never the r/<name> community", () => {
+    // Pre-fix the /user/ root was parsed as a plain subreddit name, so the paste preview
+    // and the refresh lane both asked the provider for ?subreddit=<name> — the unrelated
+    // r/<name> community (or a 404), never the post. Reddit files profile posts under
+    // `u_<name>`, which is also the slug the walker caches, so all three paths agree.
     const profile = redditParsePostUrl(
-      "https://www.reddit.com/user/d954mas/comments/1sw3kot/not_a_trolley_problem/",
+      "https://www.reddit.com/user/D954mas/comments/1sw3kot/not_a_trolley_problem/",
     );
     expect(profile).not.toBeNull();
     expect(profile!.kind).toBe("reddit_post");
     expect(profile!.externalId).toBe("1sw3kot");
+    expect(profile!.metadata?.subreddit).toBe("u_d954mas");
+
+    // A literal /r/u_<name> paste (Reddit's own canonical form) must NOT double-prefix.
+    const literal = redditParsePostUrl("https://www.reddit.com/r/u_d954mas/comments/1sw3kot/x/");
+    expect(literal!.metadata?.subreddit).toBe("u_d954mas");
+  });
+
+  it("[review-P2] /comments/<id> (subreddit-less canonical form) parses recognition-only", () => {
+    // Produced by the walker's permalink fallback AND by the deletion-propagation purge
+    // (which strips /user/<name>/ out of a deleted post's URL). It MUST parse:
+    // validateEventInput 422s any reddit_post whose url does not, so an un-parsed form
+    // would make every later PATCH of that event fail.
+    const parsed = redditParsePostUrl("https://www.reddit.com/comments/1ubhppn");
+    expect(parsed).not.toBeNull();
+    expect(parsed!.externalId).toBe("1ubhppn");
+    expect(parsed!.metadata?.subreddit, "no subreddit in the URL ⇒ recognition-only").toBeNull();
+    expect(redditParsePostUrl("https://www.reddit.com/comments/1ubhppn/slug/")!.externalId).toBe(
+      "1ubhppn",
+    );
   });
 
   it("[12-03] redditParsePostUrl: redd.it/<id> short-link → reddit_post, subreddit null", () => {

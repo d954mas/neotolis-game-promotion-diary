@@ -355,6 +355,9 @@ async function onSourceCreated(
     // Channel-scoped singleton (NOT per-source `source-${id}`): two tenants who add the
     // SAME channel must dedupe to ONE initial walk, not double-spend on concurrent walks
     // of the same feed. Shared across initial/manual/cron (redditWalkSingletonKey).
+    // pg-boss only DEFERS the conflicting intent; what actually makes this ONE paid walk
+    // is walk-core's coalescePendingIntents, which settles the deferred intent by
+    // re-running the fan-out over the pages this walk already fetched.
     {
       singletonKey: redditWalkSingletonKey(kind, channelKey),
       retrySingletonConflict: true,
@@ -495,6 +498,19 @@ async function fetchEventPreviewMetadata(
   const parsed = redditParsePostUrl(canonicalUrl);
   if (parsed === null) return { kind: "unreachable", cause: "url_not_reddit_post" };
 
+  // RECOGNITION-ONLY short link (review fix): `redd.it/<id>` carries no subreddit, and
+  // ScrapeCreators exposes neither lookup-by-id nor a redirect follower — the provider
+  // could only ever return null here. Say so BEFORE the cap gate: the pre-fix order
+  // spent a per-user quota slot (enforceAdapterUserQuota writes the counter audit row)
+  // on a request that never left the process, and reported the dead-end as the generic
+  // "unavailable" (indistinguishable from a deleted post). The URL still parses, so the
+  // user can save the event as a stats-less manual card — or re-paste the full
+  // /r/<sub>/comments/<id> permalink to get live data.
+  const parsedSubreddit = (parsed.metadata?.subreddit as string | null | undefined) ?? null;
+  if (parsedSubreddit === null) {
+    return { kind: "unreachable", cause: "reddit_short_link_unsupported" };
+  }
+
   await enforceAdapterUserQuota(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh", {
     platform: QUOTA_PLATFORM,
   });
@@ -503,8 +519,8 @@ async function fetchEventPreviewMetadata(
   // resolved no post — it must reach the per-user cap audit (review fix; mirrors
   // walk-core). Issued-error discriminator: an HTTP-status AdapterError carries a
   // numeric context.status; a reserve-null denial carries none (nothing was spent).
-  // The null-post path issued a request UNLESS the provider early-outed before HTTP
-  // (redd.it short-link — no subreddit in the URL, no fetch).
+  // Every path below this point DID issue the request (the one no-fetch case, the
+  // redd.it short link, already returned above).
   let post;
   try {
     post = await provider.fetchPostByUrl(SOCIAL_PLATFORM, canonicalUrl, {

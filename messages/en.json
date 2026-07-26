@@ -754,6 +754,7 @@
   "add_event_modal_footer_hint": "Will be saved as {kind} ·",
   "add_event_modal_url_error_invalid": "Not a valid URL.",
   "add_event_modal_url_error_kind_mismatch": "Doesn't look like a {platform} URL.",
+  "add_event_modal_url_error_reddit_short_link": "This link has no subreddit in it (redd.it / reddit.com/comments), so stats can't be fetched — paste the full reddit.com/r/… post link. You can still save this one without stats.",
   "add_event_modal_dirty_confirm": "Discard your changes?",
 
   "games_picker_title": "Games",

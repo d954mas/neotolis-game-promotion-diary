@@ -4,11 +4,37 @@
 //
 // Schedule: 05:00 UTC daily.
 //
-// ZERO-HTTP pure-DB UPDATE. Posts past the 48h grace window have author /
-// author_fullname / deletion_detected_by nulled. Title + body excerpt REMAIN (the
-// user's diary context); author-identifying info is removed. deletion_detected_by is
-// purged too (review fix): for an account walk its value is
-// "reddit_account:<username>" — the very author identity this cron exists to erase.
+// ZERO-HTTP pure-DB UPDATE (no provider request is needed or issued — detection is
+// what costs credits, and it already happened).
+//
+// ★ THE POLICY (review fix — "anonymize, don't delete"): after the 48h grace window,
+// EVERY field from which the deleted post's author is mechanically recoverable is
+// erased; the diary CONTENT (title, body excerpt, metrics, thumbnail, the event row
+// itself) stays, because that is the user's own record of their promotion work. The
+// pre-fix version nulled only author / author_fullname / deletion_detected_by and left
+// the username sitting in plain sight in three derived places, so the "purge" did not
+// actually purge:
+//
+//   reddit_posts.author            → NULL
+//   reddit_posts.author_fullname   → NULL  (the t2_ id — a stable author identifier)
+//   reddit_posts.deletion_detected_by → NULL  ("reddit_account:<username>")
+//   reddit_posts.permalink         → a PROFILE post's permalink is
+//                                    /user/<name>/comments/<id>/<slug> ⇒ rewritten to
+//                                    the subreddit-less canonical /comments/<id>
+//   reddit_posts.subreddit_slug    → a PROFILE post lives in the pseudo-subreddit
+//                                    `u_<name>` ⇒ NULL
+//   events.url                     → same /user/<name>/… rewrite (the diary link stays
+//                                    valid: Reddit resolves /comments/<id>, and
+//                                    redditParsePostUrl accepts it, so the event stays
+//                                    editable/refreshable)
+//   events.metadata.subreddit      → `u_<name>` ⇒ null (the card then renders no
+//                                    subreddit line instead of the username)
+//
+// A SUBREDDIT post (/r/<sub>/comments/<id>/<slug>) carries no author anywhere in its
+// URL or slug, so only the three columns change for it. The events UPDATE is
+// CROSS-TENANT by design — this is an operator compliance job, not a user request; it
+// is scoped to the exact purged post ids and to kind='reddit_post'.
+//
 // Consequence (deliberate): clearReappearedDeletions can no longer un-flag a purged
 // post (it matches on the subject key) — a purge is TERMINAL, the conservative
 // GDPR posture; deletion_detected_at stays set so the freeze + the "Deleted on
@@ -29,10 +55,10 @@
 //
 // When ADMIN_EMAIL_ALLOWLIST is empty (no operator resolvable) the purge STILL runs
 // but the audit is skipped (purging is the security-critical work; the missing
-// forensic row is logged at INFO). Idempotency: the "any identity column still
-// non-null" guard makes a re-run on an already-purged tick return purged=0 and emit
-// no audit row — and writeSnapshot never restores a nulled author (the
-// deletion_detected_at freeze in snapshots.ts).
+// forensic row is logged at INFO). Idempotency: the "any author residue still present"
+// guard (all five predicates, not just `author IS NOT NULL`) makes a re-run on an
+// already-purged tick return purged=0 and emit no audit row — and writeSnapshot never
+// restores a nulled author (the deletion_detected_at freeze in snapshots.ts).
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -48,25 +74,70 @@ export async function handleDeletionPropagationCron(): Promise<{ purged: number 
   // unconditional call costs one SELECT on the first tick only.
   const operatorId = await resolveOperatorUserId();
   const purged = await db.transaction(async (tx) => {
-    // The guard covers EVERY identity column (not just `author`): a row can carry
-    // author_fullname without author (the provider nulls them independently), and
-    // deletion_detected_by must be erased even on rows whose author was already null.
-    const result = await tx.execute(sql`
-      WITH purged AS (
-        UPDATE reddit_posts
-        SET author = NULL, author_fullname = NULL, deletion_detected_by = NULL, updated_at = NOW()
-        WHERE deletion_detected_at IS NOT NULL
-          AND deletion_detected_at < NOW() - INTERVAL '48 hours'
-          AND (author IS NOT NULL OR author_fullname IS NOT NULL OR deletion_detected_by IS NOT NULL)
-        RETURNING post_id
-      )
-      SELECT COUNT(*)::int AS purged FROM purged
+    // The guard covers EVERY place the author survives (not just `author`): a row can
+    // carry author_fullname without author (the provider nulls them independently),
+    // deletion_detected_by must be erased even on rows whose author was already null,
+    // and a profile post keeps the username inside permalink + subreddit_slug.
+    // `post_id` is the `t3_<base36>` fullname, so the anonymized permalink is rebuilt
+    // from it rather than regex-captured out of the old URL.
+    const result = await tx.execute<{ post_id: string }>(sql`
+      UPDATE reddit_posts
+      SET author = NULL,
+          author_fullname = NULL,
+          deletion_detected_by = NULL,
+          permalink = CASE
+            WHEN permalink ~* '/user/[^/]+/comments/'
+              THEN 'https://www.reddit.com/comments/' || substring(post_id from 4)
+            ELSE permalink
+          END,
+          subreddit_slug = CASE WHEN left(subreddit_slug, 2) = 'u_' THEN NULL ELSE subreddit_slug END,
+          updated_at = NOW()
+      WHERE deletion_detected_at IS NOT NULL
+        AND deletion_detected_at < NOW() - INTERVAL '48 hours'
+        AND (
+          author IS NOT NULL
+          OR author_fullname IS NOT NULL
+          OR deletion_detected_by IS NOT NULL
+          OR permalink ~* '/user/[^/]+/comments/'
+          OR left(subreddit_slug, 2) = 'u_'
+        )
+      RETURNING post_id
     `);
-    const purgedCount = Number(
-      (result as unknown as { rows: Array<{ purged: number | string }> }).rows[0]?.purged ?? 0,
+    const purgedIds = (result as unknown as { rows: Array<{ post_id: string }> }).rows.map(
+      (row) => row.post_id,
     );
+    const purgedCount = purgedIds.length;
 
     if (purgedCount > 0) {
+      // Derived-copy scrub on the diary rows themselves. CROSS-TENANT by design
+      // (operator compliance job), scoped to the purged post ids + kind='reddit_post'.
+      // Content columns (title, notes, occurred_at) are untouched — only the two
+      // author-derivable fields are.
+      // Drizzle spreads a JS array into separate placeholders, which would build a row
+      // constructor — join the ids into an explicit IN list (same pattern as
+      // feed-enrichment's DISTINCT ON query).
+      const purgedIdList = sql.join(
+        purgedIds.map((id) => sql`${id}`),
+        sql`, `,
+      );
+      await tx.execute(sql`
+        UPDATE events
+        SET url = CASE
+              WHEN url ~* '/user/[^/]+/comments/' AND left(external_id, 3) = 't3_'
+                THEN 'https://www.reddit.com/comments/' || substring(external_id from 4)
+              ELSE url
+            END,
+            metadata = CASE
+              WHEN left(metadata->>'subreddit', 2) = 'u_'
+                THEN jsonb_set(metadata, '{subreddit}', 'null'::jsonb)
+              ELSE metadata
+            END,
+            updated_at = NOW()
+        WHERE kind::text = 'reddit_post'
+          AND external_id IN (${purgedIdList})
+          AND (url ~* '/user/[^/]+/comments/' OR left(metadata->>'subreddit', 2) = 'u_')
+      `);
+
       if (operatorId === null) {
         logger.info(
           { purged: purgedCount },

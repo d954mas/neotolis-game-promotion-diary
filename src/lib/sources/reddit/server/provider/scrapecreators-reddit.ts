@@ -166,10 +166,19 @@ export const scrapeCreatorsRedditProvider: RedditSocialProvider = {
     // match the post by its t3_ fullname. Recent posts (the common paste case)
     // resolve in 1 credit; a cold post absent from page 1 yields null (the
     // preview falls back to the pasted-URL metadata in Plan 12-06).
+    //
+    // The slug the parser hands over is the FEED identity, which for a
+    // `/user/<name>/comments/<id>` profile post is Reddit's pseudo-subreddit
+    // `u_<name>` (url.ts PROFILE_SUB_PREFIX) — passing the bare `<name>` here asked
+    // for the unrelated r/<name> community and never matched the post.
     const parsed = redditParsePostUrl(url);
     if (parsed === null) return null;
     const subreddit = (parsed.metadata?.subreddit as string | null | undefined) ?? null;
-    if (subreddit === null) return null; // redd.it short-link: sub not in URL (Plan 12-06)
+    // redd.it short-link: no subreddit in the URL ⇒ no feed to search. The paste
+    // preview rejects this BEFORE the cap gate with an explicit
+    // `reddit_short_link_unsupported` cause (index.ts); this stays as the seam-level
+    // belt for any other caller (e.g. a cached permalink that is somehow a short link).
+    if (subreddit === null) return null;
 
     const page = await fetchRedditFeedPage("subreddit", subreddit, null, opts);
     void platform;
