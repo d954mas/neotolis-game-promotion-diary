@@ -32,6 +32,8 @@ const PLATFORM = "reddit";
 const PROVIDER = "scrapecreators";
 const MAX_PICK = 200;
 const INCREMENTAL_WINDOW_DAYS = 14;
+/** How stale a needs_reconnect channel must go before the cron retries it once. */
+const RECONNECT_REHAB_DAYS = 7;
 
 const KIND_CONFIG: Array<{
   kind: "reddit_account" | "reddit_subreddit";
@@ -99,13 +101,23 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
 
   let totalEnqueued = 0;
   for (const cfg of KIND_CONFIG) {
-    // Case-insensitive match: reddit_posts.author is stored verbatim (case-preserving) but
-    // channelKey is lowercased. LOWER() is a no-op for the already-lowercase subredditSlug.
-    // Without it a mixed-case account has newestPost=NULL → mis-tiered "active" forever.
+    // Case-insensitive match: reddit_posts.author is stored verbatim (case-preserving)
+    // but channelKey is lowercased — without folding, a mixed-case account has
+    // newestPost=NULL and is mis-tiered "active" forever.
+    //
+    // The fold is applied ONLY to author, and it is matched by the functional index
+    // idx_reddit_posts_author_lower. subreddit_slug is already lowercased on write
+    // (normalize.ts), so LOWER() there bought nothing and merely made
+    // idx_reddit_posts_subreddit_published unusable. This subquery is CORRELATED —
+    // evaluated once per candidate row, twice more in the active branch — against a
+    // table the schema retains forever, so an unusable index here is a sequential scan
+    // per candidate that degrades silently as the cache grows.
+    const subjectExpr =
+      cfg.kind === "reddit_account" ? sql`LOWER(${redditPosts.author})` : sql`${cfg.subject}`;
     const newestPostExpr = sql<Date | null>`(
       SELECT MAX(${redditPosts.publishedAt})
       FROM ${redditPosts}
-      WHERE LOWER(${cfg.subject}) = ${dataSourceChannelState.channelKey}
+      WHERE ${subjectExpr} = ${dataSourceChannelState.channelKey}
     )`;
 
     // Tier predicate lives in SQL, BEFORE ORDER BY/LIMIT — NOT a post-LIMIT JS filter.
@@ -135,7 +147,14 @@ export async function handleRedditPollCron(job: PollCronJob, boss: MinimalBoss):
           eq(dataSources.channelId, dataSourceChannelState.channelKey),
           isNull(dataSources.deletedAt),
           eq(dataSources.autoImport, true),
-          eq(dataSources.needsReconnect, false),
+          // REHAB LANE: needs_reconnect normally excludes a source, but only a WALK
+          // clears the flag and only this cron enqueues walks — so a source flagged by
+          // a transient upstream 404 (a sub quarantined for an hour, a provider hiccup)
+          // would be excluded forever. Reddit has no credentials, so there is no user-
+          // facing "Reconnect" button to recover it either. Let a flagged channel back
+          // in once its state has gone stale: one cheap incremental walk, and a success
+          // calls clearNeedsReconnect. Bounded at ~2 credits per stranded source per week.
+          sql`(${dataSources.needsReconnect} = false OR ${dataSourceChannelState.lastPolledAt} < NOW() - ${sql.raw(`INTERVAL '${RECONNECT_REHAB_DAYS} days'`)})`,
         ),
       )
       .where(and(sql`${dataSourceChannelState.kind} = ${cfg.kind}`, tierPredicate))

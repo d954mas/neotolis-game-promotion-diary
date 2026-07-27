@@ -86,6 +86,15 @@ export const redditPosts = pgTable(
     authorPublishedIdx: index("idx_reddit_posts_author")
       .on(t.author, t.publishedAt)
       .where(sql`${t.author} IS NOT NULL`),
+    // FUNCTIONAL twin of the above. Every author predicate in the codebase folds case
+    // (`LOWER(author) = channelKey`) because the column stores the verbatim display
+    // spelling while channelKey is lowercased — and a plain btree on `author` cannot
+    // serve a `LOWER(author)` predicate. Without this index the poll-cron tier
+    // subquery (correlated: once per candidate row, twice in the active branch) and
+    // both deletion reconcilers sequentially scan a table the schema retains FOREVER.
+    authorLowerPublishedIdx: index("idx_reddit_posts_author_lower")
+      .on(sql`LOWER(${t.author})`, t.publishedAt)
+      .where(sql`${t.author} IS NOT NULL`),
     // Subreddit-walk frontier — the newest-post-per-sub lookup for
     // reddit_subreddit sources.
     subredditPublishedIdx: index("idx_reddit_posts_subreddit_published").on(

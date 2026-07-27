@@ -1,0 +1,1 @@
+CREATE INDEX "idx_reddit_posts_author_lower" ON "reddit_posts" USING btree (LOWER("author"),"published_at") WHERE "reddit_posts"."author" IS NOT NULL;

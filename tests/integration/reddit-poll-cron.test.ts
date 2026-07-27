@@ -6,6 +6,7 @@
 //
 // Requirements: PLAT-04 / D-15 (throttle skip-gate).
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { MinimalBoss } from "../../src/lib/sources/adapter.js";
 
@@ -153,5 +154,40 @@ describe("reddit.poll.cron enqueue + throttle skip-gate", () => {
     await handleRedditPollCron({ id: "j7", data: { tier: "warm" } }, stubBoss(sent));
 
     expect(sent, "a warm tick must not enqueue anything").toHaveLength(0);
+  });
+
+  // REGRESSION: needs_reconnect excludes a channel from this cron, but ONLY a walk
+  // clears the flag and ONLY this cron enqueues walks — so a source flagged by a
+  // transient upstream 404 was stranded forever, with no "Reconnect" button to press
+  // (Reddit has no credentials). A stale flagged channel gets one retry per week.
+  it("[review-P2] a needs_reconnect channel is skipped while fresh, and retried once stale", async () => {
+    const fresh = `rcf${uniq()}`,
+      stale = `rcs${uniq()}`;
+    await seedChannel(fresh, 1);
+    await seedChannel(stale, 1);
+    await db
+      .update(dataSources)
+      .set({ needsReconnect: true })
+      .where(eq(dataSources.channelId, fresh));
+    await db
+      .update(dataSources)
+      .set({ needsReconnect: true })
+      .where(eq(dataSources.channelId, stale));
+    // Only the stale one has gone past the rehab window.
+    await db
+      .update(dataSourceChannelState)
+      .set({ lastPolledAt: new Date(Date.now() - 1 * DAY) })
+      .where(eq(dataSourceChannelState.channelKey, fresh));
+    await db
+      .update(dataSourceChannelState)
+      .set({ lastPolledAt: new Date(Date.now() - 30 * DAY) })
+      .where(eq(dataSourceChannelState.channelKey, stale));
+    const sent: SentJob[] = [];
+
+    await handleRedditPollCron({ id: "j8", data: { tier: "active" } }, stubBoss(sent));
+
+    const keys = sent.map((s) => s.payload.channelKey);
+    expect(keys, "a recently-flagged channel stays excluded").not.toContain(fresh);
+    expect(keys, "a long-stale flagged channel gets one rehab walk").toContain(stale);
   });
 });
