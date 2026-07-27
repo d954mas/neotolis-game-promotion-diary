@@ -66,7 +66,10 @@ import { writeAuditTx } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import { resolveOperatorUserId } from "../quota.js";
 
-export async function handleDeletionPropagationCron(): Promise<{ purged: number }> {
+export async function handleDeletionPropagationCron(): Promise<{
+  purged: number;
+  orphansAnonymized: number;
+}> {
   // Resolve the operator BEFORE opening the purge transaction (review fix): the
   // resolver runs on the module-level `db` — called from inside the tx it would
   // acquire a SECOND pool connection while the tx holds its first, hanging the
@@ -158,6 +161,58 @@ export async function handleDeletionPropagationCron(): Promise<{ purged: number 
     return purgedCount;
   });
 
-  logger.info({ purged }, "reddit.deletion_propagation_cron: tick complete");
-  return { purged };
+  const orphansAnonymized = await anonymizeOrphanedAuthors();
+
+  logger.info({ purged, orphansAnonymized }, "reddit.deletion_propagation_cron: tick complete");
+  return { purged, orphansAnonymized };
+}
+
+/** How long a cached post may sit with NOBODY interested before its author is dropped. */
+const ORPHAN_AUTHOR_RETENTION_DAYS = 90;
+
+/**
+ * ORPHAN GC — the other half of the Reddit Public Content Policy posture.
+ *
+ * A `reddit_subreddit` walk caches EVERY post in the sub, which means it stores THIRD
+ * PARTIES' usernames + their stable `t2_` ids — not the tenant's own identity. The
+ * purge above only ever fires on `deletion_detected_at`, and that flag is only ever set
+ * by a walk of that subject. So the moment the source is deleted (or the whole tenant
+ * account is), no walk runs again, nothing is ever flagged, and those identities freeze
+ * in the table with no mechanism that can ever remove them — exactly the outcome the
+ * deletion-propagation control exists to prevent. The other paid adapters do not have
+ * this exposure because they only ever cache the account owner's own posts.
+ *
+ * A row is orphaned when NOTHING references it any more:
+ *   - no diary event points at it (any tenant — the row is public data), and
+ *   - no live source covers its subject (neither the author as a reddit_account nor
+ *     its subreddit as a reddit_subreddit), and
+ *   - no walk has touched it for the retention window (a live walk rewrites author on
+ *     every re-sighting, so a stale updated_at is itself evidence nobody is polling it).
+ *
+ * Content is preserved — this anonymizes the author, it does not delete the post row,
+ * mirroring the "anonymize, don't delete" rule of the purge above. ZERO-HTTP.
+ */
+async function anonymizeOrphanedAuthors(): Promise<number> {
+  const result = await db.execute<{ post_id: string }>(sql`
+    UPDATE reddit_posts p
+    SET author = NULL,
+        author_fullname = NULL,
+        updated_at = NOW()
+    WHERE (p.author IS NOT NULL OR p.author_fullname IS NOT NULL)
+      AND p.updated_at < NOW() - ${sql.raw(`INTERVAL '${ORPHAN_AUTHOR_RETENTION_DAYS} days'`)}
+      AND NOT EXISTS (
+        SELECT 1 FROM events e
+         WHERE e.kind::text = 'reddit_post' AND e.external_id = p.post_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM data_sources ds
+         WHERE ds.deleted_at IS NULL
+           AND (
+             (ds.kind::text = 'reddit_account' AND LOWER(ds.channel_id) = LOWER(p.author))
+             OR (ds.kind::text = 'reddit_subreddit' AND ds.channel_id = p.subreddit_slug)
+           )
+      )
+    RETURNING p.post_id
+  `);
+  return (result as unknown as { rows: Array<{ post_id: string }> }).rows.length;
 }

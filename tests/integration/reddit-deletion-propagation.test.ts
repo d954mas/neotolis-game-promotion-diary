@@ -253,6 +253,7 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       collected: 2,
       operatorPaused: false,
       deepTargetIso: null,
+      emptyPasses: 0,
     });
 
     // Tick 2 resumes deep + returns only an OLDER page (C@10d), reaching end-of-feed.
@@ -479,5 +480,81 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       (env as { ADMIN_EMAIL_ALLOWLIST: Set<string> }).ADMIN_EMAIL_ALLOWLIST = savedAllowlist;
       await resetSocialDailyCap();
     }
+  });
+  // ORPHAN GC (review): a reddit_subreddit walk caches THIRD PARTIES' usernames + their
+  // stable t2_ ids. The purge above only ever fires on deletion_detected_at, and that
+  // flag is only ever set by a WALK of that subject — so once the source is gone, no
+  // walk runs, nothing is flagged, and those identities freeze in the table forever with
+  // no mechanism that can remove them.
+  describe("orphan author GC", () => {
+    it("anonymizes a stale post nobody references any more", async () => {
+      const shortId = `orph${uniq()}`;
+      await seedTrackedPost(shortId, 400, `Stranger${uniq()}`);
+      // Older than the retention window and untouched by any walk since.
+      await db
+        .update(redditPosts)
+        .set({ updatedAt: new Date(Date.now() - 200 * DAY) })
+        .where(eq(redditPosts.postId, `t3_${shortId}`));
+
+      await handleDeletionPropagationCron();
+
+      const row = await readPost(shortId);
+      expect(row!.author, "an orphaned third-party username must not be kept forever").toBeNull();
+      expect(row!.authorFullname, "the stable t2_ id goes with it").toBeNull();
+      expect(row!.title, "content is anonymized, not deleted").toBe(`Devlog ${shortId}`);
+    });
+
+    it("keeps the author while a diary event still references the post", async () => {
+      const u = await seedUserDirectly({ email: `rdt-gc-ev-${uniq()}@t.io` });
+      const shortId = `keep${uniq()}`;
+      const author = `Stranger${uniq()}`;
+      await seedTrackedPost(shortId, 400, author);
+      await db
+        .update(redditPosts)
+        .set({ updatedAt: new Date(Date.now() - 200 * DAY) })
+        .where(eq(redditPosts.postId, `t3_${shortId}`));
+      await db.insert(events).values({
+        userId: u.id,
+        kind: "reddit_post",
+        occurredAt: new Date(Date.now() - 400 * DAY),
+        title: "still in my diary",
+        externalId: `t3_${shortId}`,
+      });
+
+      await handleDeletionPropagationCron();
+
+      expect((await readPost(shortId))!.author, "a referenced post keeps its author").toBe(author);
+    });
+
+    it("keeps the author while a LIVE source still covers the subject", async () => {
+      const shortId = `live${uniq()}`;
+      const author = `Owner${uniq()}`;
+      await seedAccountSource(author.toLowerCase());
+      await seedTrackedPost(shortId, 400, author);
+      await db
+        .update(redditPosts)
+        .set({ updatedAt: new Date(Date.now() - 200 * DAY) })
+        .where(eq(redditPosts.postId, `t3_${shortId}`));
+
+      await handleDeletionPropagationCron();
+
+      expect(
+        (await readPost(shortId))!.author,
+        "a subject someone still tracks is not an orphan",
+      ).toBe(author);
+    });
+
+    it("keeps a RECENTLY walked post even with no event and no source", async () => {
+      const shortId = `fresh${uniq()}`;
+      const author = `Stranger${uniq()}`;
+      await seedTrackedPost(shortId, 400, author);
+      // updated_at is "now" from the insert — a live walk touched it.
+
+      await handleDeletionPropagationCron();
+
+      expect((await readPost(shortId))!.author, "the retention window must be respected").toBe(
+        author,
+      );
+    });
   });
 });
