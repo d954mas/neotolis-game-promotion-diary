@@ -41,4 +41,22 @@ test.describe("360px responsive smoke", () => {
     // way the resolved URL contains /login.
     expect(page.url()).toMatch(/\/login/);
   });
+
+  // The last straggler of the vitest -> playwright migration: the other cases moved
+  // when vitest#7981 bit, this one stayed behind in tests/browser/responsive-360.test.ts
+  // and was invisible because that project ran in no CI job.
+  test("body computed overflow-x is 'clip' (not 'hidden') — sticky descendants anchor to viewport", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const overflowX = await page.evaluate(() => getComputedStyle(document.body).overflowX);
+    // `clip` is the load-bearing value: it crops overflow WITHOUT establishing a scroll
+    // container, preserving position: sticky on descendants. `hidden` (the regression
+    // source) coerces overflow-y to auto and promotes body to a scroll container,
+    // breaking sticky anchoring.
+    expect(
+      overflowX,
+      `body computed overflow-x === ${overflowX} — expected 'clip' to preserve sticky descendants`,
+    ).toBe("clip");
+  });
 });

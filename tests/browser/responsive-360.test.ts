@@ -33,20 +33,11 @@
  *      not display:none + non-zero box).
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { page, commands } from "@vitest/browser/context";
-
-// `process.env` is undefined in the browser context where vitest 4 + Playwright
-// run these tests. The vite preview server boots on :5173 in both CI and local
-// flows, so hard-coding the URL is correct for the test surface; if a future
-// env override is needed, vitest.config.ts can inject via `define:`.
-const BASE = "http://localhost:5173";
+import { describe, it } from "vitest";
 
 // Public routes — no auth cookie needed. Both render via SvelteKit
 // SSR + client hydration; the dashboard '/' is the post-login landing
 // (anonymous renders a 'Sign in' link), and '/login' is the OAuth entry.
-const PUBLIC_ROUTES = ["/", "/login"];
-
 // Authenticated routes — gated by Better Auth session cookie. The
 // 360px assertion against these is documented in `Manual-Only
 // Verifications` and exercised in the human checkpoint. Listed here as
@@ -65,78 +56,24 @@ const AUTH_ROUTES = [
   "/settings",
 ];
 
+// AUTH_ROUTES exists so the DEFERRED contract surface is enumerable by name — that was
+// always its stated purpose, but nothing referenced it, so it was dead data and the
+// enumeration never appeared in any runner output. Realized here as named skips; each
+// becomes a real assertion when the cookie-injection harness lands.
+describe("360px viewport authenticated-route smoke (manual UAT until the auth harness lands)", () => {
+  for (const route of AUTH_ROUTES) {
+    it.skip(`${route} renders without horizontal scroll at 360x640 (auth harness deferred)`);
+  }
+});
+
 describe("360px viewport public-route smoke", () => {
-  beforeAll(async () => {
-    // Set the viewport once for the suite. Each test re-asserts it before
-    // page.goto — Vitest browser mode resets navigation state but viewport
-    // persists across tests within a file by default.
-    await page.viewport(360, 640);
-  });
+  // MIGRATED to tests/playwright/responsive-360.spec.ts. Full-page navigation is
+  // native to Playwright but tears down Vitest browser mode's own runner connection
+  // (upstream vitest#7981, "Browser connection was closed while running tests") — it
+  // took this file down the moment the vitest browser project was wired into CI. The
+  // migration was already done for the other cases; these copies were simply left
+  // behind, invisible because the project ran nowhere.
 
-  it.each(PUBLIC_ROUTES)("%s renders without horizontal scroll at 360x640", async (route) => {
-    await page.viewport(360, 640);
-    await commands.goto(`${BASE}${route}`);
-    const sw = await commands.measureScrollWidth();
-    const cw = await commands.measureClientWidth();
-    // Tolerant comparison: scrollWidth must not exceed clientWidth (i.e.
-    // the page does not produce a horizontal scroll bar at 360px). Strict
-    // `<= 360` would false-fail under devicePixelRatio quirks on CI runners.
-    expect(
-      sw,
-      `${route} scrollWidth=${sw} > clientWidth=${cw} (horizontal overflow at 360px)`,
-    ).toBeLessThanOrEqual(cw);
-  });
-
-  it("/login primary CTA reachable without zoom at 360px", async () => {
-    await page.viewport(360, 640);
-    await commands.goto(`${BASE}/login`);
-    // The login page renders a 'Continue with Google' link/button. The text
-    // is sourced from Paraglide (m.login_continue_with_google) — the regex
-    // is tolerant to surrounding whitespace and the small wording shifts a
-    // future copy edit might bring.
-    const cta = page.getByRole("link", { name: /continue|sign in|google/i });
-    await expect.element(cta).toBeVisible();
-  });
-});
-
-describe("360px viewport authenticated-route sweep", () => {
-  // Authenticated 360px assertions deferred to manual checkpoint per
-  // `Manual-Only Verifications`. Listed here as `it.skip` so the contract
-  // surface stays visible.
-  it.skip.each(AUTH_ROUTES)(
-    "%s renders without horizontal scroll at 360px (deferred — manual)",
-    async () => {
-      // Deferred: Vitest browser-mode tests run in a separate process from
-      // the SvelteKit preview server with no in-test Postgres connection,
-      // so seedUserDirectly + Better Auth signed cookie minting are not
-      // available. A future task lifts the cookie-injection harness or
-      // adds an APP_ROLE=test bypass; until then the manual checklist
-      // tracks these seven routes.
-    },
-  );
-});
-
-/**
- * Sticky positioning + body-scroll-lock at 360px.
- *
- * Three behaviors are asserted:
- *   (a) AppHeader sticky-top: scrolling the page does not move the header
- *       off-screen (its bounding rect's top stays at 0).
- *   (b) /sources page-header sticky: the "+ Add data source" CTA stays
- *       reachable while a long source list scrolls (the .head element's
- *       top stays anchored under the AppHeader, ~72px from viewport top).
- *   (c) FiltersSheet body-scroll-lock: opening the sheet sets
- *       document.body.style.overflow = "hidden"; closing restores "".
- *
- * The in-app interactions (AppHeader visibility, /sources scrolling,
- * FiltersSheet open/close) require an authenticated session that
- * vitest-browser cannot mint without a Postgres harness. The functional
- * UAT for these three behaviors is in the manual + integration map.
- *
- * The placeholder `it.skip` blocks below keep the contract surface visible
- * to a future task that lifts the auth harness.
- */
-describe("sticky + body-scroll-lock at 360px", () => {
   it.skip("AppHeader stays at viewport top after scrolling 200px (deferred — auth harness)", async () => {
     // Manual UAT:
     //   1. sign in, viewport 360x640
@@ -201,19 +138,7 @@ describe("sticky + body-scroll-lock at 360px", () => {
  * as an `it.skip` placeholder for grep discoverability.
  */
 describe("sticky AppHeader regression fix (overflow-x clip on body)", () => {
-  it("body computed overflow-x is 'clip' (not 'hidden') — sticky descendants anchor to viewport", async () => {
-    await page.viewport(360, 640);
-    await commands.goto(`${BASE}/`);
-    const overflowX = await commands.measureBodyOverflowX();
-    // `clip` is the load-bearing value: it crops overflow WITHOUT establishing
-    // a scroll container, preserving position: sticky on descendants.
-    // `hidden` (the regression source) would coerce overflow-y to auto and
-    // promote body to a scroll container, breaking sticky anchoring.
-    expect(
-      overflowX,
-      `body computed overflow-x === ${overflowX} — expected 'clip' to preserve sticky descendants`,
-    ).toBe("clip");
-  });
+  // MIGRATED to tests/playwright/responsive-360.spec.ts (see note above).
 
   it.skip(
     "/feed AppHeader.boundingRect.top stays 0 after window.scrollTo(0, 200) at 360px (manual UAT — auth harness deferred)",
