@@ -30,28 +30,18 @@ describe("SourceRegistry", () => {
     expect(adapter.refreshQueue?.canRefresh("reddit_post")).toBe(false);
   });
 
-  // TODO(12-05): re-enable once the ScrapeCreators reddit adapter is re-wired
-  // into the registry (temporarily unwired in Plan 12-02; getAdapter throws).
-  it.skip("redditAdapter declares its fixed lane worker schedule", () => {
+  it("redditAdapter declares its fixed lane worker schedule", () => {
     const adapter = getAdapter("reddit_account");
     const worker = adapter.workQueue?.scheduledWorkers[0];
     expect(worker?.name).toBe("reddit.refresh");
-    expect(worker?.intervalMs).toBe(7500);
+    expect(worker?.intervalMs).toBe(1000);
     expect(worker?.replicaPolicy).toBe("parallel");
     expect(worker?.laneQueue).toMatchObject({
       strategy: "fixed-slot-round-robin",
       adapterKind: "reddit_account",
-      slots: [
-        "service_source",
-        "user_source",
-        "user_post",
-        "user_source",
-        "service_post",
-        "user_post",
-        "user_source",
-        "user_post",
-      ],
-      fallthrough: ["user_post", "user_source", "service_post", "service_source"],
+      slots: ["user_post", "service_post"],
+      fallthrough: ["user_post", "service_post"],
+      batchScope: "global",
     });
   });
 
@@ -81,14 +71,12 @@ describe("SourceRegistry", () => {
     expect(typeof adapter.canBackfillSource).toBe("function");
   });
 
-  // TODO(12-05): re-enable once the reddit adapter is re-wired (unwired in 12-02).
-  it.skip("redditAdapter does not treat synthetic daily observability as a syncStats hard stop", () => {
+  it("redditAdapter does not treat synthetic daily observability as a syncStats hard stop", () => {
     const adapter = getAdapter("reddit_account");
     expect(adapter.syncStats?.canRun).toBeUndefined();
   });
 
-  // TODO(12-05): re-enable once the reddit adapter is re-wired (unwired in 12-02).
-  it.skip("redditAdapter does not treat synthetic daily observability as a source-backfill hard stop", () => {
+  it("redditAdapter does not treat synthetic daily observability as a source-backfill hard stop", () => {
     const adapter = getAdapter("reddit_account");
     expect(adapter.canBackfillSource).toBeUndefined();
   });
