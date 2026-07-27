@@ -26,7 +26,12 @@ import type {
   ObservabilityDailyStats,
 } from "$lib/sources/adapter.js";
 import { isTikTokConfigured } from "./provider/registry.js";
-import { getSocialSpendToday, getSocialThrottleState, type SocialThrottleState } from "./quota.js";
+import {
+  getSocialSpendToday,
+  getSocialProviderSpendToday,
+  getSocialThrottleState,
+  type SocialThrottleState,
+} from "./quota.js";
 
 const PLATFORM = "tiktok";
 const PROVIDER = "scrapecreators";
@@ -104,6 +109,10 @@ export interface TikTokProviderBlock {
   isConfigured: boolean;
   requestsToday: number;
   creditsUsed: number;
+  /** JOINT spend across every platform on this provider (IG + TikTok + Reddit) — the
+   *  number `dailyCap` and `throttleState` actually gate on. `creditsUsed` above is
+   *  only THIS platform's share. */
+  providerCreditsUsed: number;
   dailyCap: number;
   remainingBalance: number;
   prepaidBalance: number;
@@ -116,12 +125,14 @@ export async function getTikTokProviderBlock(now: Date = new Date()): Promise<Ti
     PROVIDER,
     now,
   );
+  const { creditsUsed: providerCreditsUsed } = await getSocialProviderSpendToday(PROVIDER, now);
   const throttleState = await getSocialThrottleState(PLATFORM, PROVIDER, now);
   return {
     isConfigured: isTikTokConfigured(),
     // One credit per request (D-18) ⇒ requests today == credits used today.
     requestsToday: creditsUsed,
     creditsUsed,
+    providerCreditsUsed,
     dailyCap,
     remainingBalance: prepaidBalance,
     prepaidBalance,

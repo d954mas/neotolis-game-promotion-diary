@@ -32,7 +32,12 @@ import type {
   ObservabilityDailyStats,
 } from "$lib/sources/adapter.js";
 import { isInstagramConfigured } from "./provider/registry.js";
-import { getSocialSpendToday, getSocialThrottleState, type SocialThrottleState } from "./quota.js";
+import {
+  getSocialSpendToday,
+  getSocialProviderSpendToday,
+  getSocialThrottleState,
+  type SocialThrottleState,
+} from "./quota.js";
 
 const PLATFORM = "instagram";
 const PROVIDER = "scrapecreators";
@@ -117,6 +122,10 @@ export interface InstagramProviderBlock {
   isConfigured: boolean;
   requestsToday: number;
   creditsUsed: number;
+  /** JOINT spend across every platform on this provider (IG + TikTok + Reddit) — the
+   *  number `dailyCap` and `throttleState` actually gate on. `creditsUsed` above is
+   *  only THIS platform's share. */
+  providerCreditsUsed: number;
   dailyCap: number;
   /** prepaidBalance is the absolute funded remaining (D-16 hard ceiling). */
   remainingBalance: number;
@@ -132,12 +141,14 @@ export async function getInstagramProviderBlock(
     PROVIDER,
     now,
   );
+  const { creditsUsed: providerCreditsUsed } = await getSocialProviderSpendToday(PROVIDER, now);
   const throttleState = await getSocialThrottleState(PLATFORM, PROVIDER, now);
   return {
     isConfigured: isInstagramConfigured(),
     // One credit per request (D-18) ⇒ requests today == credits used today.
     requestsToday: creditsUsed,
     creditsUsed,
+    providerCreditsUsed,
     dailyCap,
     remainingBalance: prepaidBalance,
     prepaidBalance,

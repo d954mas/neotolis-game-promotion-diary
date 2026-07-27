@@ -39,7 +39,12 @@ import type {
   ObservabilityDailyStats,
 } from "$lib/sources/adapter.js";
 import { isRedditConfigured } from "./provider/registry.js";
-import { getSocialSpendToday, getSocialThrottleState, type SocialThrottleState } from "./quota.js";
+import {
+  getSocialSpendToday,
+  getSocialProviderSpendToday,
+  getSocialThrottleState,
+  type SocialThrottleState,
+} from "./quota.js";
 // Real-dollar cost of ONE provider request (12-SPIKE Q5) — ONE source of truth in
 // http.ts; the costEstimateUsd projection multiplies it by requests used.
 import { USD_PER_REQUEST } from "./http.js";
@@ -113,6 +118,12 @@ export interface RedditProviderBlock {
   isConfigured: boolean;
   requestsToday: number;
   creditsUsed: number;
+  /** JOINT spend across every platform on this provider — the number `dailyCap` and
+   *  `throttleState` actually gate on. `creditsUsed` above is only THIS platform's
+   *  share; rendering that against the shared cap understates how close the operator
+   *  is to a stop (IG 900 + Reddit 40 would read "40/1000" while reservations are
+   *  already being denied). */
+  providerCreditsUsed: number;
   dailyCap: number;
   remainingBalance: number;
   prepaidBalance: number;
@@ -125,12 +136,14 @@ export async function getRedditProviderBlock(now: Date = new Date()): Promise<Re
     PROVIDER,
     now,
   );
+  const { creditsUsed: providerCreditsUsed } = await getSocialProviderSpendToday(PROVIDER, now);
   const throttleState = await getSocialThrottleState(PLATFORM, PROVIDER, now);
   return {
     isConfigured: isRedditConfigured(),
     // One credit per request ⇒ requests today == credits used today.
     requestsToday: creditsUsed,
     creditsUsed,
+    providerCreditsUsed,
     dailyCap,
     remainingBalance: prepaidBalance,
     prepaidBalance,

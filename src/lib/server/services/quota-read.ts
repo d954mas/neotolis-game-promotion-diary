@@ -97,7 +97,11 @@ export async function loadRedditQuota(userId: string): Promise<RedditQuotaView> 
     isOperatorConfigured: true,
     accountRequests: { used: acctUsage.requests, cap: perUserCap },
     subredditRequests: { used: subUsage.requests, cap: perUserCap },
-    serviceLoad: { used: block.creditsUsed, capacity: block.dailyCap },
+    // JOINT provider spend, not Reddit's share: `dailyCap` is the shared
+    // ScrapeCreators envelope (IG + TikTok + Reddit), so pairing it with Reddit-only
+    // credits told the user "40/1000" at the exact moment their refresh was being
+    // refused because the pool stood at 940/1000.
+    serviceLoad: { used: block.providerCreditsUsed, capacity: block.dailyCap },
   };
 }
 

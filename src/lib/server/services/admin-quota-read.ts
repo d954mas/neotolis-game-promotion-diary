@@ -107,6 +107,8 @@ export type AdminRedditBlock =
       isConfigured: true;
       requestsToday: number;
       creditsUsed: number;
+      /** JOINT spend across every platform on this provider — what dailyCap gates on. */
+      providerCreditsUsed: number;
       dailyCap: number;
       remainingBalance: number;
       prepaidBalance: number;
@@ -142,6 +144,8 @@ export type AdminInstagramBlock =
       isConfigured: true;
       requestsToday: number;
       creditsUsed: number;
+      /** JOINT spend across every platform on this provider — what dailyCap gates on. */
+      providerCreditsUsed: number;
       dailyCap: number;
       remainingBalance: number;
       prepaidBalance: number;
@@ -163,6 +167,8 @@ export type AdminTiktokBlock =
       isConfigured: true;
       requestsToday: number;
       creditsUsed: number;
+      /** JOINT spend across every platform on this provider — what dailyCap gates on. */
+      providerCreditsUsed: number;
       dailyCap: number;
       remainingBalance: number;
       prepaidBalance: number;
@@ -232,6 +238,7 @@ export async function loadAdminQuotaPage(): Promise<{
         isConfigured: true,
         requestsToday: rd.requestsToday,
         creditsUsed: rd.creditsUsed,
+        providerCreditsUsed: rd.providerCreditsUsed,
         dailyCap: rd.dailyCap,
         remainingBalance: rd.remainingBalance,
         prepaidBalance: rd.prepaidBalance,
@@ -259,6 +266,7 @@ export async function loadAdminQuotaPage(): Promise<{
         isConfigured: true,
         requestsToday: ig.requestsToday,
         creditsUsed: ig.creditsUsed,
+        providerCreditsUsed: ig.providerCreditsUsed,
         dailyCap: ig.dailyCap,
         remainingBalance: ig.remainingBalance,
         prepaidBalance: ig.prepaidBalance,
@@ -277,6 +285,7 @@ export async function loadAdminQuotaPage(): Promise<{
         isConfigured: true,
         requestsToday: tt.requestsToday,
         creditsUsed: tt.creditsUsed,
+        providerCreditsUsed: tt.providerCreditsUsed,
         dailyCap: tt.dailyCap,
         remainingBalance: tt.remainingBalance,
         prepaidBalance: tt.prepaidBalance,
