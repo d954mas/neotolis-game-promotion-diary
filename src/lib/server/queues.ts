@@ -161,10 +161,36 @@ export const QUEUES = {
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
-export const REDDIT_WALK_QUEUE_OPTIONS = { policy: "exclusive" as const };
+/**
+ * A Reddit walk is PAID and multi-page: one invocation can fetch up to
+ * DEEP_PAGE_CAP pages, each costing a prepaid ScrapeCreators credit, and it
+ * persists its resume cursor only after the whole page loop has been fanned out.
+ * pg-boss's queue defaults (retryLimit 2, retryDelay 0, expireInSeconds 900) are
+ * therefore actively harmful here:
+ *
+ *   - retryLimit 2 + retryDelay 0 turns one transient 5xx on the last page into
+ *     three immediate full re-walks — ~3x the credits for zero extra coverage,
+ *     multiplied across every channel when the provider has an incident.
+ *   - expireInSeconds 900 can elapse mid-walk against a slow provider, so pg-boss
+ *     re-activates the job while the original handler is still running (expiry does
+ *     not abort the Node handler) — two concurrent PAID walks of the same channel,
+ *     defeating the `exclusive` policy.
+ *
+ * The daily poll cron is the natural retry for a walk, so the queue must not add
+ * one of its own. NOTE: pg-boss applies these at queue CREATION; an already-created
+ * queue keeps its original settings.
+ */
+export const REDDIT_WALK_QUEUE_OPTIONS = {
+  policy: "exclusive" as const,
+  retryLimit: 0,
+  expireInSeconds: 3600,
+};
 
 interface MinimalBoss {
-  createQueue(name: string, options?: { policy?: string }): Promise<unknown>;
+  createQueue(
+    name: string,
+    options?: { policy?: string; retryLimit?: number; expireInSeconds?: number },
+  ): Promise<unknown>;
 }
 
 export async function declareAllQueues(boss: MinimalBoss): Promise<void> {
