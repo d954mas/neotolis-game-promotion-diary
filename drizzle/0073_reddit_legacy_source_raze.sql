@@ -38,15 +38,26 @@
 -- walker has imported since. Without these the predicates match the NEW rows exactly as
 -- well as the old ones.
 --
---   events               : legacy rows key on the BARE base36 id; the rebuilt walker
---                          writes the `t3_` fullname. (external_id IS NULL covers a
---                          legacy row that never resolved one.)
+--   events               : legacy rows either key on the BARE base36 id OR already use
+--                          the `t3_` fullname written by the old pollers. Fullname rows
+--                          are legacy only while linked to a legacy-shaped source;
+--                          source-less/rebuilt `t3_` rows must survive a re-run.
 --   data_sources         : legacy rows carry metadata {username}/{subreddit}; the
 --                          rebuilt canonicalizeOnCreate writes {handle}/{slug}.
 --   data_source_channel_state : legacy rows are the ones with no surviving source.
-DELETE FROM "events"
- WHERE "kind"::text = 'reddit_post'
-   AND ("external_id" IS NULL OR "external_id" NOT LIKE 't3\_%');--> statement-breakpoint
+DELETE FROM "events" e
+ WHERE e."kind"::text = 'reddit_post'
+   AND (
+     e."external_id" IS NULL
+     OR e."external_id" NOT LIKE 't3\_%'
+     OR EXISTS (
+       SELECT 1
+         FROM "data_sources" ds
+        WHERE ds."id" = e."source_id"
+          AND ds."kind"::text IN ('reddit_account', 'reddit_subreddit')
+          AND NOT (ds."metadata" ? 'handle' OR ds."metadata" ? 'slug')
+     )
+   );--> statement-breakpoint
 DELETE FROM "data_sources"
  WHERE "kind"::text IN ('reddit_account', 'reddit_subreddit')
    AND NOT ("metadata" ? 'handle' OR "metadata" ? 'slug');--> statement-breakpoint

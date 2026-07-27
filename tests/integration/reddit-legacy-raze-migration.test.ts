@@ -128,6 +128,7 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
     // A legacy diary event with the legacy BARE-id external_id (the shape that can never
     // join the rebuilt t3_-keyed cache) + a game attachment (FK cascade must not error).
     const legacyBareId = uniq();
+    const legacyFullId = `t3_${legacyBareId}`;
     const [ev] = await db
       .insert(events)
       .values({
@@ -137,6 +138,20 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
         occurredAt: new Date("2026-01-01T00:00:00Z"),
         title: "legacy import",
         externalId: legacyBareId,
+      })
+      .returning({ id: events.id });
+    // The shipped legacy pollers already wrote fullnames too. This is the load-bearing
+    // upgrade shape: if it survives while the source is deleted, ON DELETE SET NULL
+    // detaches it and the rebuilt walker later imports a duplicate with the same t3_ id.
+    const [legacyFullnameEv] = await db
+      .insert(events)
+      .values({
+        userId: u.id,
+        sourceId: redditSrc!.id,
+        kind: "reddit_post",
+        occurredAt: new Date("2026-01-01T00:00:00Z"),
+        title: "legacy fullname import",
+        externalId: legacyFullId,
       })
       .returning({ id: events.id });
     const [game] = await db
@@ -186,6 +201,11 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
     expect(goneSrc, "legacy reddit source deleted").toBeUndefined();
     const [goneEv] = await db.select({ id: events.id }).from(events).where(eq(events.id, ev!.id));
     expect(goneEv, "legacy reddit event deleted (not merely detached)").toBeUndefined();
+    const [goneFullnameEv] = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(eq(events.id, legacyFullnameEv!.id));
+    expect(goneFullnameEv, "legacy t3_-keyed event deleted (not merely detached)").toBeUndefined();
     const [goneManual] = await db
       .select({ id: events.id })
       .from(events)
@@ -237,7 +257,7 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
         metadata: { handle: legacyHandle },
       })
       .returning({ id: dataSources.id });
-    const externalId = `t3_${legacyBareId}`;
+    const externalId = legacyFullId;
     nextPage = {
       posts: [
         {
