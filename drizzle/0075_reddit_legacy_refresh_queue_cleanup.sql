@@ -5,10 +5,13 @@
 -- DESTRUCTIVE DATA MIGRATION, EXPLICITLY APPROVED BY THE PROJECT OWNER
 -- (2026-07-27, Codex review-fix task: "Исправляй"). ROLLBACK requires restoring the
 -- removed queue rows from backup, but they must not be replayed against the rebuilt
--- adapter. Scope is exactly adapter_kind='reddit_account'; other adapters are untouched.
+-- adapter. Scope is exactly the retired Reddit work types (`author_poll`, `sub_poll`,
+-- `post_single`) under adapter_kind='reddit_account'; other adapters and rebuilt
+-- `post_stats` rows are untouched, including when this file is re-run after deploy.
 --
 -- HAND-WRITTEN ON PURPOSE: drizzle-kit cannot express data cleanup. Pure DML, no schema
 -- changes. The predicate is idempotent, and the real SQL file is exercised by
 -- tests/integration/reddit-legacy-refresh-queue-migration.test.ts.
 DELETE FROM "adapter_refresh_queue"
- WHERE "adapter_kind" = 'reddit_account';
+ WHERE "adapter_kind" = 'reddit_account'
+   AND "type" IN ('author_poll', 'sub_poll', 'post_single');

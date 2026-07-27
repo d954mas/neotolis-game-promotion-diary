@@ -246,6 +246,44 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     ).toBe(true);
   });
 
+  it("[review] never treats a 404 on a persisted deep cursor as a subject-level miss", async () => {
+    const handle = `resume404_${Math.random().toString(36).slice(2, 7)}`;
+    const sourceId = await seedAccountSource(handle);
+    const { AdapterError } = await import("../../src/lib/sources/errors.js");
+    await markChannelLastPolledAt("reddit_account", handle);
+    await writeRedditBackfillState("reddit_account", handle, {
+      cursor: "persisted-deep-cursor",
+      complete: false,
+      collected: 12,
+      operatorPaused: false,
+      deepTargetIso: new Date(0).toISOString(),
+      emptyPasses: 0,
+      notFoundPasses: 0,
+    });
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      provider.errors = [new AdapterError("cursor expired", { category: "not-found" })];
+      await handleBackfillAccount({
+        data: {
+          kind: "reddit_account",
+          channelKey: handle,
+          depthBoundIso: new Date(0).toISOString(),
+          flow: "initial",
+        },
+      });
+    }
+
+    const [source] = await db
+      .select({ needsReconnect: dataSources.needsReconnect })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId));
+    expect(source!.needsReconnect).toBe(false);
+
+    const state = await getRedditBackfillState("reddit_account", handle);
+    expect(state.cursor).toBe("persisted-deep-cursor");
+    expect(state.notFoundPasses).toBe(0);
+  });
+
   // REGRESSION: a not-found on ANY page used to abandon the whole pass and flag
   // needs_reconnect on every subscriber. poll-cron filters those out and only a WALK
   // clears the flag — and Reddit has no credentials, so there is no user-facing

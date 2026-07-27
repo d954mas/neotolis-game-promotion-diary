@@ -526,7 +526,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // affordance either). Fall through instead: the collected posts fan out, the cursor
   // persists, coveragePassComplete already excludes `notFound` so nothing reconciles,
   // and the next tick resumes where this one stopped.
-  const firstPageNotFound = notFound && notFoundAtPage === 0;
+  const firstPageNotFound = startedFromTop && notFound && notFoundAtPage === 0;
   if (firstPageNotFound) {
     state.notFoundPasses += 1;
     state.operatorPaused = false;

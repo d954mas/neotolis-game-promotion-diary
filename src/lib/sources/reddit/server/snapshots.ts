@@ -9,7 +9,9 @@
 //      last_poll_status, poll_failure_count). Every snippet field is
 //      COALESCE-preserved on a null (a failed refresh must not blank a working
 //      value — same rule twitter_posts.thumbnail_url follows). poll_failure_count
-//      increments on non-ok, resets on 'ok'.
+//      increments on non-ok, resets on 'ok'. Author fields are the one explicit
+//      nulling exception when raw.authorDeleted confirms Reddit's `[deleted]`
+//      tombstone while the post itself remains reachable.
 //   2. INSERT reddit_post_snapshots (post_id, polled_at = date_trunc('minute',
 //      now()), like_count=score, comment_count=num_comments + the RAW D-09 columns
 //      score/upvote_ratio/num_comments/num_crossposts/removed_by_category) ON
@@ -69,7 +71,8 @@ export interface WriteSnapshotArgs {
   /** Drives tier classification (BACK-04). */
   publishedAt?: Date | null;
   /** The Reddit username (reddit_posts.author — PURGED to null by the Plan 05
-   *  deletion cron). COALESCE-preserved on null. */
+   *  deletion cron). COALESCE-preserved on an ordinary null; explicitly cleared
+   *  when raw.authorDeleted confirms the account tombstone. */
   author?: string | null;
   /** The stable `t2_` id (reddit_posts.author_fullname — also purged). */
   authorFullname?: string | null;
@@ -104,9 +107,11 @@ export interface WriteSnapshotArgs {
 
 export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
   // ★ Write-path deletion-detect belt: the removed_by_category field being present
-  //   marks the post as removed. Dormant with ScrapeCreators (never returns it) —
-  //   the live mechanism is Variant A (Plan 05). first-detect only (COALESCE below).
-  const detectDeletion = args.raw?.removedByCategory != null || args.raw?.authorDeleted === true;
+  //   marks the POST as removed. An author tombstone is separate: Reddit can keep the
+  //   post public after its author deletes their account, so that signal only clears
+  //   author identity below and must not start the post-deletion clock.
+  const detectDeletion = args.raw?.removedByCategory != null;
+  const authorDeleted = args.raw?.authorDeleted === true;
   const now = new Date();
   await db.transaction(async (tx) => {
     // 1. UPSERT reddit_posts — public-data, single source of truth for the post
@@ -154,8 +159,12 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
           //   ONLY un-flag path; only after IT clears the flag does the normal
           //   COALESCE-preserve resume (next tick). During the grace window (flag
           //   set, author still present) freezing is a no-op — the value is kept.
-          author: sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.author} ELSE COALESCE(${args.author ?? null}, ${redditPosts.author}) END`,
-          authorFullname: sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.authorFullname} ELSE COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname}) END`,
+          author: authorDeleted
+            ? null
+            : sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.author} ELSE COALESCE(${args.author ?? null}, ${redditPosts.author}) END`,
+          authorFullname: authorDeleted
+            ? null
+            : sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.authorFullname} ELSE COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname}) END`,
           // ★ The write path NEVER CLEARS deletion_detected_at (12-SPIKE + review fix).
           //   reddit_posts is ONE shared row per post, but "deleted" is subject-relative
           //   (an author-deleted post is still alive in its subreddit's feed). A blanket

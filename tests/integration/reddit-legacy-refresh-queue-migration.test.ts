@@ -23,14 +23,35 @@ async function runMigration(): Promise<void> {
 }
 
 describe("migration 0075 — legacy Reddit refresh queue cleanup", () => {
-  it("deletes only reddit_account rows and is idempotent", async () => {
+  it("deletes only legacy Reddit work and preserves rebuilt rows on re-run", async () => {
     const suffix = Math.random().toString(36).slice(2, 10);
     await db.insert(adapterRefreshQueue).values([
       {
         adapterKind: "reddit_account",
+        queueName: "user_source",
+        type: "author_poll",
+        payload: { handle: `legacy-author-${suffix}` },
+        priority: 0,
+      },
+      {
+        adapterKind: "reddit_account",
+        queueName: "service_source",
+        type: "sub_poll",
+        payload: { sub: `legacy-sub-${suffix}` },
+        priority: 0,
+      },
+      {
+        adapterKind: "reddit_account",
+        queueName: "service_post",
+        type: "post_single",
+        payload: { post_id: `legacy-post-${suffix}` },
+        priority: 0,
+      },
+      {
+        adapterKind: "reddit_account",
         queueName: "user_post",
         type: "post_stats",
-        payload: { post_id: `reddit-${suffix}` },
+        payload: { post_id: `rebuilt-before-${suffix}` },
         priority: 0,
       },
       {
@@ -43,13 +64,27 @@ describe("migration 0075 — legacy Reddit refresh queue cleanup", () => {
     ]);
 
     await runMigration();
+
+    await db.insert(adapterRefreshQueue).values({
+      adapterKind: "reddit_account",
+      queueName: "user_post",
+      type: "post_stats",
+      payload: { post_id: `rebuilt-after-${suffix}` },
+      priority: 0,
+    });
     await runMigration();
 
     const redditRows = await db
-      .select({ id: adapterRefreshQueue.id })
+      .select({ type: adapterRefreshQueue.type, payload: adapterRefreshQueue.payload })
       .from(adapterRefreshQueue)
       .where(eq(adapterRefreshQueue.adapterKind, "reddit_account"));
-    expect(redditRows).toHaveLength(0);
+    expect(redditRows).toEqual(
+      expect.arrayContaining([
+        { type: "post_stats", payload: { post_id: `rebuilt-before-${suffix}` } },
+        { type: "post_stats", payload: { post_id: `rebuilt-after-${suffix}` } },
+      ]),
+    );
+    expect(redditRows).toHaveLength(2);
 
     const youtubeRows = await db
       .select({ payload: adapterRefreshQueue.payload })
