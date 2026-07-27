@@ -206,43 +206,43 @@ describe("reddit per-post refresh lane", () => {
     expect(row!.status).toBe("done");
   });
 
-  it("[12-05] is tenant-scoped: a row whose event belongs to ANOTHER user is skipped (no fetch)", async () => {
+  it("[12-05] is tenant-scoped: another user's event cannot be enqueued or fetched", async () => {
     const owner = await seedUserDirectly({ email: `rdtrq-owner-${uniq()}@t.io` });
     const attacker = await seedUserDirectly({ email: `rdtrq-atk-${uniq()}@t.io` });
     const s = uniq().slice(0, 6);
     const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
     await seedCachedPost(s, url);
     const evId = await seedEvent(owner.id, s, url);
-    // Enqueue under the ATTACKER pointing at the owner's event.
-    await enqueue(evId, attacker.id, `t3_${s}`);
     single.next = singlePost({ id: `t3_${s}`, shortcode: s });
 
-    await redditRefreshQueueTick();
+    // The adapter boundary rejects before a cross-tenant queue row can exist.
+    await expect(enqueue(evId, attacker.id, `t3_${s}`)).rejects.toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
 
-    // resolveUserPostId filters eq(events.userId, attacker.id) → no row → skip, no fetch.
     expect(single.calls).toHaveLength(0);
     expect(await snapshotCount(s)).toBe(0);
   });
 
-  it("[12-05] P1 REGRESSION: a not_found refresh does NOT clear an already-set deletion_detected_at", async () => {
+  it("[review] a bounded page-1 miss is inconclusive and does not write terminal not_found", async () => {
     const u = await seedUserDirectly({ email: `rdtrq-notfound-${uniq()}@t.io` });
     const s = uniq().slice(0, 6);
     const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
     const flaggedAt = new Date(Date.now() - 3_600_000); // flagged 1h ago, within 48h grace
     await seedCachedPost(s, url, { deletionDetectedAt: flaggedAt });
     const evId = await seedEvent(u.id, s, url);
-    single.next = null; // provider matched no post → not_found
+    single.next = null; // bounded subreddit page did not contain this older post
     await enqueue(evId, u.id, `t3_${s}`);
 
     await redditRefreshQueueTick();
 
     expect(single.calls).toHaveLength(1); // the fetch happened
     const post = await readPost(s);
-    // The write DID land (proves we exercised writeSnapshot on the not_found path)…
-    expect(post!.lastPollStatus).toBe("not_found");
-    expect(post!.pollFailureCount).toBe(1);
-    // …but the 48h GDPR grace clock is PRESERVED (pre-fix it was wiped to null).
-    expect(post!.deletionDetectedAt, "not_found must not reset the grace clock").not.toBeNull();
+    expect(post!.lastPollStatus, "a bounded feed miss is not deletion evidence").toBe("ok");
+    expect(post!.pollFailureCount).toBe(0);
+    // The 48h GDPR grace clock is also preserved.
+    expect(post!.deletionDetectedAt).not.toBeNull();
     expect(post!.deletionDetectedAt!.getTime()).toBe(flaggedAt.getTime());
     // No snapshot row on a non-ok poll.
     expect(await snapshotCount(s)).toBe(0);

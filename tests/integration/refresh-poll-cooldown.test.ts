@@ -87,6 +87,7 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { youtubeVideos, adapterRefreshQueue } =
   await import("../../src/lib/server/db/schema/index.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
@@ -342,6 +343,79 @@ describe("refresh-poll cooldown service", () => {
     expect(rows.some((r) => (r.payload as { post_id?: string }).post_id === "abc_refresh")).toBe(
       true,
     );
+  });
+
+  it("[review] rejects recognition-only Reddit URLs without consuming quota or cooldown", async () => {
+    const { getUserQuotaUsedToday } =
+      await import("../../src/lib/server/services/quota.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-short-${uniq()}@test.local` });
+    const ev = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "short123",
+      url: "https://redd.it/short123",
+    });
+    const before = await getUserQuotaUsedToday(u.id, "reddit_account");
+
+    await expect(requestRefreshPoll(u.id, ev.id, "127.0.0.1")).rejects.toMatchObject({
+      code: "reddit_short_link_unsupported",
+      status: 422,
+    });
+
+    const after = await getUserQuotaUsedToday(u.id, "reddit_account");
+    expect(after.requests).toBe(before.requests);
+    const queued = await db
+      .select({ id: adapterRefreshQueue.id })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id));
+    expect(queued).toHaveLength(0);
+    const [row] = await db.select().from(events).where(eq(events.id, ev.id));
+    expect((row!.metadata as { last_user_refresh_at?: string }).last_user_refresh_at).toBeUndefined();
+  });
+
+  it("[review] charges a subreddit event to the independent reddit_subreddit bucket", async () => {
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-subcap-${uniq()}@test.local` });
+    const [source] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_subreddit",
+        handleUrl: "https://www.reddit.com/r/IndieDev",
+        channelId: `indiedev_${uniq()}`,
+        metadata: { slug: "indiedev" },
+      })
+      .returning({ id: dataSources.id });
+    const ev = await insertEvent(u.id, {
+      sourceId: source!.id,
+      kind: "reddit_post",
+      externalId: "abc_subcap",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_subcap/test/",
+    });
+    for (let i = 0; i < env.LIMIT_SOCIAL_REQUESTS_PER_DAY; i++) {
+      await writeAuditStrict({
+        userId: u.id,
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: "reddit_subreddit",
+          platform: "reddit_subreddit",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+
+    await expect(requestRefreshPoll(u.id, ev.id, "127.0.0.1")).rejects.toMatchObject({
+      code: "requests_quota_exhausted",
+      status: 429,
+    });
+    const queued = await db
+      .select({ id: adapterRefreshQueue.id })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id));
+    expect(queued).toHaveLength(0);
   });
 
   it("reddit_post refresh-poll enforces the shared social per-user cap (429) before the cooldown write", async () => {

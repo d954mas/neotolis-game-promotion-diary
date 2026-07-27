@@ -99,6 +99,7 @@ const redditRefreshLane = createSocialRefreshLane({
   maxBatchSize: env.SOCIAL_REFRESH_LANE_CONCURRENCY,
   getSocialProvider,
   getSocialProviderSpendToday,
+  nullResultIsInconclusive: true,
   resolvePermalink,
   resolveUserPostId,
   writeSnapshot: ({ postId, permalink, post, status }) =>

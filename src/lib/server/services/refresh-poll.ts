@@ -36,6 +36,7 @@
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
+import { dataSources } from "../db/schema/data-sources.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { writeAudit, writeAuditTx, type AuditEntry } from "../audit.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
@@ -90,6 +91,24 @@ export async function requestRefreshPoll(
     });
   }
 
+  let quotaPlatform = sourceKindForPoll;
+  if (event.kind === "reddit_post" && event.sourceId !== null) {
+    const [source] = await db
+      .select({ kind: dataSources.kind })
+      .from(dataSources)
+      .where(
+        and(
+          eq(dataSources.id, event.sourceId),
+          eq(dataSources.userId, userId),
+          isNull(dataSources.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (source?.kind === "reddit_account" || source?.kind === "reddit_subreddit") {
+      quotaPlatform = source.kind;
+    }
+  }
+
   // 3. External-id gate. The poll worker keys upstream calls by external_id
   //    (YouTube videoId). A row without one cannot be polled.
   if (!event.externalId) {
@@ -119,7 +138,7 @@ export async function requestRefreshPoll(
       runGuard.code ?? "platform_quota_exhausted",
       runGuard.status ?? 429,
       {
-        platform: sourceKindForPoll,
+        platform: quotaPlatform,
         reason: runGuard.reason,
         retryAfterSeconds:
           runGuard.retryAfterMs === undefined
@@ -157,7 +176,7 @@ export async function requestRefreshPoll(
   }
 
   await enforceAdapterUserQuota(db, pollableAdapter, userId, ipAddress, "post-refresh", {
-    platform: sourceKindForPoll ?? event.kind,
+    platform: quotaPlatform ?? event.kind,
   });
 
   // 5. Persist last_user_refresh_at BEFORE enqueueing so a crash
@@ -184,7 +203,7 @@ export async function requestRefreshPoll(
     metadata: {
       event_id: eventId,
       kind: event.kind,
-      platform: sourceKindForPoll ?? event.kind,
+      platform: quotaPlatform ?? event.kind,
       external_id: externalId,
       flow: "stats_refresh",
       requests_used: 1,
@@ -192,7 +211,9 @@ export async function requestRefreshPoll(
     },
   };
   const atomicQuotaPlatform =
-    sourceKindForPoll === "reddit_account" ? sourceKindForPoll : undefined;
+    quotaPlatform === "reddit_account" || quotaPlatform === "reddit_subreddit"
+      ? quotaPlatform
+      : undefined;
   const atomicDailyCap =
     atomicQuotaPlatform === undefined
       ? undefined

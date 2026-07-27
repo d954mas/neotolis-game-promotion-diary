@@ -364,6 +364,9 @@ export interface SocialRefreshLaneConfig {
   maxBatchSize: number;
   /** Tree-local getSocialProvider (so per-tree vi.mock intercepts). */
   getSocialProvider(platform: SocialPlatform): RefreshProvider | null;
+  /** Some providers can only search a bounded newest-feed page. For those adapters a
+   * null match is inconclusive, not proof that the post is deleted/private. */
+  nullResultIsInconclusive?: boolean;
   /** Tree-local PROVIDER-WIDE spend read (so per-tree vi.mock intercepts). The
    *  claimGate's 95% defer must see the JOINT spend across every platform sharing
    *  the provider's prepaid pool (D-01) — a platform-filtered read under-counts and
@@ -555,6 +558,13 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
         pacerAlreadyAcquired,
       });
       if (post === null) {
+        if (config.nullResultIsInconclusive === true) {
+          logger.info(
+            { postId },
+            `${platform} refresh: bounded provider lookup was inconclusive`,
+          );
+          return;
+        }
         // Deleted / private — the envelope carried no media object.
         await config.writeSnapshot({ postId, permalink, post: null, status: "not_found" });
         return;

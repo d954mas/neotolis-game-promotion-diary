@@ -48,6 +48,7 @@ import { QUEUES, REDDIT_WALK_QUEUE_OPTIONS } from "$lib/server/queues.js";
 import { db } from "$lib/server/db/client.js";
 import { outbox } from "$lib/server/db/schema/outbox.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
+import { events } from "$lib/server/db/schema/events.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { backfillWindowToDate } from "$lib/server/services/data-sources.js";
 import {
@@ -56,7 +57,7 @@ import {
   nextPacificMidnight,
 } from "$lib/server/services/quota.js";
 import { getChannelState } from "$lib/server/services/channel-state.js";
-import { AppError } from "$lib/server/services/errors.js";
+import { AppError, NotFoundError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { and, eq, desc, isNull, sql } from "drizzle-orm";
 import { redditPosts } from "$lib/server/db/schema/index.js";
@@ -463,6 +464,27 @@ async function enqueueRefreshNow(input: {
   const { adapterRefreshQueue } = await import("$lib/server/db/schema/index.js");
   const { adapterRefreshQueueLabel } = await import("$lib/server/services/adapter-lane-worker.js");
   const dbCtx = input.tx ?? db;
+  const [event] = await dbCtx
+    .select({ url: events.url })
+    .from(events)
+    .where(
+      and(
+        eq(events.id, input.eventId),
+        eq(events.userId, input.userId),
+        isNull(events.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (event === undefined) throw new NotFoundError();
+  const parsed = event.url === null ? null : redditParsePostUrl(event.url);
+  const subreddit = (parsed?.metadata?.subreddit as string | null | undefined) ?? null;
+  if (parsed !== null && subreddit === null) {
+    throw new AppError(
+      "Reddit URL has no subreddit feed to refresh",
+      "reddit_short_link_unsupported",
+      422,
+    );
+  }
   const [inserted] = await dbCtx
     .insert(adapterRefreshQueue)
     .values({
