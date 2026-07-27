@@ -9,7 +9,6 @@
   "login_continue": "Continue with Google",
   "sign_out": "Sign out",
   "sign_out_all_devices": "Sign out from all devices",
-
   "games_cta_new_game": "+ New game",
   "events_cta_new_event": "+ New event",
   "keys_steam_cta_save": "Save key",
@@ -17,7 +16,6 @@
   "keys_steam_cta_add_another": "Add another key",
   "youtube_channels_cta_add": "+ Add YouTube channel",
   "settings_cta_save": "Save changes",
-
   "feed_cta_add_event": "Add event",
   "feed_cta_new_event": "+ New event",
   "feed_quick_nav_all": "All",
@@ -34,7 +32,6 @@
   "feed_move_to_inbox": "Move to inbox",
   "feed_dismiss_from_inbox": "Mark not game-related",
   "settings_sessions_signout_one": "Sign out this session",
-
   "empty_games_heading": "No games yet.",
   "empty_games_body": "Add your first game card to start tracking. You'll paste your Steam store URL like {url} on the next screen.",
   "empty_items_heading": "No tracked items yet.",
@@ -53,7 +50,6 @@
   "empty_feed_filtered_body": "Try clearing one of the filters or expanding the date range. The \"Inbox\" filter shows events you haven't attached to a game yet.",
   "empty_sources_heading": "No data sources yet.",
   "empty_sources_body": "Register a YouTube channel, Reddit account, or other social handle to auto-import content as it's published. Example handle: `@RickAstleyYT`. Today only YouTube auto-imports; other sources are coming soon.",
-
   "audit_action_all": "All actions",
   "audit_action_session_signin": "Sign-in",
   "audit_action_session_signout": "Sign-out",
@@ -92,37 +88,25 @@
   "audit_action_reddit_deletion_propagated": "Reddit deletion propagated",
   "audit_action_reddit_cap_exhausted": "Reddit cap exhausted",
   "audit_action_reddit_adapter_degraded": "Reddit adapter degraded",
-
   "common_kind_reddit": "Reddit",
   "common_kind_reddit_user": "Reddit user",
   "common_kind_reddit_subreddit": "Subreddit",
-
   "sources_new_reddit_input_hint": "Paste a Reddit URL (e.g. https://reddit.com/r/IndieDev or https://reddit.com/user/handle) or use raw prefixes r/IndieDev or u/handle.",
   "sources_new_reddit_listing_limit": "Reddit caps each subreddit and user listing at ~1000 most recent posts. Older posts can't be backfilled — Reddit doesn't expose them through the public API.",
   "sources_new_reddit_disabled": "Reddit import is off because no provider is configured. A self-host operator enables it by setting REDDIT_IMPORT_ENABLED=true plus REDDIT_PROVIDER and the shared ScrapeCreators API key. See the self-host docs.",
   "sources_new_instagram_disabled_hint": "Instagram import is off because no provider is configured. A self-host operator enables it by setting the `INSTAGRAM_PROVIDER` and provider API-key environment variables. See the self-host docs.",
   "sources_new_tiktok_disabled_hint": "TikTok import is off because no provider is configured. A self-host operator enables it by setting the `TIKTOK_PROVIDER` and provider API-key environment variables. See the self-host docs.",
-
   "quota_banner_reddit_tab_title": "Reddit",
   "quota_banner_reddit_not_configured": "Reddit not configured",
   "quota_banner_reddit_account_requests": "Reddit accounts: {used} / {cap} requests today",
   "quota_banner_reddit_subreddit_requests": "Reddit subreddits: {used} / {cap} requests today",
   "quota_banner_reddit_service_load": "Service load: {used} / {capacity} shared ScrapeCreators credits used today",
   "quota_banner_reddit_limits_explainer": "Reddit import is a paid ScrapeCreators provider on the shared prepaid budget. Each source kind (accounts, subreddits) has its own per-day request allowance; the service-load line shows the operator's shared daily ScrapeCreators spend. Refreshes pause automatically as the shared budget nears its limit.",
-
   "quota_exceeded_social_requests": "Daily import limit reached — try again tomorrow, or this resets at midnight Pacific.",
-
-  "feed_card_reddit_score": "{score} ({ratio}%)",
-  "feed_card_reddit_comments": "{comments}",
-  "feed_card_reddit_baseline_underperforming": "⚠ Underperforming median ({pct}% of typical)",
-  "feed_card_reddit_baseline_insufficient": "Insufficient sample — baseline pending",
-
   "toast_reddit_source_cap": "Reddit cap reached. Try again in {seconds}s.",
   "toast_reddit_post_cap": "Reddit post-refresh cap reached. Try again in {seconds}s.",
-
   "audit_filter_action_axis_label": "Action",
   "audit_filter_date_axis_label": "Date range",
-
   "feed_filter_source": "Source: {name}",
   "feed_filter_kind": "Kind: {kind}",
   "feed_filter_game": "Game: {title}",
@@ -134,12 +118,10 @@
   "feed_filter_show_inbox": "Inbox only",
   "feed_filter_show_specific": "Attached to games",
   "feed_filter_show_standalone": "Not game-related",
-
   "feed_chip_axis_action": "Action",
   "feed_chip_axis_kind": "Kind",
   "feed_chip_axis_source": "Source",
   "feed_chip_axis_show": "Show",
-
   "feed_date_range_today": "Today",
   "feed_date_range_week": "Week",
   "feed_date_range_month": "Month",
@@ -148,10 +130,8 @@
   "feed_date_range_clear": "Clear date range",
   "feed_date_range_label_from": "From",
   "feed_date_range_label_to": "To",
-
   "feed_loading_more": "Loading more…",
   "feed_no_more_events": "No more events.",
-
   "event_kind_label_youtube_video": "YouTube video",
   "event_kind_label_twitter_post": "Twitter",
   "event_kind_label_telegram_post": "Telegram post",
@@ -165,7 +145,6 @@
   "event_kind_label_instagram_post": "Instagram",
   "event_kind_label_tiktok_post": "TikTok",
   "event_title_instagram_fallback": "Instagram {mediaType} · {date}",
-
   "source_kind_label_youtube_channel": "YouTube",
   "source_kind_label_reddit_account": "Reddit",
   "source_kind_label_twitter_account": "Twitter",
@@ -173,7 +152,6 @@
   "source_kind_label_discord_server": "Discord",
   "source_kind_label_instagram_account": "Instagram",
   "source_kind_label_tiktok_account": "TikTok",
-
   "source_cadence_youtube_channel": "New videos every 6 hours",
   "source_cadence_reddit_account": "New posts checked daily",
   "source_cadence_instagram_account": "New posts daily; recent posts’ stats refresh about once a day",
@@ -181,14 +159,12 @@
   "source_cadence_twitter": "New tweets daily; recent tweets’ stats refresh about once a day",
   "source_cadence_telegram_channel": "New posts every 6 hours; view counts refresh about twice a day",
   "source_cadence_default": "Polls automatically",
-
   "source_kind_status_reddit_account": "Set REDDIT_IMPORT_ENABLED to enable Reddit import",
   "source_kind_status_twitter_account": "Set TWITTER_PROVIDER to enable Twitter/X import",
   "source_kind_status_telegram_channel": "Coming soon",
   "source_kind_status_discord_server": "Coming soon",
   "source_kind_status_instagram_account": "not configured by operator",
   "source_kind_status_tiktok_account": "Set TIKTOK_PROVIDER to enable TikTok import",
-
   "sources_status_auto_on_pending": "Auto-import: ON",
   "sources_status_auto_off": "Auto-import: OFF",
   "sources_auto_import_on": "Auto-import: On",
@@ -197,7 +173,6 @@
   "sources_owned_by_other": "Tracking",
   "sources_kind_disabled_tooltip": "{kind} — {status}. Schema is ready; the polling adapter isn't.",
   "sources_kind_disabled_tooltip_not_configured": "{kind} — not configured by operator. A self-host operator enables it by setting the required environment variables.",
-
   "steam_listing_open_link_label": "Open on Steam",
   "steam_listing_remove_aria": "Remove listing",
   "steam_listing_duplicate_active_prefix": "This Steam app is already attached to a game —",
@@ -242,7 +217,6 @@
   "steam_listing_confirm_delete_forever_title": "Delete listing forever?",
   "steam_listing_confirm_delete_forever_body": "This permanently removes the listing and its wishlist history. This cannot be undone.",
   "steam_listing_delete_forever_cta": "Delete forever",
-
   "wishlist_section_heading": "Wishlist",
   "wishlist_import_cta": "Import wishlist CSV",
   "wishlist_import_compact_cta": "↑ CSV",
@@ -276,9 +250,7 @@
   "wishlist_export_step_2": "Go to that game's wishlist report (\"Wishlist Actions\").",
   "wishlist_export_step_3": "Set the date range to \"all history\" so the balance is complete.",
   "wishlist_export_step_4": "Under \"Wishlist Action Summary\", click \"(view as .csv)\" — import that file here. (NOT the lifetime summary.)",
-
   "games_detail_edit_cta": "Edit",
-
   "games_edit_dialog_heading": "Edit game",
   "games_edit_title_label": "Title",
   "games_edit_description_label": "Description",
@@ -286,12 +258,10 @@
   "games_edit_cancel_cta": "Cancel",
   "games_edit_description_placeholder": "What's this game about? Pitch, target audience, current status…",
   "games_edit_description_empty": "No description yet.",
-
   "steam_listing_label_edit_label": "Label (Demo / Full / DLC / OST)",
   "steam_listing_edit_save_cta": "Save",
   "steam_listing_label_prefix": "Label:",
   "add_store_dialog_heading": "Add store",
-
   "inbox_badge": "Inbox",
   "inbox_badge_tooltip": "This event isn't attached to a game yet. Use the \"Attach to game\" picker on the right.",
   "polling_badge_hot": "Hot · checked {hoursAgo}h ago",
@@ -308,7 +278,6 @@
   "polling_refresh_now_pending": "Refreshing…",
   "polling_refresh_now_done": "Polled just now",
   "polling_refresh_now_error": "Refresh failed. Try again.",
-
   "admin_quota_page_title": "Operator quota — YouTube",
   "admin_quota_page_intro": "Today's YouTube Data API v3 spend across operator-owned keys, in Pacific Time. Resets at midnight Pacific.",
   "admin_quota_section_keys_title": "API keys — today's usage",
@@ -329,18 +298,15 @@
   "admin_quota_section_instagram_title": "Instagram spend",
   "admin_quota_section_tiktok_title": "TikTok spend",
   "admin_quota_provider_requests_label": "Requests today",
-  "admin_quota_provider_spend_label": "Spend / cap",
+  "admin_quota_provider_spend_label": "Shared spend / cap",
   "admin_quota_provider_balance_label": "Remaining balance",
   "admin_quota_provider_prepaid_balance_label": "Prepaid balance",
   "admin_quota_provider_balance_note": "Computed as cap minus tracked spend. Independent of any external balance API.",
   "admin_layout_breadcrumb": "Operator-only data — visible because your email is in ADMIN_EMAIL_ALLOWLIST.",
   "admin_layout_breadcrumb_aria": "Admin mode",
-
   "admin_reddit_section_title": "Reddit ingest — operations",
-
   "account_deleted_banner_permanent_delete_failed": "Permanent delete failed. Try again or contact support.",
   "account_deleted_banner_permanent_delete_pending": "Deleting…",
-
   "backfill_picker_section_title": "Initial backfill",
   "backfill_picker_section_blurb": "Imports past posts as events in one go. After that, auto-import keeps it current: {cadence}.",
   "backfill_picker_section_blurb_youtube": "Imports past videos as events in one go. After that, auto-import keeps it current: {cadence}.",
@@ -358,7 +324,6 @@
   "backfill_picker_helper_everything": "Channel history, up to 1000 most recent events added to your feed.",
   "backfill_picker_helper_snapshot_note": "Older posts import as a current snapshot — per-post view/like history only starts accruing once tracking begins.",
   "backfill_picker_helper_post_cap": "Up to {cap} most-recent posts within this window.",
-
   "sources_detail_pull_new_content": "Pull new content",
   "sources_detail_pull_new_content_pending": "Refreshing…",
   "sources_detail_pull_new_content_success": "Refresh started — new events will appear shortly",
@@ -430,7 +395,6 @@
   "source_detail_target_label": "Pull events from:",
   "source_detail_target_save": "Save",
   "source_detail_target_invalid_future": "Date must be in the past",
-
   "sources_error_kind_not_yet_functional": "{kind} sources are {status}. The schema is ready; the polling adapter isn't.",
   "sources_error_duplicate": "You've already registered this data source.",
   "sources_error_duplicate_channel": "You already track \"{channelName}\" — open it on /sources to edit.",
@@ -445,14 +409,12 @@
   "feed_attach_error_game_not_found": "That game isn't available. It may have been deleted.",
   "feed_attach_error_already_attached": "This event is already attached to \"{title}\". Detach first if you want to move it.",
   "feed_dismiss_error_not_in_inbox": "Only inbox events (no game attached) can be marked not game-related.",
-
   "ingest_error_malformed_url": "That doesn't look like a URL. Paste a full link starting with https://",
   "ingest_error_notes_too_long": "Notes are too long. The limit is 50 000 characters — trim the text or paste a shorter excerpt.",
   "keys_steam_error_invalid": "Steam Web API rejected that key. Double-check the value and try again.",
   "keys_steam_error_label_exists": "A key with this label already exists. Pick a different label.",
   "error_server_generic": "Something went wrong on our side. Try again in a moment.",
   "error_network": "Couldn't reach the server. Check your connection and try again.",
-
   "confirm_game_delete": "Soft-delete \"{title}\"? You can restore it within 60 days from the deleted-games view.",
   "confirm_event_delete": "Delete this event? You can restore it within 60 days.",
   "confirm_item_delete": "Remove this tracked video? You can restore it within 60 days.",
@@ -464,27 +426,21 @@
   "confirm_source_remove": "Remove \"{display_name}\"? Existing events stay in your feed but will keep pointing at this retired source. You can restore the source within 60 days from the deleted-sources view.",
   "confirm_listing_remove_title": "Remove listing?",
   "confirm_listing_remove_body": "Can be restored within 60 days.",
-
   "settings_credentials_heading": "Credentials",
   "settings_credentials_steam_link_label": "Steam Web API key",
-
   "settings_sessions_heading": "Active sessions",
   "settings_sessions_blurb": "These are the devices currently signed in to your account. Sign out from any session you don't recognize.",
   "settings_sessions_current_badge": "Current session",
   "settings_sessions_only_current": "You're only signed in here.",
-
   "settings_theme_blurb": "Light and dark themes use your device preference unless you choose one explicitly. Changes apply immediately on every page.",
   "settings_theme_heading": "Theme",
-
   "appheader_account_menu_aria": "Account menu — {email}",
-
   "events_detail_delete": "Delete",
   "events_detail_edit": "Edit",
   "events_detail_open_original": "Open original",
   "events_detail_charts_heading": "Detail page is coming soon",
   "events_detail_charts_placeholder": "View-count and engagement charts will render here once the chart layer ships.",
   "events_detail_restore": "Restore",
-
   "event_edit_aria_label": "Edit event",
   "events_edit_author_is_me": "Author is me",
   "events_edit_delete_button": "Delete event",
@@ -495,7 +451,6 @@
   "events_edit_standalone_conflict": "\"Not game-related\" is mutually exclusive with attached games. Clear games or the flag.",
   "events_edit_standalone_help": "Clear this to attach a game",
   "events_edit_standalone_label": "Not game-related",
-
   "events_new_author_is_me": "Author is me",
   "events_new_date_today": "Today",
   "events_new_date_yesterday": "Yesterday",
@@ -512,37 +467,28 @@
   "events_new_fetch_err_rate_limited": "Source is rate-limited; try again shortly",
   "events_new_fetch_err_network": "Network error",
   "events_new_fetch_err_generic": "Failed to fetch metadata",
-
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
-
   "feed_card_thumbnail_alt": "Thumbnail for: {title}",
   "feed_card_open_external": "Open external link",
-
   "feed_deleted_panel_toggle_show": "Show {count} deleted events (within {days} days)",
   "feed_deleted_panel_toggle_hide": "Hide deleted events",
   "feed_deleted_panel_restore_cta": "Restore",
   "feed_deleted_panel_restore_aria": "Restore event",
-
   "feed_attach_no_games_inline": "No games yet — + Add a game",
-
   "badge_release_tba": "TBA",
   "badge_purge_in_days": "Purges in {days} days",
   "badge_purge_in_days_warning": "Purges in {days} days",
   "toast_saved": "Saved.",
   "toast_deleted": "Deleted.",
   "toast_restored": "Restored.",
-
   "page_header_recently_deleted": "Recently deleted ({count})",
-
   "recovery_dialog_heading": "Recently deleted ({count})",
   "recovery_dialog_empty": "Nothing to recover.",
-
   "theme_toggle_aria_label": "Toggle color theme",
   "theme_label_light": "Light",
   "theme_label_dark": "Dark",
   "theme_label_system": "System",
-
   "common_cancel": "Cancel",
   "common_confirm": "Confirm",
   "common_remove": "Remove",
@@ -551,14 +497,11 @@
   "common_restore": "Restore",
   "common_save": "Save",
   "common_close": "Close",
-
   "source_note_add": "+ Add note",
   "source_note_edit_aria": "Edit note",
   "source_note_dialog_title": "Source note",
   "source_note_dialog_hint": "Private remark to disambiguate this source from similar handles. Only you see it.",
   "source_note_placeholder": "e.g. press contact for indie horror; asked for review codes",
-
-
   "add_source_modal_title": "Add data source",
   "add_source_modal_close_aria": "Close add source dialog",
   "add_source_url_first_hint": "Paste a link and we'll detect the source automatically.",
@@ -567,7 +510,6 @@
   "add_source_not_supported_yet": "{kind} isn't supported yet.",
   "add_source_link_unrecognized": "We don't recognize this link yet. Supported: YouTube, Reddit, Telegram, Instagram, TikTok.",
   "sources_error_handle_unresolvable": "Account @{handle} doesn't exist or isn't available. Check the handle and try again.",
-
   "privacy_title": "Privacy Policy",
   "privacy_last_updated": "Last updated: {date}",
   "privacy_section_who_we_are_title": "Who we are",
@@ -596,7 +538,6 @@
   "privacy_section_complaints_body": "You can complain to your national Data Protection Authority. The European Data Protection Board lists national authorities at https://edpb.europa.eu/about-edpb/about-edpb/members_en.",
   "privacy_section_contact_title": "Contact",
   "privacy_section_contact_body": "For privacy questions, exercise of rights, or any data-protection concern: {supportEmail}",
-
   "terms_title": "Terms of Service",
   "terms_last_updated": "Last updated: {date}",
   "terms_section_service_description_title": "Service description",
@@ -619,7 +560,6 @@
   "terms_section_changes_body": "Last updated date appears at the top. Material changes are notified via in-app banner.",
   "terms_section_contact_title": "Contact",
   "terms_section_contact_body": "For terms questions: {supportEmail}",
-
   "about_title": "About",
   "about_intro_body": "Neotolis Game Promotion Diary is a free, MIT-licensed self-tracking diary for indie game developers. Replace messy Google Sheets with a structured, secure, query-friendly diary.",
   "about_repo_link_label": "GitHub repository",
@@ -627,7 +567,6 @@
   "about_links_privacy": "Privacy Policy",
   "about_links_terms": "Terms of Service",
   "about_footer_contact": "Contact: {supportEmail}",
-
   "settings_account_title": "Account",
   "settings_account_link": "Account",
   "settings_account_section_export_title": "Export your data",
@@ -675,7 +614,6 @@
   "about_section_self_host_runbook_link": "Read the deploy runbook",
   "about_footer_links_label": "Legal & contact",
   "legal_back_to_about": "← Back to About",
-
   "feed_bulk_action_bar_count_selected": "{count} selected",
   "feed_bulk_action_bar_games": "Games",
   "feed_bulk_action_bar_delete": "Delete",
@@ -683,13 +621,11 @@
   "feed_bulk_action_bar_delete_forever": "Delete forever",
   "feed_bulk_action_bar_clear_selection": "Clear selection",
   "feed_bulk_action_aria_region": "Bulk actions",
-
   "feed_trash_banner_text": "You're viewing the trash. Items here are auto-removed after {days} days.",
   "feed_trash_back_to_feed": "Back to Feed",
   "feed_trash_summary_auto_removed_in": "auto-removed in {days} days",
   "feed_trash_empty_heading": "Trash is empty.",
   "feed_trash_empty_body": "Items you delete will land here. They stay for {days} days before being permanently removed.",
-
   "feed_page_head_title_feed": "Feed",
   "feed_page_head_title_trash": "Recently deleted",
   "feed_search_placeholder": "Search events…",
@@ -698,7 +634,6 @@
   "feed_filters_toggle_label": "Filters",
   "feed_active_filters_clear_all": "Clear all",
   "feed_active_filters_remove_aria": "Remove {label} filter",
-
   "feed_date_range_chip_label_all_time": "All time",
   "feed_date_range_sort_newest_first": "Newest first",
   "feed_date_range_sort_oldest_first": "Oldest first",
@@ -714,7 +649,6 @@
   "feed_date_range_picker_close": "Close",
   "feed_date_range_picker_close_aria": "Close date picker",
   "feed_date_range_picker_pick_range_placeholder": "Pick a date range",
-
   "event_detail_modal_close_aria": "Close",
   "event_detail_modal_header_title": "Event details",
   "event_detail_modal_prev_aria": "Previous event",
@@ -734,7 +668,6 @@
   "event_detail_footer_edit": "Edit",
   "event_detail_footer_restore": "Restore",
   "event_detail_footer_delete_forever": "Delete forever",
-
   "add_event_modal_title": "Add event",
   "add_event_modal_close_aria": "Close",
   "add_event_modal_cancel": "Cancel",
@@ -756,7 +689,6 @@
   "add_event_modal_url_error_kind_mismatch": "Doesn't look like a {platform} URL.",
   "add_event_modal_url_error_reddit_short_link": "This link has no subreddit in it (redd.it / reddit.com/comments), so stats can't be fetched — paste the full reddit.com/r/… post link. You can still save this one without stats.",
   "add_event_modal_dirty_confirm": "Discard your changes?",
-
   "games_picker_title": "Games",
   "games_picker_bulk_title": "Edit {count} events",
   "games_picker_off_topic_label": "Off topic",
@@ -764,27 +696,23 @@
   "games_picker_apply": "Apply",
   "games_picker_cancel": "Cancel",
   "games_picker_close_aria": "Close",
-
   "author_popover_mine_label": "{name} (you)",
   "author_popover_someone_else": "Someone else",
   "author_popover_unknown": "Unknown author",
   "author_avatar_mine_aria": "Author: {name}",
   "author_avatar_unknown_aria": "Author: unknown",
-
   "feed_card_select_aria": "Select event",
   "feed_card_deselect_aria": "Deselect event",
   "feed_card_actions_aria": "More actions",
   "feed_card_menu_edit_games": "Edit games",
   "feed_card_menu_select": "Select",
   "feed_card_menu_delete": "Delete",
-
   "toast_event_added": "Event added",
   "toast_bulk_edit_success": "{count} events updated",
   "toast_bulk_delete_success": "{count} events moved to trash",
   "toast_bulk_restore_success": "{count} events restored",
   "toast_bulk_delete_forever_success": "{count} events permanently deleted",
   "toast_close_aria": "Dismiss notification",
-
   "audit_action_events_bulk_edit": "Bulk edit",
   "audit_action_events_bulk_delete": "Bulk delete",
   "audit_action_events_delete_forever": "Permanent delete",
@@ -796,7 +724,6 @@
   "audit_action_social_provider_throttled": "Provider budget throttled",
   "audit_action_social_budget_exhausted": "Provider budget exhausted",
   "audit_action_telegram_queue_drained": "Telegram queue drained",
-
   "axis_row_show_label": "Show",
   "axis_row_game_label": "Game",
   "axis_row_author_label": "Author",
@@ -804,7 +731,6 @@
   "axis_row_type_label": "Type",
   "axis_row_clear_axis_aria": "Clear {axis} filter",
   "axis_row_count_chip": "{count}",
-
   "feed_axis_show_all": "All",
   "feed_axis_show_inbox": "Inbox",
   "feed_axis_game_all": "All games",
@@ -829,7 +755,6 @@
   "feed_axis_type_short": "Short",
   "feed_axis_type_video": "Video",
   "feed_axis_type_other": "Other",
-
   "sources_trash_banner_text": "You're viewing the trash. Items here are auto-removed after {days} days.",
   "sources_trash_back": "Back to Sources",
   "sources_trash_empty_heading": "Trash is empty.",
@@ -839,7 +764,6 @@
   "sources_trash_confirm_delete_forever": "Permanently delete \"{name}\"? This cannot be undone.",
   "toast_source_restored": "Source restored.",
   "toast_source_deleted_forever": "Source permanently deleted.",
-
   "games_trash_banner_text": "You're viewing the trash. Items here are auto-removed after {days} days.",
   "games_trash_back": "Back to Games",
   "games_trash_empty_heading": "Trash is empty.",
@@ -848,5 +772,9 @@
   "games_trash_delete_forever": "Delete forever",
   "games_trash_confirm_delete_forever": "Permanently delete \"{title}\"? This cannot be undone.",
   "toast_game_restored": "Game restored.",
-  "toast_game_deleted_forever": "Game permanently deleted."
+  "toast_game_deleted_forever": "Game permanently deleted.",
+  "feed_card_reddit_deleted": "Deleted on Reddit — the post is no longer reachable.",
+  "media_type_pill_short": "Short",
+  "media_type_pill_carousel": "Carousel",
+  "media_type_pill_video": "Video"
 }
