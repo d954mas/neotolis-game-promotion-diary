@@ -78,6 +78,17 @@ export default defineConfig({
           environment: "node",
           env: {
             METRICS_BEARER_TOKEN: "test-metrics-token-for-ci",
+            // PIN the vars whose DEFAULT is the thing under test. Vite loads the
+            // developer's .env into the test process, so a machine that has these set
+            // for local dev ran a different suite than CI: twitter-not-configured
+            // asserts "TWITTER_PROVIDER is unset (env default)" and the pacer tests
+            // assert the 5s floor, both of which a populated .env silently overrides.
+            // That produced a permanent 7-test local red — and a suite that is never
+            // green is a suite whose failures stop being read, which is exactly where
+            // a real regression hides. Pinning here (not in .env) keeps local == CI
+            // without asking anyone to gut their dev config.
+            TWITTER_PROVIDER: "",
+            TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: "5000",
           },
           setupFiles: ["./tests/setup.ts"],
           testTimeout: 30_000,

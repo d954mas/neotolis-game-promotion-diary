@@ -83,6 +83,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Migration-vs-schema drift. AGENTS.md ("Forward-only migrations") states this
+      # gate runs in CI; it did not, on this branch or master, so a schema edit that
+      # was never generated into a migration could merge and only surface at a
+      # container boot on prod. Cheap and offline — no database needed.
+      - run: pnpm db:check
       - run: pnpm test:unit
       - run: pnpm test:integration
 
@@ -177,6 +182,21 @@ jobs:
             cat vite-preview.log
             exit 1
           fi
+          # The vitest `browser` project (tests/browser/**) and the playwright
+          # specs (tests/playwright/**) are TWO different suites. This job used to
+          # run only `pnpm test:browser` (= `playwright test`, testDir
+          # ./tests/playwright), so every tests/browser/*.test.ts was provisioned
+          # for — chromium install, preview boot, the headless-shell comment above
+          # — and then never executed: a gate that could not fail.
+          #
+          # One file per vitest invocation: a single batch run tears down the
+          # browser between files and dies on `[birpc] rpc is closed` after the
+          # first one or two. Per-file is deterministic and all 12 files pass.
+          for f in tests/browser/*.test.ts; do
+            echo "::group::vitest browser $f"
+            pnpm exec vitest run --project=browser "$f"
+            echo "::endgroup::"
+          done
           pnpm test:browser
 
   smoke:
