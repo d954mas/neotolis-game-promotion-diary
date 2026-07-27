@@ -372,20 +372,69 @@ describe("reddit native-subreddit walker (Phase 12)", () => {
 
     // The subject now returns ZERO posts (every post deleted). provider.pages empty ⇒ the
     // mock yields emptyPage() — a complete, authoritative empty feed.
-    provider.pages = [];
-    await handleBackfillSubreddit({
-      data: {
-        kind: "reddit_subreddit",
-        channelKey: slug,
-        depthBoundIso: "1970-01-01T00:00:00Z",
-        flow: "auto_passive",
-      },
-    });
+    const emptyPass = async () => {
+      provider.pages = [];
+      await handleBackfillSubreddit({
+        data: {
+          kind: "reddit_subreddit",
+          channelKey: slug,
+          depthBoundIso: "1970-01-01T00:00:00Z",
+          flow: "auto_passive",
+        },
+      });
+    };
 
-    // The windowed reconcile can't fire (no oldestSeen) — the full-subject reconcile must,
-    // or a mass author-deletion would never set the GDPR clock on any row.
+    // ONE empty pass is NOT evidence. An empty feed has non-deletion causes (search-index
+    // rebuild, shadowban, temporary suspension), and the flag it would set is terminal by
+    // design — deletion_detected_by is nulled at purge, so clearReappearedDeletions can
+    // never un-flag it. Corroboration first.
+    await emptyPass();
+    expect(
+      (await readPost(P))!.deletionDetectedAt,
+      "a single empty feed must NOT mass-flag the subject's history",
+    ).toBeNull();
+
+    // The SECOND consecutive empty pass corroborates it. The windowed reconcile can't fire
+    // (no oldestSeen) — the full-subject reconcile must, or a mass deletion would never
+    // set the GDPR clock on any row.
+    await emptyPass();
     const p = await readPost(P);
-    expect(p!.deletionDetectedAt, "empty feed flags the whole tracked subject set").not.toBeNull();
+    expect(
+      p!.deletionDetectedAt,
+      "a corroborated empty feed flags the whole tracked subject set",
+    ).not.toBeNull();
     expect(p!.deletionDetectedBy).toBe(`reddit_subreddit:${slug}`);
+  });
+
+  it("[review-P2] a sighting between two empty passes RESETS the corroboration counter", async () => {
+    const slug = `sub_${uniq()}`;
+    await seedSubredditSource(slug);
+    await markChannelLastPolledAt("reddit_subreddit", slug);
+    const P = `p${uniq()}`;
+    await seedTrackedPost(P, 2, slug);
+
+    const pass = async (pages: typeof provider.pages) => {
+      provider.pages = pages;
+      await handleBackfillSubreddit({
+        data: {
+          kind: "reddit_subreddit",
+          channelKey: slug,
+          depthBoundIso: "1970-01-01T00:00:00Z",
+          flow: "auto_passive",
+        },
+      });
+    };
+
+    // empty → alive → empty must NOT reach the threshold: the counter tracks
+    // CONSECUTIVE empties, so a transient outage that recovers cannot accumulate
+    // toward an irreversible purge across unrelated days.
+    await pass([]);
+    await pass([walkPage([makePost(P, 2, slug)])]);
+    await pass([]);
+
+    expect(
+      (await readPost(P))!.deletionDetectedAt,
+      "a live sighting must reset the empty-pass counter",
+    ).toBeNull();
   });
 });

@@ -215,6 +215,68 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     expect(after.requests - before.requests).toBe(1);
   });
 
+  // REGRESSION: a not-found on ANY page used to abandon the whole pass and flag
+  // needs_reconnect on every subscriber. poll-cron filters those out and only a WALK
+  // clears the flag — and Reddit has no credentials, so there is no user-facing
+  // "Reconnect" affordance either. A one-off provider 404 on page 2 permanently
+  // stranded the source AND threw away the cursor + posts page 1 had already paid for.
+  it("[CR-06] a not-found on page TWO keeps the pass: posts land, cursor persists, no needs_reconnect", async () => {
+    const handle = `midwalk_${Math.random().toString(36).slice(2, 7)}`;
+    const sourceId = await seedAccountSource(handle);
+    const { AdapterError } = await import("../../src/lib/sources/errors.js");
+    const postId = `mw${Math.random().toString(36).slice(2, 8)}`;
+
+    // Page 1 succeeds and hands out a cursor; page 2 404s.
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: `t3_${postId}`,
+            id: postId,
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "gamedev",
+            title: "Survives the mid-walk 404",
+            selftext: "body",
+            score: 3,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - 2 * DAY) / 1000),
+            permalink: `/r/gamedev/comments/${postId}/x/`,
+          },
+        ],
+        after: "page-2",
+      }),
+    ];
+    provider.errors = [undefined as never, new AdapterError("gone", { category: "not-found" })];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 30 * DAY).toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const [src] = await db
+      .select({ needsReconnect: dataSources.needsReconnect })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId));
+    expect(src!.needsReconnect, "a mid-walk 404 is a provider hiccup, not a dead subject").toBe(
+      false,
+    );
+
+    const imported = await db.select().from(events).where(eq(events.kind, "reddit_post"));
+    expect(
+      imported.some((e) => e.externalId === `t3_${postId}`),
+      "page-1 posts must not be discarded by a page-2 404",
+    ).toBe(true);
+
+    const state = await getRedditBackfillState("reddit_account", handle);
+    expect(state.cursor, "the paid cursor survives so the next tick resumes").toBe("page-2");
+  });
+
   it("[CR-01] a reserved authoritative empty first page advances the user's ledger exactly once", async () => {
     const sourceId = await seedAccountSource(`empty_${Math.random().toString(36).slice(2, 7)}`);
     const [source] = await db
@@ -309,6 +371,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       collected: 5,
       operatorPaused: true,
       deepTargetIso: "1970-01-01T00:00:00Z",
+      emptyPasses: 0,
     });
     await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 30 * DAY));
     await markChannelLastPolledAt("reddit_account", handle);
@@ -464,6 +527,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       collected: 4,
       operatorPaused: false,
       deepTargetIso: null,
+      emptyPasses: 0,
     });
     await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 7 * DAY));
     const { markChannelBackfillComplete } =
@@ -564,6 +628,68 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       imported.some((event) => event.externalId === `t3_${deepId}`),
       "active walk follows the deepest subscriber target",
     ).toBe(true);
+  });
+
+  // REGRESSION: the widened-target recursion compared a subscriber's
+  // backfill_target_since against THIS pass's depth bound instead of the coverage
+  // frontier the channel had already reached. poll-cron always bounds at now-14d
+  // while a default source carries now-30d, so `now-30d < now-14d` held on EVERY
+  // completed pass — re-firing a forceDeep re-walk of already-covered ground daily,
+  // forever, billed to the subscriber's PERSONAL daily quota and importing nothing.
+  it("[CR-05] a cron pass over an already-deeper-walked channel does NOT re-fire the widened deep walk", async () => {
+    const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
+    const handle = `covered_${Math.random().toString(36).slice(2, 7)}`;
+    // Subscriber wants 30d back; the channel has ALREADY been walked to 400d.
+    const sourceId = await seedAccountSource(handle, new Date(Date.now() - 30 * DAY));
+    const [subscriber] = await db
+      .select({ userId: dataSources.userId })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId));
+    await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 400 * DAY));
+    await markChannelLastPolledAt("reddit_account", handle);
+
+    // One page whose oldest post crosses the cron bound → the pass completes.
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: "t3_fresh01",
+            id: "fresh01",
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "gamedev",
+            title: "Recent devlog",
+            selftext: "body",
+            score: 5,
+            num_comments: 1,
+            created_utc: Math.floor((Date.now() - 20 * DAY) / 1000),
+            permalink: "/r/gamedev/comments/fresh01/x/",
+          },
+        ],
+        after: "page-2",
+      }),
+    ];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 14 * DAY).toISOString(),
+        flow: "auto_passive",
+      },
+    });
+
+    // Exactly one fetch: page 1 crosses the 14d bound and completes the pass. A
+    // re-fired widened recursion resets the cursor and fetches again (2+).
+    expect(provider.calls, "cron pass must not re-walk already-covered depth").toBe(1);
+    // ...and it must not have been billed to the subscriber. The recursion passes
+    // triggerUserId, which flips the fetch to origin:"user" + userAccounting — that is
+    // how a daily cron re-walk silently ate the user's own LIMIT_SOCIAL_REQUESTS_PER_DAY.
+    expect(
+      (await getUserQuotaUsedToday(subscriber!.userId, "reddit_account")).requests,
+      "a cron pass must not consume the subscriber's personal daily quota",
+    ).toBe(0);
   });
 
   it("[CR-01] real pg-boss defers a same-channel outbox intent and delivers it once after release", async () => {

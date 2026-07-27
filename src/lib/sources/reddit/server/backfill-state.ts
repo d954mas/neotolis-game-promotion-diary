@@ -72,6 +72,18 @@ export interface RedditBackfillState {
    *  carried across resume ticks, and cleared to null once the deep completes / a
    *  non-deep (incremental/exhausted) pass runs. null ⇒ no deep in progress. */
   deepTargetIso: string | null;
+  /** CONSECUTIVE complete passes that saw ZERO posts. Corroboration counter for the
+   *  "authoritative empty feed ⇒ the subject deleted everything" inference, which
+   *  mass-flags the subject's whole cached history for GDPR purge. That inference is
+   *  only as trustworthy as the feed: the ACCOUNT path is a broad
+   *  `search?query=author:<handle>` against Reddit's SEARCH INDEX, which returns zero
+   *  results for reasons that are not deletion (index rebuild, shadowban, temporary
+   *  suspension, subs opting out of indexing). Acting on a single empty response would
+   *  destroy author + permalink data for every tenant referencing those posts, and the
+   *  flag is terminal by design (deletion_detected_by is nulled at purge, so
+   *  clearReappearedDeletions can never un-flag it). Reset to 0 by any pass with
+   *  sightings. */
+  emptyPasses: number;
 }
 
 const EMPTY: RedditBackfillState = {
@@ -80,6 +92,7 @@ const EMPTY: RedditBackfillState = {
   collected: 0,
   operatorPaused: false,
   deepTargetIso: null,
+  emptyPasses: 0,
 };
 
 /** Read the Reddit backfill sub-state from a channel-state row's metadata, with
@@ -95,6 +108,7 @@ export function readRedditBackfillState(
     collected: typeof r?.collected === "number" ? r.collected : 0,
     operatorPaused: r?.operatorPaused === true,
     deepTargetIso: typeof r?.deepTargetIso === "string" ? r.deepTargetIso : null,
+    emptyPasses: typeof r?.emptyPasses === "number" ? r.emptyPasses : 0,
   };
 }
 

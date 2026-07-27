@@ -46,6 +46,7 @@ async function seedCompleteAccount(handle: string, frontier: Date): Promise<stri
     collected: 17,
     operatorPaused: false,
     deepTargetIso: null,
+    emptyPasses: 0,
   });
   await markChannelBackfillFrontier("reddit_account", handle, frontier);
   await markChannelBackfillComplete("reddit_account", handle);

@@ -107,6 +107,12 @@ const INCREMENTAL_PAGE_CAP = 2;
  *  even if SOCIAL_BACKFILL_MAX_POSTS is set huge. 100 posts / ~7-24 per page ⇒ well
  *  under this. */
 const DEEP_PAGE_CAP = 30;
+/** Consecutive complete-and-empty passes required before an empty feed is treated as
+ *  "the subject deleted everything" and its whole cached history is flagged for GDPR
+ *  purge. Two daily passes ⇒ a transient search-index outage self-heals before any
+ *  irreversible write; a genuine mass deletion is still caught within ~a day, well
+ *  inside the 48h purge grace that follows. */
+const AUTHORITATIVE_EMPTY_PASSES = 2;
 
 /** One collected post: the cross-source RawEvent plus the walk-local facts the
  *  fan-out needs but the RawEvent contract does not carry (the post author, which
@@ -253,6 +259,9 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       collected: 0,
       operatorPaused: state0.operatorPaused,
       deepTargetIso: null,
+      // Cross-pass corroboration, NOT walk progress — a cursor reset must not
+      // forget that the previous passes came back empty.
+      emptyPasses: state0.emptyPasses,
     };
   } else {
     // A deep pass RE-OPENED on a COMPLETED sub-state (initial-deeper / forceDeep
@@ -265,6 +274,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         collected: 0,
         operatorPaused: state0.operatorPaused,
         deepTargetIso: null,
+        emptyPasses: state0.emptyPasses,
       };
     }
     state.deepTargetIso = target.toISOString();
@@ -284,10 +294,12 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   let pausedByRateLimit = false;
   let pausedByUserQuota = false;
   let notFound = false;
+  let notFoundAtPage = -1;
   let walkedThisTick = false;
   let fetchedThisTick = 0;
   let droppedThisTick = 0;
   let crossedBound = false;
+  let feedExhausted = false;
 
   // Reserve the paid credit and write its per-user accounting row atomically before
   // HTTP. A provider error therefore still counts exactly once, while an accounting
@@ -339,6 +351,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
           pausedByBudget = true;
         } else if (err.category === "not-found") {
           notFound = true;
+          notFoundAtPage = pageNo;
         } else {
           throw err; // transient / permanent → pg-boss retry / dead-letter
         }
@@ -435,6 +448,12 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
     state.cursor = page.nextCursor;
     if (page.endOfFeed || crossedBound || page.nextCursor === null) {
+      // Distinguish "the feed ran out" from "we stopped at the depth bound". Only the
+      // former means no target, however old, can yield another post (see the
+      // widened-subscriber gate below). crossedBound excludes it because we broke out
+      // of the post loop early: the rest of THIS page is older than the bound and is
+      // exactly what a deeper subscriber still wants, cursor or no cursor.
+      feedExhausted = !crossedBound && (page.endOfFeed || page.nextCursor === null);
       state.complete = true;
       break;
     }
@@ -457,13 +476,32 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // or they see nothing until the next daily cron. Narrows the dedupe race window
   // from the whole walk to milliseconds.
   subscribers = await loadSubscribers();
+  // COVERAGE FRONTIER, not this pass's bound. Comparing a subscriber's target against
+  // `target` alone re-fires the widened recursion on EVERY completed pass, forever:
+  // poll-cron always bounds at now-14d while a default source carries
+  // backfillTargetSince = now-30d, so `now-30d < now-14d` holds on every tick even
+  // after the channel has been walked to now-400d. That re-walk imports nothing (every
+  // insert is an onConflictDoNothing no-op) but bills up to DEEP_PAGE_CAP pages a day
+  // to the subscriber's PERSONAL daily quota, starving their own Refresh-Now.
+  // Recurse only when the subscriber wants strictly deeper than the oldest point this
+  // channel has ever reached — the same predicate the branch decision uses above — and
+  // only while the feed still has pages left to give.
+  const walkedFrontier =
+    oldestSeenPublishedAt !== null &&
+    (deepestWalked === null || oldestSeenPublishedAt.getTime() < deepestWalked.getTime())
+      ? oldestSeenPublishedAt
+      : deepestWalked;
+  const coverageFrontier =
+    walkedFrontier !== null && walkedFrontier.getTime() < target.getTime()
+      ? walkedFrontier
+      : target;
   const widenedSubscriber =
-    state.complete && !pausedThisTick
+    state.complete && !pausedThisTick && !feedExhausted
       ? subscribers
           .filter(
             (subscriber) =>
               subscriber.backfillTargetSince !== null &&
-              subscriber.backfillTargetSince.getTime() < target.getTime(),
+              subscriber.backfillTargetSince.getTime() < coverageFrontier.getTime(),
           )
           .sort(
             (left, right) =>
@@ -473,8 +511,17 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
   // Empty first page on a brand-new source ⇒ probable bad/private handle → flag
   // needs_reconnect, do NOT mark complete (a typo would otherwise be swallowed).
+  //
+  // Only a FIRST-PAGE 404 says anything about the subject. A 404 on page N>0 is a
+  // provider hiccup mid-walk: bailing here would throw away the cursor and the posts
+  // already paid for, and — worse — flag needs_reconnect on every subscriber, which
+  // poll-cron filters out permanently (only a walk clears the flag, and cron will
+  // never enqueue one again; Reddit has no credentials, so there is no "Reconnect"
+  // affordance either). Fall through instead: the collected posts fan out, the cursor
+  // persists, coveragePassComplete already excludes `notFound` so nothing reconciles,
+  // and the next tick resumes where this one stopped.
   if (
-    notFound ||
+    (notFound && notFoundAtPage === 0) ||
     (wasNeverPolled &&
       !pausedThisTick &&
       walkedThisTick &&
@@ -581,17 +628,33 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       seenIds,
       oldestSeenPublishedAt,
     );
-  } else if (coveragePassComplete && fetchedThisTick === 0 && !wasNeverPolled) {
+  } else if (
+    coveragePassComplete &&
+    fetchedThisTick === 0 &&
+    !wasNeverPolled &&
+    state.emptyPasses + 1 >= AUTHORITATIVE_EMPTY_PASSES
+  ) {
     // AUTHORITATIVE EMPTY feed on an ESTABLISHED source: the subject deleted ALL its
     // posts (the feed is newest-first, so a complete empty page-1 = zero posts exist).
     // The windowed reconcile above can't fire (no oldestSeen), so the entire tracked
     // subject set must be reconciled — otherwise a mass author-deletion never sets the
     // GDPR clock on ANY row. A brand-new empty source (wasNeverPolled) already returned
     // via the needs_reconnect branch above (a typo, not a mass deletion).
+    //
+    // Gated on AUTHORITATIVE_EMPTY_PASSES consecutive empty passes: the account path
+    // reads Reddit's SEARCH INDEX, which goes empty for reasons that are not deletion
+    // (see RedditBackfillState.emptyPasses). One bad day must not irreversibly strip
+    // author + permalink data that other tenants also reference.
     reconciledDeletions = await reconcileAllDisappeared(config, channelKey);
   }
 
   // ── Persist state + channel bookkeeping ──
+  // Corroboration counter for the branch above: a complete pass that saw nothing
+  // increments it, ANY sighting resets it. Only counts passes that could have seen
+  // posts — a paused / not-found / partial pass is not evidence either way.
+  if (coveragePassComplete) {
+    state.emptyPasses = fetchedThisTick === 0 ? state.emptyPasses + 1 : 0;
+  }
   state.operatorPaused = pausedByBudget;
   const walkComplete = !pausedThisTick && state.complete;
   await writeRedditBackfillState(config.kind, channelKey, state);
