@@ -34,6 +34,7 @@
   // Registered via ./index.ts as `cardComponent` so /feed/+page.svelte's
   // `getCardComponent("reddit_post")` returns this component.
 
+  import { m } from "$lib/paraglide/messages.js";
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
   import StatChips from "$lib/components/feed/parts/StatChips.svelte";
   import { deriveMediaTypeOverlay } from "$lib/components/feed/parts/media-type-overlay.js";
@@ -80,10 +81,38 @@
   // Subreddit slug / handle from the FK source-of-truth (data_sources via `source`
   // prop), falling back to the r/<sub> slug the URL carries (redditSubredditLabel
   // reads event metadata only as the URL-intrinsic, rename-proof last resort).
-  const sourceLabel = $derived.by(
-    (): string =>
-      source?.channelTitle ?? source?.displayName ?? redditSubredditLabel(event.metadata),
-  );
+  //
+  // The stored displayName is the BARE slug/handle ("gamedev", "d954mas") — Reddit's
+  // canonicalizeOnCreate strips the sigil. Rendering it raw put "gamedev" next to a
+  // hand-pasted "r/gamedev" from the same community, i.e. two spellings of one place
+  // in a single column. Re-apply the sigil from the SOURCE KIND, and never
+  // double-prefix a value that already carries one.
+  const sourceLabel = $derived.by((): string => {
+    const raw = source?.channelTitle ?? source?.displayName ?? null;
+    if (raw === null || raw === "") return redditSubredditLabel(event.metadata);
+    if (/^[ru]\//i.test(raw)) return raw;
+    if (source?.kind === "reddit_account") return `u/${raw}`;
+    if (source?.kind === "reddit_subreddit") return `r/${raw}`;
+    return raw;
+  });
+
+  // Which community the post landed in. For a SUBREDDIT source that is the label
+  // above, so it would be pure repetition; for an ACCOUNT source the label is the
+  // handle, and without this line a dev tracking their own posts cannot tell whether
+  // one went to r/gamedev or r/IndieDev. The slug is intrinsic and rename-proof (the
+  // one sanctioned denormalization), read from the post's own cache row.
+  const bylineLabel = $derived.by((): string | null => {
+    if (source?.kind === "reddit_subreddit") return null;
+    const slug = event.redditEnrichment?.subredditSlug ?? null;
+    if (slug === null || slug === "") return null;
+    const label = `r/${slug}`;
+    return label === sourceLabel ? null : label;
+  });
+
+  // Deleted-on-Reddit notice. The enrichment has always carried this and the event
+  // DETAIL rendered it, but the card type dropped the field — so a deleted post looked
+  // completely normal in the feed and the only way to find out was to open it.
+  const deletedAt = $derived(event.redditEnrichment?.deletionDetectedAt ?? null);
 
   // D-06 adaptive: media-ness is the post FORM, not cover presence. An image / gallery
   // post reserves the media slot (forceThumbSlot below) even when it has NO usable cover
@@ -109,9 +138,14 @@
   const overlay = $derived.by(() => deriveMediaTypeOverlay(event));
 </script>
 
+{#snippet deletedSnippet()}
+  <p class="reddit-deleted" role="status">{m.feed_card_reddit_deleted()}</p>
+{/snippet}
+
 <BaseFeedCard
   {event}
   {sourceLabel}
+  {bylineLabel}
   {thumbnailUrl}
   {games}
   {selected}
@@ -125,6 +159,7 @@
   {onDeleteForever}
   {currentUserName}
   statsSlot={statsSnippet}
+  extraSlot={deletedAt ? deletedSnippet : undefined}
   thumbnailOverlay={overlay}
   forceThumbSlot={isMediaPost}
   onThumbnailError={() => (thumbErrored = true)}
@@ -148,3 +183,14 @@
     </div>
   {/if}
 {/snippet}
+
+<style>
+  .reddit-deleted {
+    margin: var(--space-1) 0 0;
+    padding: var(--space-1) var(--space-2);
+    border: 1px dashed var(--danger-border, var(--border-1));
+    border-radius: var(--radius-1);
+    color: var(--danger-text, var(--text-2));
+    font-size: var(--font-size-0);
+  }
+</style>

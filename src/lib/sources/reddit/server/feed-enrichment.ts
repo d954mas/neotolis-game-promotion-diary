@@ -60,6 +60,12 @@ export interface RedditEnrichment {
    *  detail surface (EventDetailContent) renders a "Deleted on Reddit" notice off this;
    *  without projecting it here that notice could never appear. */
   deletionDetectedAt: string | null;
+  /** The post's own subreddit slug from reddit_posts.subreddit_slug. INTRINSIC, not a
+   *  display name — Reddit forbids subreddit rename and the slug IS part of the
+   *  canonical URL, so this is the one sanctioned denormalization (AGENTS.md). The card
+   *  needs it because an ACCOUNT source's label is the handle: without this a dev
+   *  tracking their own posts cannot see which community each one went to. */
+  subredditSlug: string | null;
 }
 
 /** Discriminator key for the in-place decoration. The card-props mapper (Plan 06)
@@ -200,6 +206,7 @@ export async function redditEnrichFeedDtos(
         thumbnailUrl: meta?.thumbnailUrl ?? null,
         mediaType: meta?.mediaType ?? null,
         deletionDetectedAt: meta?.deletionDetectedAt ? meta.deletionDetectedAt.toISOString() : null,
+        subredditSlug: meta?.subredditSlug ?? null,
       };
       // A post is paused if EITHER its subreddit source OR its account source is paused.
       // Match on the kind-namespaced key so the two keyspaces can't collide.

@@ -85,6 +85,13 @@ export interface CardEventLite {
     } | null;
     thumbnailUrl: string | null;
     mediaType: string | null;
+    /** ISO timestamp the post was detected deleted-on-Reddit, else null. The feed card
+     *  renders a notice off this — without it a deleted post looked like any other in
+     *  the feed and the user had to open the detail view to find out. */
+    deletionDetectedAt?: string | null;
+    /** The post's OWN subreddit slug (intrinsic, rename-proof — the sanctioned
+     *  denormalization). Lets an account-sourced post show which community it went to. */
+    subredditSlug?: string | null;
   };
   /** Instagram public-data decoration attached by
    *  sources/instagram/server/feed-enrichment.ts (mirrors redditEnrichment).
@@ -178,6 +185,11 @@ export interface CardSourceLite {
   displayName: string | null;
   handleUrl: string;
   channelTitle?: string | null;
+  /** The source kind (`reddit_account` / `reddit_subreddit` / …). Reddit needs it to
+   *  render the right sigil: the stored displayName is the BARE slug/handle, so a card
+   *  showed "gamedev" while a hand-pasted post from the same community showed
+   *  "r/gamedev" — two spellings of one place in a single column. */
+  kind?: string | null;
 }
 
 /** Read the YouTube channel name from FK-joined data_sources, NEVER

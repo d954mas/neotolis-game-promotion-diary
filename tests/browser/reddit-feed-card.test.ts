@@ -39,6 +39,8 @@ function makeEvent(opts: {
   stats: RdStats | null;
   thumbnailUrl: string | null;
   mediaType: string | null;
+  subredditSlug?: string | null;
+  deletionDetectedAt?: string | null;
 }): CardEventLite {
   return {
     id: "ev_rd_1",
@@ -59,20 +61,37 @@ function makeEvent(opts: {
       stats: opts.stats,
       thumbnailUrl: opts.thumbnailUrl,
       mediaType: opts.mediaType,
+      subredditSlug: opts.subredditSlug ?? "gamedev",
+      deletionDetectedAt: opts.deletionDetectedAt ?? null,
     },
   };
 }
 
+// REALISTIC fixture: canonicalizeOnCreate stores the BARE slug/handle and Reddit
+// never populates channelTitle. The previous fixture pre-prefixed both, which is a
+// shape the adapter never produces — it hid the missing-sigil bug entirely.
 const source = {
   id: "src_rd_1",
-  displayName: "r/gamedev",
+  displayName: "gamedev",
   handleUrl: "https://www.reddit.com/r/gamedev",
-  channelTitle: "r/gamedev",
+  kind: "reddit_subreddit",
+};
+
+const accountSource = {
+  id: "src_rd_2",
+  displayName: "d954mas",
+  handleUrl: "https://www.reddit.com/user/d954mas",
+  kind: "reddit_account",
 };
 
 function mountCard(
   event: CardEventLite,
-  sourceProp: typeof source | null = source,
+  sourceProp: {
+    id: string;
+    displayName: string | null;
+    handleUrl: string;
+    kind?: string;
+  } | null = source,
 ): { card: HTMLElement; component: ReturnType<typeof mount> } {
   const component = mount(RedditFeedCard, {
     target: host,
@@ -227,6 +246,77 @@ describe("RedditFeedCard adaptive rendering (Phase 12 Plan 06 — PLAT-04)", () 
     expect(nums).toHaveLength(1);
     expect(nums).toContain("350");
     expect(card.querySelector('.card-stats .stat[data-metric="comments"]')).toBeNull();
+    unmount(component);
+  });
+  // REGRESSION (review): the adapter stores the BARE slug, so the card used to render
+  // "gamedev" while a hand-pasted post from the same community rendered "r/gamedev" —
+  // two spellings of one place in a single feed column.
+  it("[review] a subreddit source renders the r/ sigil, not the bare slug", () => {
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/gamedev");
+    unmount(component);
+  });
+
+  it("[review] an account source renders the u/ sigil AND the post's own subreddit as a byline", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: "IndieDev",
+      }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("u/d954mas");
+    expect(
+      (card.querySelector(".card-byline")?.textContent ?? "").trim(),
+      "a dev tracking their own posts must see WHICH community each went to",
+    ).toBe("r/IndieDev");
+    unmount(component);
+  });
+
+  it("[review] a subreddit source does NOT repeat its own slug as a byline", () => {
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+    );
+    expect(card.querySelector(".card-byline")).toBeNull();
+    unmount(component);
+  });
+
+  it("[review] an already-sigilled display name is never double-prefixed", () => {
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+      { ...source, displayName: "r/gamedev" },
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/gamedev");
+    unmount(component);
+  });
+
+  // REGRESSION (review): the enrichment carried deletionDetectedAt and the event DETAIL
+  // rendered it, but the card type dropped the field — a deleted post looked completely
+  // normal in the feed.
+  it("[review] a deleted-on-Reddit post shows the notice on the CARD, not only in the detail", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        deletionDetectedAt: "2026-06-20T10:00:00Z",
+      }),
+    );
+    const notice = card.querySelector(".reddit-deleted");
+    expect(notice, "the feed must surface deletion without opening the event").not.toBeNull();
+    expect((notice?.textContent ?? "").toLowerCase()).toContain("deleted");
+    unmount(component);
+  });
+
+  it("[review] a live post shows NO deletion notice", () => {
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+    );
+    expect(card.querySelector(".reddit-deleted")).toBeNull();
     unmount(component);
   });
 });
