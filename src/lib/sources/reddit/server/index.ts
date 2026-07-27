@@ -47,6 +47,7 @@ import { env } from "$lib/server/config/env.js";
 import { QUEUES, REDDIT_WALK_QUEUE_OPTIONS } from "$lib/server/queues.js";
 import { db } from "$lib/server/db/client.js";
 import { outbox } from "$lib/server/db/schema/outbox.js";
+import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { backfillWindowToDate } from "$lib/server/services/data-sources.js";
 import {
@@ -57,7 +58,7 @@ import {
 import { getChannelState } from "$lib/server/services/channel-state.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc, isNull, sql } from "drizzle-orm";
 import { redditPosts } from "$lib/server/db/schema/index.js";
 import { redditAccountAdapterCore } from "./adapter.js";
 import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
@@ -607,6 +608,40 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
 }
 
 /**
+ * resolveCachedAuthorIsMe — per-post ownership for a PASTED reddit_post.
+ *
+ * A Reddit source can carry other people's content (a subreddit feed always does), so
+ * ownership is a property of the POST's author, never of the source row — the same rule
+ * the walk applies via resolveOwnedUsernames (CHECKLIST §3). Without this the create
+ * path had no author match at all: a dev pasting their OWN post, with u/<handle>
+ * registered as an owned account, still got it filed as somebody else's until a walk
+ * happened to re-cover that post. Reads the author from OUR cache (written by the
+ * preview), never from the request body.
+ */
+async function resolveCachedAuthorIsMe(userId: string, externalId: string): Promise<boolean> {
+  const [post] = await db
+    .select({ author: redditPosts.author })
+    .from(redditPosts)
+    .where(eq(redditPosts.postId, externalId))
+    .limit(1);
+  if (!post?.author) return false;
+  const [owned] = await db
+    .select({ id: dataSources.id })
+    .from(dataSources)
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.kind, "reddit_account"),
+        eq(dataSources.isOwnedByMe, true),
+        isNull(dataSources.deletedAt),
+        sql`LOWER(${dataSources.channelId}) = ${post.author.toLowerCase()}`,
+      ),
+    )
+    .limit(1);
+  return owned !== undefined;
+}
+
+/**
  * validateEventInput — reddit_post URL-invariant for the merged-state PATCH gate
  * (mirrors youtube/telegram validateEventInput). The CREATE path enforces url-required
  * via its Zod schema; without this the PATCH merged-state validator (events-mutation.ts)
@@ -641,6 +676,7 @@ export const redditAdapter: SourceAdapter & typeof redditAccountAdapterCore = {
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
   resolveCachedExternalId,
+  resolveCachedAuthorIsMe,
   validateEventInput,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "reddit_post",

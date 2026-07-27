@@ -713,6 +713,17 @@ export interface SourceAdapter {
    *  videoId, Reddit t3 id) omit this — the parseAnyUrl path already covers them. */
   resolveCachedExternalId?(url: string): Promise<string | null>;
 
+  /** Resolve `author_is_me` for a pasted event from the adapter's OWN cache.
+   *  Declare this ONLY for kinds whose source can carry OTHER PEOPLE's content, so
+   *  ownership is a property of the POST, not of the source row (CHECKLIST §3):
+   *  Reddit matches the cached post's author against the tenant's own
+   *  `reddit_account` sources. Kinds where one source == one identity
+   *  (telegram/twitter/tiktok/instagram) inherit from the source row at create time
+   *  and omit this. Returns false when the cache has no row (a create without a
+   *  prior preview) — the walk corrects it on the next pass. An explicit
+   *  `input.authorIsMe` from the caller always wins over this. */
+  resolveCachedAuthorIsMe?(userId: string, externalId: string): Promise<boolean>;
+
   /** Batch lookup of live poll-state for events of this adapter's kinds.
    *  dto.ts's overlayPollStateOnEvents iterates allAdapters and merges
    *  results. YouTube: SELECT publishedAt/lastPolledAt/lastPollStatus

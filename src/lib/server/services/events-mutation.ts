@@ -189,6 +189,7 @@ export async function createEvent(
   // mismatch is silently left as null; the route-layer superRefine catches
   // malformed kind/URL pairs before the service is called.
   let derivedExternalId: string | null = input.externalId ?? null;
+  let resolvedAuthorIsMe = false;
   if (derivedExternalId == null && input.url != null && input.url !== "") {
     // CYCLE-BREAKER: source URL parsing imports the adapter registry, and
     // the registry resolves adapter barrels that call back into event
@@ -237,6 +238,17 @@ export async function createEvent(
     if (adapter.resolveCachedExternalId !== undefined) {
       derivedExternalId = await adapter.resolveCachedExternalId(input.url);
     }
+    // Per-post ownership for kinds whose source can carry other people's content
+    // (Reddit). An explicit caller value always wins; otherwise the adapter matches
+    // the CACHED post's author against the tenant's own accounts. Runs after the
+    // external_id derivation because that id is the cache key.
+    if (
+      input.authorIsMe === undefined &&
+      derivedExternalId !== null &&
+      adapter.resolveCachedAuthorIsMe !== undefined
+    ) {
+      resolvedAuthorIsMe = await adapter.resolveCachedAuthorIsMe(userId, derivedExternalId);
+    }
   }
 
   // The events INSERT + junction INSERT loop run in a single tx so a
@@ -256,7 +268,7 @@ export async function createEvent(
           userId,
           sourceId: input.sourceId ?? null,
           kind: input.kind,
-          authorIsMe: input.authorIsMe ?? false,
+          authorIsMe: input.authorIsMe ?? resolvedAuthorIsMe,
           occurredAt,
           title: input.title.trim(),
           url: input.url ?? null,
@@ -565,10 +577,10 @@ export async function enrichFromUrl(
       authorName: preview.authorName || null,
       authorUrl: preview.authorUrl || null,
       canonicalUrl: parsed.canonicalUrl,
-      // author_is_me inheritance for Reddit lives in syncStats.fetch
-      // (matches t3.author against owned reddit_account.metadata.username).
-      // enrichFromUrl is the PREVIEW path — no DB write happens here, so
-      // we don't pre-compute sourceMatch.
+      // author_is_me is matched PER POST for Reddit (a subreddit feed carries other
+      // people's content), and it happens at CREATE time off the cached post row —
+      // see resolveRedditAuthorIsMe in createEvent. Not here: enrichFromUrl is the
+      // preview path and its sourceMatch is not carried into the create request.
       sourceMatch: null,
     };
   }
@@ -1397,11 +1409,17 @@ export async function attachEventToGames(
     // On any non-empty junction diff, additionally strip metadata.inbox so
     // the event re-enters the inbox triage flow if the user later detaches
     // all games.
+    //
+    // ONE CLOCK for the column: the INSERT takes `updated_at`'s defaultNow() (the
+    // DATABASE clock), so bumping it with the APP HOST's `new Date()` mixed two time
+    // sources on one column — where the two clocks drift, a freshly-attached row can
+    // report updated_at EARLIER than its own created_at. Postgres NOW() keeps every
+    // write on the same clock as the default.
     if (diffNonEmpty) {
       await tx
         .update(events)
         .set({
-          updatedAt: new Date(),
+          updatedAt: sql`NOW()`,
           metadata: sql`COALESCE(${events.metadata}, '{}'::jsonb) - 'inbox'`,
         })
         .where(and(eq(events.userId, userId), eq(events.id, eventId)));
@@ -1409,7 +1427,7 @@ export async function attachEventToGames(
       // No-op call — preserve metadata as-is (dismissed flag survives).
       await tx
         .update(events)
-        .set({ updatedAt: new Date() })
+        .set({ updatedAt: sql`NOW()` })
         .where(and(eq(events.userId, userId), eq(events.id, eventId)));
     }
   });

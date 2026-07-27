@@ -282,18 +282,16 @@ describe("attachEventToGames (M:N junction service)", () => {
       },
       "127.0.0.1",
     );
-    const beforeTs = ev.updatedAt;
-
-    // Wait long enough for the Postgres NOW() clock to advance past
-    // beforeTs across container clock skew. createEvent's updatedAt
-    // comes from JS new Date(); attachEventToGames bumps via Postgres
-    // NOW(). On Windows + Docker the two clocks can drift ±30ms even
-    // with NTP, so a 50ms sleep occasionally produced after < before.
-    // 500ms is generous enough to outrun any plausible skew while
-    // still keeping the test fast.
-    await new Promise((r) => setTimeout(r, 500));
+    // ONE CLOCK, and no sleep. Both timestamps now come from Postgres: the INSERT takes
+    // updated_at's defaultNow() and attachEventToGames bumps it with NOW(). This used to
+    // compare a DB-clock value against an app-host `new Date()`, i.e. it measured
+    // host-vs-container skew rather than the bump — and tried to out-wait that skew with
+    // a 500ms sleep on the assumption it stays within ±30ms. Measured on this machine the
+    // DB ran up to ~1s AHEAD of the host, so `after` was legitimately smaller and no
+    // sleep could have fixed it. NOW() is the transaction timestamp and these are two
+    // distinct transactions, so the ordering is guaranteed without waiting.
     const after = await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
-    expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(beforeTs.getTime());
+    expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(ev.updatedAt.getTime());
   });
 });
 
