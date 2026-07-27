@@ -2693,6 +2693,81 @@ describe("PATCH /api/events/:id youtube invariant (merged-state validator)", () 
     expect(body.metadata?.reason).toBe("url_not_reddit_post");
   });
 
+  // REGRESSION: the "match-if-present" kinds (telegram/tiktok/twitter) must NOT
+  // require a URL. They briefly did, which made every already-stored url-less row
+  // permanently uneditable — updateEvent re-validates the MERGED url (existing.url)
+  // on every PATCH, so editing just the title returned 422 forever. The paired
+  // wrong-platform case below is what keeps this from being a vacuous pass.
+  for (const kind of ["telegram_post", "tiktok_post", "twitter_post"] as const) {
+    it(`PATCH {title} on a url-less kind=${kind} event succeeds (url is optional for match-if-present kinds)`, async () => {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const u = await seedUserDirectly({ email: `ev-opt-url-${uniq()}@test.local` });
+      const [ev] = await db
+        .insert(events)
+        .values({
+          id: uuidv7(),
+          userId: u.id,
+          kind,
+          authorIsMe: true,
+          occurredAt: new Date("2026-04-28T12:00:00Z"),
+          title: "Manual social log, no link",
+          url: null,
+          metadata: {},
+        })
+        .returning();
+
+      const res = await app.request(`/api/events/${ev!.id}`, {
+        method: "PATCH",
+        headers: {
+          cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ title: "Edited title" }),
+      });
+
+      expect(res.status).toBe(200);
+      const [row] = await db
+        .select()
+        .from(events)
+        .where(and(eq(events.userId, u.id), eq(events.id, ev!.id)));
+      expect(row!.title).toBe("Edited title");
+      expect(row!.url).toBeNull();
+    });
+
+    it(`PATCH {url: wrong-platform} on kind=${kind} still returns 422 (present-but-wrong is rejected)`, async () => {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const u = await seedUserDirectly({ email: `ev-wrong-url-${uniq()}@test.local` });
+      const [ev] = await db
+        .insert(events)
+        .values({
+          id: uuidv7(),
+          userId: u.id,
+          kind,
+          authorIsMe: true,
+          occurredAt: new Date("2026-04-28T12:00:00Z"),
+          title: "Manual social log, no link",
+          url: null,
+          metadata: {},
+        })
+        .returning();
+
+      const res = await app.request(`/api/events/${ev!.id}`, {
+        method: "PATCH",
+        headers: {
+          cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }),
+      });
+
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("kind_url_inconsistent");
+    });
+  }
+
   it("cross-tenant PATCH /api/events/:id returns 404 (never reaches merged-state validator) — AGENTS.md item 2", async () => {
     // PRIV-01 invariant: a forged eventId belonging to user A surfaces as 404
     // when user B PATCHes it. The merged-state validator must NOT introduce

@@ -621,7 +621,12 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
 
 function validateEventInput(input: { kind: string; url?: string | null }): void {
   if (input.kind !== "tiktok_post") return;
-  if (!input.url || tiktokParseUrl(input.url) === null) {
+  // EVENT_KIND_DISPLAY.tiktok_post.urlValidation is "match-if-present": a manual
+  // social log may legitimately have no link. Requiring one here would also make
+  // every already-stored url-less row uneditable, since updateEvent re-validates
+  // the MERGED url (existing.url) on every PATCH.
+  if (!input.url) return;
+  if (tiktokParseUrl(input.url) === null) {
     throw new AppError(
       "url must be a recognized TikTok post URL when kind=tiktok_post",
       "kind_url_inconsistent",

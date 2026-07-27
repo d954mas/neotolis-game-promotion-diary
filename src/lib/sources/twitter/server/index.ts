@@ -586,7 +586,12 @@ async function resolveCachedExternalId(url: string): Promise<string | null> {
 
 function validateEventInput(input: { kind: string; url?: string | null }): void {
   if (input.kind !== "twitter_post") return;
-  if (!input.url || twitterParseUrl(input.url) === null) {
+  // EVENT_KIND_DISPLAY.twitter_post.urlValidation is "match-if-present": a manual
+  // social log may legitimately have no link. Requiring one here would also make
+  // every already-stored url-less row uneditable, since updateEvent re-validates
+  // the MERGED url (existing.url) on every PATCH.
+  if (!input.url) return;
+  if (twitterParseUrl(input.url) === null) {
     throw new AppError(
       "url must be a recognized X/Twitter post URL when kind=twitter_post",
       "kind_url_inconsistent",
