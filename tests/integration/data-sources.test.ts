@@ -142,6 +142,75 @@ describe("register data sources via POST /api/sources", () => {
     expect(detail.source.lastPolledAt?.toISOString()).toBe(lastMetadataRefreshAt.toISOString());
   });
 
+  it("source detail read-model marks active Reddit account and subreddit walks as pulling", async () => {
+    const { PgBoss } = await import("pg-boss");
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { QUEUES, REDDIT_WALK_QUEUE_OPTIONS } = await import("../../src/lib/server/queues.js");
+    const handle = `pulling_${Math.random().toString(36).slice(2, 10)}`;
+    const slug = `pulling_sub_${Math.random().toString(36).slice(2, 10)}`;
+    const userA = await seedUserDirectly({ email: `${handle}@test.local` });
+    const accountSource = await createSource(
+      userA.id,
+      {
+        kind: "reddit_account",
+        handleUrl: `https://reddit.com/user/${handle}`,
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+    const subredditSource = await createSource(
+      userA.id,
+      {
+        kind: "reddit_subreddit",
+        handleUrl: `https://reddit.com/r/${slug}`,
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+    const boss = new PgBoss({ connectionString: env.DATABASE_URL });
+    boss.on("error", () => undefined);
+    let accountJobId: string | null = null;
+    let subredditJobId: string | null = null;
+
+    await boss.start();
+    try {
+      await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT, REDDIT_WALK_QUEUE_OPTIONS);
+      await boss.createQueue(QUEUES.REDDIT_BACKFILL_SUBREDDIT, REDDIT_WALK_QUEUE_OPTIONS);
+      accountJobId = await boss.send(QUEUES.REDDIT_BACKFILL_ACCOUNT, {
+        kind: "reddit_account",
+        channelKey: handle,
+        triggerUserId: userA.id,
+        depthBoundIso: "1970-01-01T00:00:00.000Z",
+        flow: "incremental",
+      });
+      subredditJobId = await boss.send(QUEUES.REDDIT_BACKFILL_SUBREDDIT, {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        triggerUserId: userA.id,
+        depthBoundIso: "1970-01-01T00:00:00.000Z",
+        flow: "incremental",
+      });
+      expect(accountJobId).not.toBeNull();
+      expect(subredditJobId).not.toBeNull();
+
+      const accountDetail = await loadSourceDetailPage(userA.id, accountSource.id);
+      const subredditDetail = await loadSourceDetailPage(userA.id, subredditSource.id);
+
+      expect(accountDetail.pulling).toBe(true);
+      expect(subredditDetail.pulling).toBe(true);
+    } finally {
+      if (accountJobId !== null) {
+        await boss.deleteJob(QUEUES.REDDIT_BACKFILL_ACCOUNT, accountJobId).catch(() => undefined);
+      }
+      if (subredditJobId !== null) {
+        await boss
+          .deleteJob(QUEUES.REDDIT_BACKFILL_SUBREDDIT, subredditJobId)
+          .catch(() => undefined);
+      }
+      await boss.stop({ graceful: false });
+    }
+  });
+
   it("source detail read-model enriches telegram_channel lastPolledAt from channel-state", async () => {
     const userA = await seedUserDirectly({ email: "ds2tgdetail@test.local" });
     const created = await createSource(

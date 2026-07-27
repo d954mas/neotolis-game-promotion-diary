@@ -23,6 +23,7 @@ import { toDataSourceDto, type DataSourceDto } from "../dto.js";
 import { loadUserQuota, loadQuotaPlatforms } from "./quota-read.js";
 import type { QuotaPlatformView, RedditQuotaView } from "./quota-read.js";
 import { NotFoundError } from "./errors.js";
+import { QUEUES } from "../queues.js";
 
 // Per-user quota types now live in quota-read.ts (D-03, single source of
 // truth). Re-exported here so existing importers of these names from
@@ -30,6 +31,13 @@ import { NotFoundError } from "./errors.js";
 export type { QuotaPlatformView, RedditQuotaView } from "./quota-read.js";
 
 const REFRESH_CONTENT_COOLDOWN_MS = 5 * 60_000;
+const PULLING_SOURCE_KIND_BY_QUEUE = new Map<string, DataSourceDto["kind"]>([
+  [QUEUES.YOUTUBE_BACKFILL_CHANNEL, "youtube_channel"],
+  [QUEUES.REDDIT_BACKFILL_ACCOUNT, "reddit_account"],
+  [QUEUES.REDDIT_BACKFILL_ACCOUNT_LEGACY, "reddit_account"],
+  [QUEUES.REDDIT_BACKFILL_SUBREDDIT, "reddit_subreddit"],
+  [QUEUES.REDDIT_BACKFILL_SUBREDDIT_LEGACY, "reddit_subreddit"],
+]);
 
 export interface SourcesPageData {
   active: DataSourceDto[];
@@ -369,11 +377,12 @@ async function loadRefreshContentCooldown(
 }
 
 /**
- * Channel-scoped "pulling" state from the pg-boss queue. Worker payload
- * carries channelKey (not sourceId), so a walk on a channel paints
- * spinners on ALL subscribers to that channel together — the walk is
- * shared. `to_regclass` guards a fresh self-host install where the
- * pgboss schema hasn't been created yet.
+ * Channel-scoped "pulling" state from the pg-boss queues. Worker payloads
+ * carry channelKey (not sourceId), so a walk on a channel paints spinners
+ * on ALL subscribers to that channel together — the walk is shared.
+ * Queue-to-kind namespacing prevents equal keys on different platforms
+ * from painting each other's sources. `to_regclass` guards a fresh
+ * self-host install where the pgboss schema hasn't been created yet.
  */
 async function loadPullingChannels(
   dtos: DataSourceDto[],
@@ -389,19 +398,28 @@ async function loadPullingChannels(
     channelIds.map((c) => sql`${c}`),
     sql`, `,
   );
-  const active = await db.execute<{ channel_key: string }>(
+  const queueNameList = sql.join(
+    [...PULLING_SOURCE_KIND_BY_QUEUE.keys()].map((name) => sql`${name}`),
+    sql`, `,
+  );
+  const active = await db.execute<{ name: string; channel_key: string }>(
     sql`
-      SELECT DISTINCT data->>'channelKey' AS channel_key
+      SELECT DISTINCT name, data->>'channelKey' AS channel_key
       FROM pgboss.job
-      WHERE name = 'youtube.backfill.channel'
+      WHERE name IN (${queueNameList})
         AND state IN ('active', 'created', 'retry')
         AND data->>'channelKey' IN (${channelKeyList})
     `,
   );
-  const pullingChannelKeys = new Set(active.rows.map((r) => r.channel_key).filter(Boolean));
+  const pullingSourceKeys = new Set(
+    active.rows.flatMap((row) => {
+      const kind = PULLING_SOURCE_KIND_BY_QUEUE.get(row.name);
+      return kind === undefined || !row.channel_key ? [] : [`${kind}:${row.channel_key}`];
+    }),
+  );
   const pulling: Record<string, boolean> = {};
   for (const s of dtos) {
-    if (s.channelId && pullingChannelKeys.has(s.channelId)) pulling[s.id] = true;
+    if (s.channelId && pullingSourceKeys.has(`${s.kind}:${s.channelId}`)) pulling[s.id] = true;
   }
   return pulling;
 }
