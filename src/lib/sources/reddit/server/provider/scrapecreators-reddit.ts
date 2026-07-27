@@ -199,6 +199,7 @@ export const scrapeCreatorsRedditProvider: RedditSocialProvider = {
       thumbnailUrl: match.thumbnailUrl,
       ownerId: match.authorFullname,
       ownerUsername: match.author,
+      ownerDeleted: match.raw.authorDeleted === true,
       // Carry the richer Reddit FORM so the paste-preview snapshot persists the real
       // media_type (image/gallery cards render correctly before the source walk).
       mediaType: match.mediaType,

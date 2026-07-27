@@ -121,7 +121,17 @@ const redditRefreshLane = createSocialRefreshLane({
             author: post.ownerUsername,
             authorFullname: post.ownerId,
             metrics: { likes: post.metrics.likes, comments: post.metrics.comments },
-            raw: null,
+            raw:
+              post.ownerDeleted === true
+                ? {
+                    score: null,
+                    upvoteRatio: null,
+                    numComments: null,
+                    numCrossposts: null,
+                    removedByCategory: null,
+                    authorDeleted: true,
+                  }
+                : null,
             status,
           },
     ),

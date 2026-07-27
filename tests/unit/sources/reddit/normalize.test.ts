@@ -12,6 +12,7 @@ import {
   normalizeRedditFeed,
   normalizeRedditOwner,
   normalizeRedditPost,
+  normalizeSingleRedditPost,
 } from "$lib/sources/reddit/server/normalize.js";
 import { AdapterError } from "$lib/sources/errors.js";
 
@@ -96,6 +97,7 @@ describe("reddit normalize (D-09 mapping — Phase 12)", () => {
     expect(post.author).toBeNull();
     expect(post.authorFullname).toBeNull();
     expect(post.raw.authorDeleted).toBe(true);
+    expect(normalizeSingleRedditPost(raw).ownerDeleted).toBe(true);
     expect(normalizeRedditOwner(raw)).toBeNull();
   });
 

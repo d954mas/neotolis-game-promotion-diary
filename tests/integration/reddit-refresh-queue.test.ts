@@ -206,6 +206,41 @@ describe("reddit per-post refresh lane", () => {
     expect(row!.status).toBe("done");
   });
 
+  it("[review] Refresh Now clears a deleted owner without marking the post deleted", async () => {
+    const u = await seedUserDirectly({ email: `rdtrq-owner-deleted-${uniq()}@t.io` });
+    const s = uniq().slice(0, 6);
+    const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
+    await seedCachedPost(s, url, {
+      author: "former_author",
+      authorFullname: "t2_former",
+      deletionDetectedAt: null,
+    });
+    const evId = await seedEvent(u.id, s, url);
+    single.next = singlePost({
+      id: `t3_${s}`,
+      shortcode: s,
+      ownerId: null,
+      ownerUsername: null,
+      ownerDeleted: true,
+      metrics: { views: null, likes: 111, comments: 12, shares: null },
+    });
+    await enqueue(evId, u.id, `t3_${s}`);
+
+    await redditRefreshQueueTick();
+
+    const post = await readPost(s);
+    expect(post!.author).toBeNull();
+    expect(post!.authorFullname).toBeNull();
+    expect(post!.deletionDetectedAt).toBeNull();
+    expect(post!.lastPollStatus).toBe("ok");
+    const [snapshot] = await db
+      .select()
+      .from(redditPostSnapshots)
+      .where(eq(redditPostSnapshots.postId, `t3_${s}`));
+    expect(snapshot!.likeCount).toBe(111);
+    expect(snapshot!.commentCount).toBe(12);
+  });
+
   it("[12-05] is tenant-scoped: another user's event cannot be enqueued or fetched", async () => {
     const owner = await seedUserDirectly({ email: `rdtrq-owner-${uniq()}@t.io` });
     const attacker = await seedUserDirectly({ email: `rdtrq-atk-${uniq()}@t.io` });

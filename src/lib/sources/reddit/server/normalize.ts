@@ -309,6 +309,7 @@ export function normalizeSingleRedditPost(raw: unknown): NormalizedSinglePost {
     thumbnailUrl: full.thumbnailUrl,
     ownerId: full.authorFullname,
     ownerUsername: full.author,
+    ownerDeleted: full.raw.authorDeleted === true,
   };
 }
 

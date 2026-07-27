@@ -110,6 +110,11 @@ export interface NormalizedSinglePost {
   ownerId: string | null;
   /** Owner handle/username — display value, read from source-of-truth, not cached. */
   ownerUsername: string | null;
+  /** The provider explicitly reported that the owner account was deleted while the
+   * post itself remains available. Optional because only Reddit exposes this
+   * distinction today. Consumers use it to clear stale owner identity without
+   * marking the post unavailable. */
+  ownerDeleted?: boolean;
   /** Reddit post FORM ("self"|"link"|"image"|"gallery") when the provider is Reddit;
    *  else null/absent. OPTIONAL so non-Reddit provider impls stay untouched (same
    *  pattern as ResolvedAccount.secUid). Lets the paste-preview snapshot persist the
