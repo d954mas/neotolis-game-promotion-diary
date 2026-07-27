@@ -219,11 +219,20 @@ reddit_provider_on_smoke() {
         console.log(r.rowCount>0 ? String(r.rows[0].prepaid_balance_credits) : "missing");
       } finally { await c.end(); }
     }).catch((err)=>{console.error(err);process.exit(1);});
-  ' 2>&1)
+  ')
   log "shared scrapecreators balance after the walk: $balance (seeded 1000)"
-  if [[ "$balance" == "missing" || "$balance" == "1000" ]]; then
+  # POSITIVE assertion, not a denylist. The probe used to merge stderr into $balance
+  # (2>&1) and only reject the literals "missing"/"1000" — so a probe that CRASHED
+  # produced a stack trace, matched neither, and read as "the ledger was debited".
+  # The strongest P0 assertion in this gate was the one that could silently stop
+  # asserting. Require a real integer strictly between 0 and the seeded 1000.
+  if ! [[ "$balance" =~ ^[0-9]+$ ]]; then
     kill -TERM "$mock_pid" 2>/dev/null || true
-    fail "(RDT-ON.3) the shared 'scrapecreators' balance was not debited ($balance) — reddit spend did not charge the shared ledger (P0 budget-key regression)"
+    fail "(RDT-ON.3) the balance probe did not return a number (got: '${balance}') — cannot verify the shared-ledger debit"
+  fi
+  if (( balance >= 1000 )); then
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.3) the shared 'scrapecreators' balance was not debited ($balance of 1000) — reddit spend did not charge the shared ledger (P0 budget-key regression)"
   fi
   log "(RDT-ON.3) PASS — reddit spend debited the SHARED 'scrapecreators' balance (P0 seam live in the image)"
 
