@@ -559,10 +559,7 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
       });
       if (post === null) {
         if (config.nullResultIsInconclusive === true) {
-          logger.info(
-            { postId },
-            `${platform} refresh: bounded provider lookup was inconclusive`,
-          );
+          logger.info({ postId }, `${platform} refresh: bounded provider lookup was inconclusive`);
           return;
         }
         // Deleted / private — the envelope carried no media object.

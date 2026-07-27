@@ -56,7 +56,9 @@ export async function checkDbSchemaDrift(rootDir = process.cwd()) {
 
     const after = await readJournal(tempMigrations);
     if (journalHasSchemaDrift(before, after)) {
-      throw new Error("Database schema drift detected. Run `pnpm db:generate` and commit the result.");
+      throw new Error(
+        "Database schema drift detected. Run `pnpm db:generate` and commit the result.",
+      );
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true });

@@ -468,11 +468,7 @@ async function enqueueRefreshNow(input: {
     .select({ url: events.url })
     .from(events)
     .where(
-      and(
-        eq(events.id, input.eventId),
-        eq(events.userId, input.userId),
-        isNull(events.deletedAt),
-      ),
+      and(eq(events.id, input.eventId), eq(events.userId, input.userId), isNull(events.deletedAt)),
     )
     .limit(1);
   if (event === undefined) throw new NotFoundError();

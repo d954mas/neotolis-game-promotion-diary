@@ -106,8 +106,7 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
   // ★ Write-path deletion-detect belt: the removed_by_category field being present
   //   marks the post as removed. Dormant with ScrapeCreators (never returns it) —
   //   the live mechanism is Variant A (Plan 05). first-detect only (COALESCE below).
-  const detectDeletion =
-    args.raw?.removedByCategory != null || args.raw?.authorDeleted === true;
+  const detectDeletion = args.raw?.removedByCategory != null || args.raw?.authorDeleted === true;
   const now = new Date();
   await db.transaction(async (tx) => {
     // 1. UPSERT reddit_posts — public-data, single source of truth for the post

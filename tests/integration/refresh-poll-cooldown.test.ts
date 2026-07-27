@@ -346,8 +346,7 @@ describe("refresh-poll cooldown service", () => {
   });
 
   it("[review] rejects recognition-only Reddit URLs without consuming quota or cooldown", async () => {
-    const { getUserQuotaUsedToday } =
-      await import("../../src/lib/server/services/quota.js");
+    const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
     const u = await seedUserDirectly({ email: `rp-reddit-short-${uniq()}@test.local` });
     const ev = await insertEvent(u.id, {
       kind: "reddit_post",
@@ -369,7 +368,9 @@ describe("refresh-poll cooldown service", () => {
       .where(eq(adapterRefreshQueue.userId, u.id));
     expect(queued).toHaveLength(0);
     const [row] = await db.select().from(events).where(eq(events.id, ev.id));
-    expect((row!.metadata as { last_user_refresh_at?: string }).last_user_refresh_at).toBeUndefined();
+    expect(
+      (row!.metadata as { last_user_refresh_at?: string }).last_user_refresh_at,
+    ).toBeUndefined();
   });
 
   it("[review] charges a subreddit event to the independent reddit_subreddit bucket", async () => {

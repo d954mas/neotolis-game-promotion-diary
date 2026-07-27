@@ -240,9 +240,10 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
 
     expect(await runNotFound(), "one provider 404 is inconclusive").toBe(false);
     expect(await runNotFound(), "two consecutive provider 404s remain inconclusive").toBe(false);
-    expect(await runNotFound(), "the third consecutive provider 404 confirms the subject miss").toBe(
-      true,
-    );
+    expect(
+      await runNotFound(),
+      "the third consecutive provider 404 confirms the subject miss",
+    ).toBe(true);
   });
 
   // REGRESSION: a not-found on ANY page used to abandon the whole pass and flag

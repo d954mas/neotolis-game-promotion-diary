@@ -531,8 +531,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     state.notFoundPasses += 1;
     state.operatorPaused = false;
     await writeRedditBackfillState(config.kind, channelKey, state);
-    const shouldFlag =
-      wasNeverPolled || state.notFoundPasses >= FIRST_PAGE_NOT_FOUND_THRESHOLD;
+    const shouldFlag = wasNeverPolled || state.notFoundPasses >= FIRST_PAGE_NOT_FOUND_THRESHOLD;
     if (shouldFlag) {
       for (const sub of subscribers) {
         await markSourceNeedsReconnect(sub.userId, sub.id, "not-found");
