@@ -4,8 +4,8 @@
 // from the TikTok wrapper and re-pointed to platform label "reddit"; the budget
 // machinery (reserveSocialCredits / getSocialSpendToday) is the SHARED
 // social-provider quota — keyed by PROVIDER ("scrapecreators"), the prepaid
-// balance is ONE pool across IG + TikTok + Reddit (D-01) — so we IMPORT it from
-// the instagram tree rather than fork a fourth copy of the credit ledger.
+// balance is ONE pool across IG + TikTok + Reddit (D-01), implemented in the
+// neutral server layer rather than owned by any one feature.
 //
 // This wrapper is where the provider seam's HTTP discipline lives, so the
 // provider (provider/scrapecreators-reddit.ts) stays a thin issuer that never
@@ -41,7 +41,7 @@ import {
   getSocialSpendToday,
   reserveSocialCredits,
   type SocialQuotaPool,
-} from "$lib/sources/instagram/server/quota.js";
+} from "$lib/server/services/social-provider-quota.js";
 import type { SocialPlatform } from "$lib/sources/social-provider.js";
 import type { DailyUserRequestAccounting } from "$lib/server/daily-user-quota.js";
 

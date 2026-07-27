@@ -20,7 +20,7 @@ const getSocialSpendToday = vi.fn();
 // ScrapeCreators pool lives there; reddit/server/quota.ts only re-exports it), so that
 // is the module that has to be mocked — mocking the reddit re-export leaves the real
 // DB-backed implementation in place.
-vi.mock("../../../../src/lib/sources/instagram/server/quota.js", async (importOriginal) => {
+vi.mock("../../../../src/lib/server/services/social-provider-quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,

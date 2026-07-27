@@ -69,7 +69,7 @@ import {
   getSocialSpendToday,
   reserveSocialCredits,
   type SocialQuotaPool,
-} from "$lib/sources/instagram/server/quota.js";
+} from "$lib/server/services/social-provider-quota.js";
 import type { SocialPlatform } from "$lib/sources/social-provider.js";
 
 /** twitterapi.io API base — the single home for the literal (Pattern 2 delta #1).

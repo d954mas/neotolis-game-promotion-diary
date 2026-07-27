@@ -18,8 +18,8 @@
 // shared concurrency knob and no acquirePacerSlot is threaded.
 //
 // The single-post fetch resolves the post from the subreddit feed (ScrapeCreators
-// exposes no single-post-by-id endpoint); a cold post absent from page 1 yields a
-// not_found snapshot — acceptable for the diary (the walk keeps recent posts fresh).
+// exposes no single-post-by-id endpoint). A bounded page-1 miss is inconclusive and
+// leaves the previous snapshot intact; the account walk remains the authoritative path.
 
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { events } from "$lib/server/db/schema/events.js";
