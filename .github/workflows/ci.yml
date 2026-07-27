@@ -83,10 +83,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Migration-vs-schema drift. AGENTS.md ("Forward-only migrations") states this
-      # gate runs in CI; it did not, on this branch or master, so a schema edit that
-      # was never generated into a migration could merge and only surface at a
-      # container boot on prod. Cheap and offline — no database needed.
+      # Snapshot-graph validity plus a disposable drizzle-kit generate against the
+      # real TypeScript schema. The generated output lives in a temporary copy, and
+      # any new journal entry means db:generate was omitted.
       - run: pnpm db:check
       - run: pnpm test:unit
       - run: pnpm test:integration
