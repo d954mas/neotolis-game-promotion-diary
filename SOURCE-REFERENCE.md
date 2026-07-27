@@ -127,11 +127,11 @@ The reservoir is a fast-path approximation; the persistent counter table (`src/l
 
 In `src/lib/sources/reddit/server/adapter.ts`, export `redditChannelAdapter: DataSourceAdapter`. Implement the contract methods (`src/lib/sources/adapter.ts` is the contract source of truth):
 - `kind: "reddit_account"`
-- `pollContent(source, since)` — list latest `/user/<account>/submitted` with `?after=` for incremental
-- `pollStats(events, source, picked)` — batch `/by_id/t3_xxx,t3_yyy`
+- `pollContent(source, since)` — page the provider feed with a cursor for incremental. Reddit as built has NO user-posts endpoint, so the account path is a broad `search?query=author:<handle>` that must filter off-subject posts client-side; the subreddit path uses the native subreddit endpoint (see `provider/scrapecreators-reddit.ts`).
+- `pollStats(events, source, picked)` — re-fetch per post. There is no batch-by-id endpoint on a paid scraper; budget accordingly.
 - `pollStatsByVideoId(externalIds, quotaUser, picked)` — service-driven path (rename for non-video kinds is fine; the contract method name is legacy from Phase 03.0)
 - `parseUrl(url)` — host check FIRST (`reddit.com` / `redd.it` / `old.reddit.com`); extract subreddit + post-id from `/r/<sub>/comments/<id>/...` (Pattern 4.4)
-- `observability` — `auth.kind === "operator-oauth-app-only"`; `quota.getDailyStats` reads a Reddit-specific quota counter
+- `observability` — `auth.kind === "scrape"` (an operator-held paid-scraper key, NOT OAuth — Reddit's self-service OAuth closed Nov 2025); `quota.getDailyStats` projects the SHARED ScrapeCreators prepaid pool, not a Reddit-private counter
 - `canRefreshPoll?(eventKind)` — optional dispatch hint for `POST /api/sources/:id/refresh-content`
 
 The methods that need pg-boss / scheduler infrastructure (`registerQueues`, `scheduleCronTicks`, `backfillSource`) MUST follow the bypass-the-barrel safety pattern: throwing stubs in `adapter.ts`, real implementations in `./index.ts` (Pattern 4.6).
@@ -195,21 +195,25 @@ export async function chargedFetch(url, picked, units, ctx) {
 
 Reconcile reservoirs on worker boot from the persistent counter table (`src/lib/sources/<kind>/server/quota.ts`). The reservoir is ORIGIN-SCOPED (cron vs user) so a user-driven Refresh-now flood cannot eat into the cron reserve and vice versa. See `src/lib/sources/youtube/server/http.ts` for the full canonical implementation.
 
-### 4.2 OAuth refresh (Phase 6 future-shape — Reddit / Twitter)
+### 4.2 Credential selection (future per-user shape)
 
-The OAuth-refresh path is internal to the credentials wrapper:
+No adapter uses OAuth today. Reddit's self-service OAuth closed in Nov 2025 and its
+adapter was rebuilt on an operator-held paid-scraper key (Phase 12); Twitter, Instagram
+and TikTok are operator-key too. If a future platform needs per-user credentials, keep
+the choice inside a credentials wrapper so there is ONE edit point:
 
 ```typescript
-// src/lib/sources/reddit/server/credentials.ts
-export async function pickCredentials(ctx: AdapterContext): Promise<RedditCredentials> {
-  // 1) Operator app-only bearer (refreshed by a sidecar cron job)
-  // 2) Phase 6: if ctx.userId is set AND the user has a per-user OAuth row, use that
-  //    Until Phase 6, ctx.userId is informational only.
-  return loadOperatorBearer();
+// src/lib/sources/<kind>/server/credentials.ts
+export async function pickCredentials(ctx: AdapterContext): Promise<Credentials> {
+  // 1) Operator key / bearer
+  // 2) Future: if ctx.userId is set AND the user has a per-user OAuth row, use that.
+  //    Until then, ctx.userId is informational only.
+  return loadOperatorKey();
 }
 ```
 
-YouTube's `pickCredentials` (`src/lib/sources/youtube/server/credentials.ts`) is the v0.1 reference: operator-only, ctx.userId informational, single edit point for Phase 6 per-user override (D-05).
+YouTube's `pickCredentials` (`src/lib/sources/youtube/server/credentials.ts`) is the
+live reference: operator-only, ctx.userId informational, single edit point (D-05).
 
 ### 4.3 Snapshot UPSERT (idempotent)
 

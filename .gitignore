@@ -72,3 +72,7 @@ scripts/.grafana-session/
 # scripts' process.env reads (which are intentional outside config/env.ts).
 .dev-*.ts
 .dev-*.mjs
+
+# pnpm local content-addressable store — created when pnpm is run with a
+# project-local store dir. Package cache, never committed.
+.pnpm-store/

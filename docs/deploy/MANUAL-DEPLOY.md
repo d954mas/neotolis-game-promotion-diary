@@ -108,6 +108,19 @@ Add any new keys to `.env`. **Phase 12 (Reddit) added:**
 | `REDDIT_IMPORT_ENABLED` | yes to enable Reddit | Default `false` (import stays OFF). Set to the literal `true` to turn it on — the legally-hot platform never auto-enables just because a provider + key are present. |
 | `REDDIT_PROVIDER` | yes to enable Reddit | Set to `scrapecreators` (the only buildable value). Empty (default) => Reddit is "not configured": the add-source Reddit chip renders disabled and no scraper credits are spent. |
 | `SCRAPECREATORS_API_KEY` | shared | The SAME prepaid ScrapeCreators key you already use for Instagram + TikTok — Reddit draws from the ONE shared credit balance. No new key, no new budget vars. |
+| `SOCIAL_PROVIDER_DAILY_CAP_CREDITS` | **must be > 0** | Already set if Instagram/TikTok import works. Verify it, because Reddit is now a THIRD consumer of a pool previously sized for two — and a `0` cap (the `.env.example` default) silently rejects every reservation, so Reddit will look enabled and import nothing. |
+| `SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS` | **must be > 0** | Same — the remaining prepaid balance. At `0` no request is ever issued. |
+
+**Delete from `.env`** (removed from the schema in Phase 12 — unknown keys are
+ignored at boot, so nothing breaks, but `REDDIT_PROXY_URL` holds live Webshare
+proxy credentials and should not linger):
+
+```bash
+sed -i '/^REDDIT_USER_AGENT=/d; /^REDDIT_PROXY_URL=/d; /^REDDIT_BASE_URL_OVERRIDE=/d' .env
+```
+
+> The `diff .env.example .env` check above only surfaces keys that were **added**
+> upstream, never ones that were **removed** — hence the explicit delete.
 
 > **Reddit is a paid ScrapeCreators adapter, default-OFF.** Phase 12 razed
 > the old free public-`.json` transport (whole datacenter proxy pools were
@@ -152,6 +165,29 @@ echo "GF_SERVER_SERVE_FROM_SUB_PATH=true" >> .env
 Save and close.
 
 ### 5. Pull the new image and restart
+
+> ### ⚠️ Phase 12 only — back up FIRST, this deploy destroys data
+>
+> Step 5 runs the migrations, and the Phase 12 batch is destructive on live
+> user data:
+>
+> - `0070` — `DROP TABLE ... CASCADE` on the eight legacy Reddit tables.
+> - `0073` — `DELETE` on `events` (**every** `reddit_post` row, auto-imported
+>   *and* hand-pasted, including user-typed `title` / `notes` and their
+>   `event_games` links), `data_sources`, and `data_source_channel_state`.
+>
+> This is a hard delete — no soft-delete, no Trash entry, no in-app undo. A
+> successful destructive migration never trips the Rollback section below,
+> because nothing "breaks". The dump is the only recovery path:
+>
+> ```bash
+> ./scripts/backup.sh              # or: docker compose exec -T postgres pg_dump -U postgres diary > pre-phase12.sql
+> ls -lh pre-phase12.sql           # verify it is non-empty before continuing
+> ```
+>
+> **After deploying, tell users:** their Reddit diary entries and Reddit
+> sources are gone and must be re-added; the rebuilt importer only picks up
+> posts going forward.
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
@@ -235,8 +271,10 @@ For Phase 12 (Reddit), also verify — only if you enabled it (`REDDIT_IMPORT_EN
 - `/sources/new` → the Reddit chip is enabled (it renders disabled /
   "not configured" when either var is unset). Adding a `reddit_account`
   handle or a `reddit_subreddit` shows the backfill picker.
-- `/admin/quota` → the shared ScrapeCreators budget (Instagram + TikTok +
-  Reddit) is visible; Reddit spend draws it down.
+- `/admin` → the Reddit section shows the shared ScrapeCreators budget
+  (Instagram + TikTok + Reddit); Reddit spend draws it down. This is the only
+  truthful spend view — the provisioned Grafana "Activity" dashboard still
+  reads a retired audit verb and shows Reddit as `0` regardless of real spend.
 - `docker compose logs worker | grep -i reddit` — confirms the adapter
   imports posts and runs the active/cold subject walks without errors.
 
@@ -322,8 +360,11 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate app worker sche
 ```
 
 Reddit shares the ScrapeCreators prepaid balance with Instagram + TikTok, so
-if imports stop, check the shared budget under `/admin/quota` — an exhausted
-daily cap or prepaid balance pauses all three until it refills / resets.
+if imports stop, check the shared budget in the `/admin` Reddit section — an
+exhausted daily cap or prepaid balance pauses all three until it refills /
+resets. To stop Reddit spend outright, set `REDDIT_IMPORT_ENABLED=false` and
+force-recreate `app worker scheduler`; that is a hard stop on every Reddit
+request and leaves existing sources rendered as operator-paused.
 
 ---
 

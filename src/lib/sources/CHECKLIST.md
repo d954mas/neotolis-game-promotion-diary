@@ -10,8 +10,8 @@ For deeper conceptual context (why backfill state machine, why two-layer cap, wh
 
 Before any code:
 
-- [ ] **Quota model.** Document the platform's API rate-limit shape: per-key daily envelope (YouTube), per-OAuth-token rolling window (Reddit), per-app-bearer (Twitter), unlimited (Telegram). Determines `userQuotaCap`, DB claim gates, and whether `requiresSingletonRuntime` is needed.
-- [ ] **Auth shape.** Operator static keys (YouTube), per-user OAuth (Reddit/Twitter), unauthenticated scrape (Telegram public). Determines `observability.auth` declaration.
+- [ ] **Quota model.** Document the platform's API rate-limit shape: per-key daily envelope (YouTube), shared prepaid credit pool (Instagram / TikTok / Reddit — all one ScrapeCreators balance), per-key QPS pacing (Twitter), unlimited (Telegram). Determines `userQuotaCap`, DB claim gates, and whether `requiresSingletonRuntime` is needed.
+- [ ] **Auth shape.** Operator static keys (YouTube), operator paid-scraper key (Instagram / TikTok / Reddit / Twitter), unauthenticated scrape (Telegram public). Determines `observability.auth` declaration.
 - [ ] **Pool attribution.** Will adapter use cron pool, user pool, or both? See §9 of SOURCE-REFERENCE.md. YouTube uses both.
 - [ ] **API safety posture.** For unauthenticated/public endpoints, document conservative cadence, User-Agent requirements, retry/backoff semantics, and UI degraded-state behavior before wiring the worker.
 - [ ] **External id stability.** What's the canonical id for posts/videos? Are URLs immutable? Determines `parseUrl` regex and `events.external_id` semantics.
@@ -22,11 +22,11 @@ Before any code:
 ## 1. Schema (per-source tables)
 
 - [ ] Create `src/lib/sources/<kind>/server/schema/` directory.
-- [ ] Define platform-specific tables in `<kind>/server/schema/*.ts`. Examples: `reddit_posts`, `reddit_metadata_fetch_log`, `reddit_token_refresh_log`. Public-data (cross-tenant) tables: NO `userId` column. Per-tenant tables: `userId` column required (AGENTS.md invariant 1).
+- [ ] Define platform-specific tables in `<kind>/server/schema/*.ts`. Examples: `reddit_posts`, `reddit_post_snapshots`, `telegram_channels`. Public-data (cross-tenant) tables: NO `userId` column. Per-tenant tables: `userId` column required (AGENTS.md invariant 1).
 - [ ] **Subject/channel entity + full historical storage (REQUIRED for analytics-capable adapters).** Any auto-import adapter SHOULD provide:
   - [ ] **(a) A public-data subject entity table** (channel / account / subreddit) keyed on the platform's INTRINSIC, rename-proof id — the SOURCE OF TRUTH for that subject's OWN upstream metadata (title, avatar, subscriber count, description, handle aliases). This is NOT a denorm of `data_sources` (AGENTS.md no-denorm): `data_sources.display_name` is the user-facing, user-renameable label; the entity row's `title`/`name` is the upstream-scraped value. The two coexist and never alias each other. Populate it via UPSERT on each poll, COALESCE-preserving prior good values on a partial/failed parse so a transient miss never blanks working metadata. References: `youtube_channels` (header comment "this IS our truth"), `reddit_subreddits_cache`, `telegram_channels`, `instagram_accounts`. The `instagram_accounts` case is the canonical "populate without new cost" example — it rides the create-time profile resolve (the richer fields) + the FREE feed owner object (account_id + @handle + avatar), so a PAID adapter gains the subject-entity anchor with ZERO additional provider credits.
   - [ ] **(b) Full per-post + per-post-snapshot historical storage** (public-data, retained FOREVER — no GC, even when the last referencing event / source is deleted), grouped by the subject key (carry the rename-proof subject id as a column on the per-post row, e.g. `telegram_posts.channel_key`). The row IS the historical record; channel-level analytics later require the full history. References: `youtube_videos` + `youtube_video_snapshots`, `reddit_posts` + `reddit_post_snapshots`, `telegram_posts` + `telegram_post_snapshots`.
-  - [ ] **(c) [future / optional] Per-subject baselines for percentile context** — a separate public-data aggregate table keyed by the subject key, computed by a nightly cron, surfaced in `/feed` enrichment as "your post vs the subject's median". Build only when the read-path needs it; the canonical pattern to copy is `reddit_subreddit_baselines` (median / p75 over a rolling window, `PERCENTILE_CONT`, `sample_size` gate). Designing the subject entity (a) up front is what makes (c) cheap to add later.
+  - [ ] **(c) [future / optional] Per-subject baselines for percentile context** — a separate public-data aggregate table keyed by the subject key, computed by a nightly cron, surfaced in `/feed` enrichment as "your post vs the subject's median". Build only when the read-path needs it. No adapter ships one today — the former `reddit_subreddit_baselines` (median / p75 over a rolling window, `PERCENTILE_CONT`, `sample_size` gate) was razed with the pre-Phase-12 Reddit tree; recover its shape from git history rather than expecting it in the codebase. Designing the subject entity (a) up front is what makes (c) cheap to add later.
 - [ ] Re-export tables from `<kind>/server/schema/index.ts`.
 - [ ] Add re-export to `src/lib/server/db/schema/index.ts` — **one line**: `export * from "$lib/sources/<kind>/server/schema/index.js";`. This is the only barrel-level edit needed for schema.
 - [ ] Generate migration: `pnpm exec drizzle-kit generate`. Add migration to `drizzle/meta/_journal.json` if generated separately.
@@ -54,7 +54,7 @@ Implement only those that apply to your platform.
 - [ ] SQL lane workers - when queue order/cadence is part of quota safety, declare it through `workQueue.scheduledWorkers[].laneQueue` and use `createAdapterBatchLaneWorker`. Pick `maxBatchSize` per the upstream API's batch tolerance (number for uniform across lanes, per-lane record when lanes have different batching characteristics). `batchScope: "global"` when one upstream request can safely serve many tenants (quota-efficient shared requests), or `"user"` when the upstream identity is tenant-bound (per-user OAuth/token).
 
 - [ ] `refreshQueue?: { canRefresh(eventKind), enqueue(input) }` — opt into the «Refresh now» button per event kind.
-- [ ] `workQueue?: { scheduledWorkers[] }` — opt into adapter-owned interval workers when queue order/cadence is part of the quota contract. Use `laneQueue.strategy="fixed-slot-round-robin"` for SQL lane workers like Reddit.
+- [ ] `workQueue?: { scheduledWorkers[] }` — opt into adapter-owned interval workers when queue order/cadence is part of the quota contract. Use `laneQueue.strategy="fixed-slot-round-robin"` for SQL lane workers like YouTube's.
 - [ ] `reconcileRuntimeState?()` — sync process-local runtime state with persistent counters at worker boot. Skip if adapter uses persistent state only.
 - [ ] `normalizeSourceOnCreate?(input, ctx)` — pure/cheap local source URL normalization before duplicate/quota prechecks. No upstream I/O here. Use it for canonical URL spelling and metadata injection (Reddit `u/name` -> canonical user URL + `metadata.username`).
 - [ ] `canonicalizeOnCreate?(input, ctx)` — URL canonicalization at create time (e.g., resolve handle → channel id).
@@ -169,8 +169,8 @@ Before merging the platform PR:
 These are documented gaps that future platform authors may bump into. None are blockers — workarounds exist — but flagging here so you're not surprised:
 
 - **Platform-specific upstream clients.** Keep upstream fetch methods local to the adapter server tree and call them from explicit handlers/capabilities. `SourceAdapter` should expose cross-source orchestration only; queue/quota/accounting boundaries must be visible at the call site.
-- **Rolling-window quota shapes.** `userQuotaCap` only supports daily windows. Platforms with rolling caps (Reddit 600/10min) pick one of three documented options in `SOURCE-REFERENCE.md` §9.
-- **Reddit public `.json` safety.** Current Reddit uses unauthenticated public JSON with conservative cadence. Before increasing usage, add UA validation, header-aware backoff, escalating adapter pause windows (10m/1h/3h/12h), and a UI degraded state that disables remote refresh chips while still allowing local URL/event/source creation.
+- **Rolling-window quota shapes.** `userQuotaCap` only supports daily windows. A platform whose upstream enforces a rolling cap picks one of three documented options in `SOURCE-REFERENCE.md` §9.
+- **Shared prepaid pools.** Instagram, TikTok and Reddit all draw the ONE ScrapeCreators prepaid balance, so a per-platform view of spend is NOT the number the cap gates on — read `getSocialProviderSpendToday(provider)` for anything that compares against `SOCIAL_PROVIDER_DAILY_CAP_CREDITS`. Adding a fourth platform to an existing pool means re-sizing the operator's envelope, not just wiring the adapter.
 - **UI server cast** (registry-ui.ts). `as unknown as AdapterUiServer` cast is a known type-narrowing smell. Will be cleaned up when the second UI adapter lands and the actual abstraction shape becomes concrete.
 
 ---
@@ -207,4 +207,4 @@ src/lib/sources/youtube/
     └── index.ts                       ← optional client-side override
 ```
 
-Most files are platform-specific. For Reddit/Twitter, `metadata.ts` / `route-metadata.ts` / some handlers may not apply — adapt as needed.
+Most files are platform-specific. `metadata.ts` / `route-metadata.ts` / some handlers apply only to platforms with a separate metadata endpoint — the paid-scraper adapters (Instagram / TikTok / Reddit / Twitter) have none and omit them. Adapt as needed.

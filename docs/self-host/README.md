@@ -110,15 +110,19 @@ cannot be rolled back in place.
   ahead of the ScrapeCreators rebuild. **Any historical Reddit import data on a
   pre-Phase-12 self-host is permanently lost on upgrade** — it is only recoverable from a
   backup you took first. This is intentional (the old anonymous-scrape path was already
-  dead in production; the rebuild starts from a clean schema), not a bug. Non-Reddit data
-  (games, events, other sources) is untouched. If you never enabled Reddit import, you
-  have nothing to lose here — but take the backup anyway.
-- **⚠️ Migration `0073` also deletes your registered Reddit *sources*.** The legacy
-  rows stored walk keys in an old metadata shape the rebuilt walker cannot use, so
-  they are removed rather than left permanently broken. **Re-add your Reddit
-  profile / subreddit sources after upgrading.** Diary events imported from them
-  survive — they detach from the deleted source (like manually-pasted events) and
-  re-gain live stats once the rebuilt importer re-caches the posts.
+  dead in production; the rebuild starts from a clean schema), not a bug. Games, other
+  sources, and non-Reddit diary events are untouched. If you never enabled Reddit import,
+  you have nothing to lose here — but take the backup anyway.
+- **⚠️ Migration `0073` deletes your Reddit sources AND every Reddit diary entry.**
+  The legacy rows stored walk keys in an old metadata shape the rebuilt walker cannot
+  use, so they are removed rather than left permanently broken. This takes **all**
+  `reddit_post` events with them — not just the auto-imported ones, but also posts you
+  pasted in by hand, including the `title` and `notes` you typed and the games you
+  attached to them. It is a hard `DELETE`: nothing lands in Trash, and nothing is
+  recoverable from inside the app. **The pre-upgrade `pg_dump` is your only recovery
+  path** — take it, and verify it restores, before you pull this release. After
+  upgrading, re-add your Reddit profile / subreddit sources; the rebuilt importer
+  re-imports posts going forward, but hand-written entries are gone for good.
 
 ## Notes
 
