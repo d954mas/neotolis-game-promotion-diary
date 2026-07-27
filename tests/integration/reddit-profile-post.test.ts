@@ -115,6 +115,16 @@ describe("reddit profile posts (/user/<name>/comments/<id>)", () => {
       requests[0]!.searchParams.get("subreddit"),
       "the profile pseudo-subreddit, NOT the bare username",
     ).toBe(`u_${author.toLowerCase()}`);
+    // 12-SPIKE Q6, confirmed LIVE against the real API: the subreddit endpoint answers
+    // HTTP 400 ("You need to sort by 'top' to provide a timeframe") whenever timeframe
+    // is present without sort=top. The author path DOES send timeframe=all, so a
+    // copy-paste between the two branches silently breaks every subreddit request —
+    // and nothing asserted the absence until now.
+    expect(requests[0]!.searchParams.get("sort")).toBe("new");
+    expect(
+      requests[0]!.searchParams.get("timeframe"),
+      "timeframe on a sort=new subreddit request is a live 400",
+    ).toBeNull();
 
     expect(preview.kind).toBe("ok");
     if (preview.kind !== "ok") throw new Error("unreachable");
