@@ -215,6 +215,36 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     expect(after.requests - before.requests).toBe(1);
   });
 
+  it("[review] requires three consecutive page-1 404s before reconnecting an established source", async () => {
+    const handle = `flaky404_${Math.random().toString(36).slice(2, 7)}`;
+    const sourceId = await seedAccountSource(handle);
+    const { AdapterError } = await import("../../src/lib/sources/errors.js");
+    await markChannelLastPolledAt("reddit_account", handle);
+
+    const runNotFound = async () => {
+      provider.errors = [new AdapterError("temporary provider miss", { category: "not-found" })];
+      await handleBackfillAccount({
+        data: {
+          kind: "reddit_account",
+          channelKey: handle,
+          depthBoundIso: new Date(0).toISOString(),
+          flow: "incremental",
+        },
+      });
+      const [source] = await db
+        .select({ needsReconnect: dataSources.needsReconnect })
+        .from(dataSources)
+        .where(eq(dataSources.id, sourceId));
+      return source!.needsReconnect;
+    };
+
+    expect(await runNotFound(), "one provider 404 is inconclusive").toBe(false);
+    expect(await runNotFound(), "two consecutive provider 404s remain inconclusive").toBe(false);
+    expect(await runNotFound(), "the third consecutive provider 404 confirms the subject miss").toBe(
+      true,
+    );
+  });
+
   // REGRESSION: a not-found on ANY page used to abandon the whole pass and flag
   // needs_reconnect on every subscriber. poll-cron filters those out and only a WALK
   // clears the flag — and Reddit has no credentials, so there is no user-facing
@@ -372,6 +402,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       operatorPaused: true,
       deepTargetIso: "1970-01-01T00:00:00Z",
       emptyPasses: 0,
+      notFoundPasses: 0,
     });
     await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 30 * DAY));
     await markChannelLastPolledAt("reddit_account", handle);
@@ -528,6 +559,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       operatorPaused: false,
       deepTargetIso: null,
       emptyPasses: 0,
+      notFoundPasses: 0,
     });
     await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 7 * DAY));
     const { markChannelBackfillComplete } =

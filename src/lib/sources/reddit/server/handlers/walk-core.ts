@@ -113,6 +113,9 @@ const DEEP_PAGE_CAP = 30;
  *  irreversible write; a genuine mass deletion is still caught within ~a day, well
  *  inside the 48h purge grace that follows. */
 const AUTHORITATIVE_EMPTY_PASSES = 2;
+/** Established subjects need corroboration before a provider 404 becomes a reconnect
+ * signal. The old Reddit adapter used the same three-strike protection. */
+const FIRST_PAGE_NOT_FOUND_THRESHOLD = 3;
 
 /** One collected post: the cross-source RawEvent plus the walk-local facts the
  *  fan-out needs but the RawEvent contract does not carry (the post author, which
@@ -262,6 +265,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       // Cross-pass corroboration, NOT walk progress — a cursor reset must not
       // forget that the previous passes came back empty.
       emptyPasses: state0.emptyPasses,
+      notFoundPasses: state0.notFoundPasses,
     };
   } else {
     // A deep pass RE-OPENED on a COMPLETED sub-state (initial-deeper / forceDeep
@@ -275,6 +279,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         operatorPaused: state0.operatorPaused,
         deepTargetIso: null,
         emptyPasses: state0.emptyPasses,
+        notFoundPasses: state0.notFoundPasses,
       };
     }
     state.deepTargetIso = target.toISOString();
@@ -509,8 +514,9 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
           )[0]
       : undefined;
 
-  // Empty first page on a brand-new source ⇒ probable bad/private handle → flag
-  // needs_reconnect, do NOT mark complete (a typo would otherwise be swallowed).
+  // A first-page 404 on a never-polled source is a probable bad/private handle and can
+  // be surfaced immediately. An ESTABLISHED source needs three consecutive misses:
+  // one provider hiccup must not strand every subscriber behind needs_reconnect.
   //
   // Only a FIRST-PAGE 404 says anything about the subject. A 404 on page N>0 is a
   // provider hiccup mid-walk: bailing here would throw away the cursor and the posts
@@ -520,14 +526,49 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // affordance either). Fall through instead: the collected posts fan out, the cursor
   // persists, coveragePassComplete already excludes `notFound` so nothing reconciles,
   // and the next tick resumes where this one stopped.
+  const firstPageNotFound = notFound && notFoundAtPage === 0;
+  if (firstPageNotFound) {
+    state.notFoundPasses += 1;
+    state.operatorPaused = false;
+    await writeRedditBackfillState(config.kind, channelKey, state);
+    const shouldFlag =
+      wasNeverPolled || state.notFoundPasses >= FIRST_PAGE_NOT_FOUND_THRESHOLD;
+    if (shouldFlag) {
+      for (const sub of subscribers) {
+        await markSourceNeedsReconnect(sub.userId, sub.id, "not-found");
+      }
+    }
+    await markChannelLastPolledAt(config.kind, channelKey);
+    if (triggerUserId) {
+      await writeWalkAudit({
+        config,
+        job,
+        flow,
+        channelKey,
+        triggerUserId,
+        requestsUsed: 0,
+        inserted: 0,
+        branch,
+      });
+    }
+    logger.info(
+      { jobId: job.id, channelKey, notFoundPasses: state.notFoundPasses, shouldFlag },
+      `${config.queue}: first-page not-found recorded`,
+    );
+    return;
+  }
+
+  // Any successful first page proves the subject endpoint is healthy, including a
+  // later-page 404 where page one already returned usable posts.
+  state.notFoundPasses = 0;
+
   if (
-    (notFound && notFoundAtPage === 0) ||
-    (wasNeverPolled &&
-      !pausedThisTick &&
-      walkedThisTick &&
-      fetchedThisTick === 0 &&
-      requestsUsed > 0 &&
-      state.complete)
+    wasNeverPolled &&
+    !pausedThisTick &&
+    walkedThisTick &&
+    fetchedThisTick === 0 &&
+    requestsUsed > 0 &&
+    state.complete
   ) {
     for (const sub of subscribers) {
       await markSourceNeedsReconnect(sub.userId, sub.id, "not-found");
@@ -547,7 +588,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     }
     logger.info(
       { jobId: job.id, channelKey },
-      `${config.queue}: empty first page / not-found on new source — flagged needs_reconnect`,
+      `${config.queue}: empty first page on new source — flagged needs_reconnect`,
     );
     return;
   }

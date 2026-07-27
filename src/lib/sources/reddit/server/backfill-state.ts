@@ -84,6 +84,10 @@ export interface RedditBackfillState {
    *  clearReappearedDeletions can never un-flag it). Reset to 0 by any pass with
    *  sightings. */
   emptyPasses: number;
+  /** Consecutive first-page 404s from the provider. Established sources require three
+   * corroborating misses before needs_reconnect; one transient provider 404 must not
+   * strand every tenant subscribed to the shared channel. */
+  notFoundPasses: number;
 }
 
 const EMPTY: RedditBackfillState = {
@@ -93,6 +97,7 @@ const EMPTY: RedditBackfillState = {
   operatorPaused: false,
   deepTargetIso: null,
   emptyPasses: 0,
+  notFoundPasses: 0,
 };
 
 /** Read the Reddit backfill sub-state from a channel-state row's metadata, with
@@ -109,6 +114,7 @@ export function readRedditBackfillState(
     operatorPaused: r?.operatorPaused === true,
     deepTargetIso: typeof r?.deepTargetIso === "string" ? r.deepTargetIso : null,
     emptyPasses: typeof r?.emptyPasses === "number" ? r.emptyPasses : 0,
+    notFoundPasses: typeof r?.notFoundPasses === "number" ? r.notFoundPasses : 0,
   };
 }
 

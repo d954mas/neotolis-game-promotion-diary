@@ -254,6 +254,7 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       operatorPaused: false,
       deepTargetIso: null,
       emptyPasses: 0,
+      notFoundPasses: 0,
     });
 
     // Tick 2 resumes deep + returns only an OLDER page (C@10d), reaching end-of-feed.
