@@ -30,9 +30,29 @@
 -- HAND-WRITTEN ON PURPOSE: this is a DATA migration (no schema change), which
 -- `drizzle-kit generate` cannot express — see the AGENTS.md "Forward-only migrations"
 -- clause covering hand-written data migrations (idempotent, test-covered, no DDL).
--- Idempotent by construction: re-running deletes nothing (the rows are gone) and never
--- touches rows the rebuilt tree created afterwards, because it runs exactly once at the
--- deploy that introduces the rebuilt tree.
-DELETE FROM "events" WHERE "kind"::text = 'reddit_post';--> statement-breakpoint
-DELETE FROM "data_sources" WHERE "kind"::text IN ('reddit_account', 'reddit_subreddit');--> statement-breakpoint
-DELETE FROM "data_source_channel_state" WHERE "kind"::text IN ('reddit_account', 'reddit_subreddit');
+--
+-- IDEMPOTENT BY SHAPE, not by "it only runs once". Each predicate additionally matches
+-- the LEGACY row shape, so a re-run — a repair migration (this repo already needed one:
+-- 0062), an operator executing the file by hand after a partial deploy, or a restored
+-- backup re-migrated — is a genuine no-op instead of wiping everything the rebuilt
+-- walker has imported since. Without these the predicates match the NEW rows exactly as
+-- well as the old ones.
+--
+--   events               : legacy rows key on the BARE base36 id; the rebuilt walker
+--                          writes the `t3_` fullname. (external_id IS NULL covers a
+--                          legacy row that never resolved one.)
+--   data_sources         : legacy rows carry metadata {username}/{subreddit}; the
+--                          rebuilt canonicalizeOnCreate writes {handle}/{slug}.
+--   data_source_channel_state : legacy rows are the ones with no surviving source.
+DELETE FROM "events"
+ WHERE "kind"::text = 'reddit_post'
+   AND ("external_id" IS NULL OR "external_id" NOT LIKE 't3\_%');--> statement-breakpoint
+DELETE FROM "data_sources"
+ WHERE "kind"::text IN ('reddit_account', 'reddit_subreddit')
+   AND NOT ("metadata" ? 'handle' OR "metadata" ? 'slug');--> statement-breakpoint
+DELETE FROM "data_source_channel_state" dscs
+ WHERE dscs."kind"::text IN ('reddit_account', 'reddit_subreddit')
+   AND NOT EXISTS (
+     SELECT 1 FROM "data_sources" ds
+      WHERE ds."kind" = dscs."kind" AND ds."channel_id" = dscs."channel_key"
+   );

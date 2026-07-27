@@ -18,7 +18,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normalize.js";
 import type { DailyUserRequestAccounting } from "../../src/lib/server/daily-user-quota.js";
@@ -286,5 +286,74 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
       .where(eq(events.externalId, externalId));
     expect(matching, "the rebuilt walk imports exactly one t3_-keyed event").toHaveLength(1);
     expect(matching[0]!.sourceId).toBe(rebuiltSource!.id);
+  });
+  // REGRESSION (review): the migration used to be scoped by KIND alone, so its
+  // predicates matched the REBUILT tree's rows exactly as well as the legacy ones. The
+  // header claimed idempotency, but that reasoning was "it only ever runs once" — and
+  // this repo has already needed a repair migration that re-executed skipped work
+  // (0062). A second execution would then have wiped every Reddit source and event the
+  // rebuilt walker had imported. The predicates now additionally match the LEGACY SHAPE.
+  it("[review] re-running the migration does NOT touch rebuilt-tree rows", async () => {
+    const u = await seedUserDirectly({ email: `rdt-raze-idem-${uniq()}@t.io` });
+    const handle = `rebuilt_${uniq()}`;
+
+    // A REBUILT-shape source (metadata {handle}, channel_id set) + its channel state.
+    const [src] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_account",
+        handleUrl: `https://www.reddit.com/user/${handle}`,
+        channelId: handle,
+        metadata: { handle },
+      })
+      .returning({ id: dataSources.id });
+    await db
+      .insert(dataSourceChannelState)
+      .values({ kind: "reddit_account", channelKey: handle })
+      .onConflictDoNothing();
+    // A REBUILT-shape event (t3_-keyed), both source-linked and hand-pasted.
+    const t3 = `t3_${uniq()}`;
+    await db.insert(events).values({
+      userId: u.id,
+      sourceId: src!.id,
+      kind: "reddit_post",
+      occurredAt: new Date("2026-07-01T00:00:00Z"),
+      title: "imported by the rebuilt walker",
+      externalId: t3,
+    });
+    const pastedT3 = `t3_${uniq()}`;
+    await db.insert(events).values({
+      userId: u.id,
+      kind: "reddit_post",
+      occurredAt: new Date("2026-07-02T00:00:00Z"),
+      title: "pasted after the upgrade",
+      externalId: pastedT3,
+    });
+
+    await runMigration();
+    await runMigration();
+
+    const survivingSources = await db
+      .select({ id: dataSources.id })
+      .from(dataSources)
+      .where(eq(dataSources.id, src!.id));
+    expect(survivingSources, "a rebuilt-shape source must survive a re-run").toHaveLength(1);
+
+    for (const id of [t3, pastedT3]) {
+      const rows = await db.select({ id: events.id }).from(events).where(eq(events.externalId, id));
+      expect(rows, `a rebuilt-shape event (${id}) must survive a re-run`).toHaveLength(1);
+    }
+
+    const state = await db
+      .select({ channelKey: dataSourceChannelState.channelKey })
+      .from(dataSourceChannelState)
+      .where(
+        and(
+          eq(dataSourceChannelState.kind, "reddit_account"),
+          eq(dataSourceChannelState.channelKey, handle),
+        ),
+      );
+    expect(state, "channel state with a live source must survive a re-run").toHaveLength(1);
   });
 });
