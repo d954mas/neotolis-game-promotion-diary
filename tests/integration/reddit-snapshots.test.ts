@@ -153,6 +153,38 @@ describe("reddit snapshots write path (Phase 12)", () => {
     expect(snaps).toHaveLength(1);
   });
 
+  it("[review] starts the deletion clock when the provider returns an author tombstone", async () => {
+    const postId = `t3_${uniq()}`;
+    await writeSnapshot({
+      postId,
+      author: "former_author",
+      authorFullname: "t2_former",
+      metrics: { likes: 5, comments: 1 },
+      status: "ok",
+    });
+
+    await writeSnapshot({
+      postId,
+      author: null,
+      authorFullname: null,
+      metrics: { likes: 6, comments: 2 },
+      raw: {
+        score: 6,
+        upvoteRatio: null,
+        numComments: 2,
+        numCrossposts: null,
+        removedByCategory: null,
+        authorDeleted: true,
+      },
+      status: "ok",
+    });
+
+    const post = await readPost(postId);
+    expect(post!.deletionDetectedAt, "the 48h purge grace starts on the tombstone").not.toBeNull();
+    expect(post!.author, "identity remains only for the grace period").toBe("former_author");
+    expect(post!.authorFullname).toBe("t2_former");
+  });
+
   it("[review-P1] a PURGED author is FROZEN — a later cross-subject snapshot never restores it", async () => {
     const postId = `t3_${uniq()}`;
     // A live post, tracked with its author.

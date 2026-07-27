@@ -231,6 +231,8 @@ export interface NormalizedRedditPost extends NormalizedPost {
     numComments: number | null;
     numCrossposts: number | null;
     removedByCategory: string | null;
+    /** Reddit's literal `[deleted]` author tombstone was present. */
+    authorDeleted?: boolean;
   };
 }
 
@@ -249,6 +251,7 @@ export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
   const selftext =
     typeof post.selftext === "string" && post.selftext.trim() !== "" ? post.selftext : null;
   const title = typeof post.title === "string" && post.title !== "" ? post.title : null;
+  const authorDeleted = post.author?.trim().toLowerCase() === "[deleted]";
   // Timestamp is load-bearing (tier + frontier + newest-first walk boundary). A post
   // with no resolvable published_at is malformed → THROW so mapPostsResilient DROPS it
   // (a minority-drop is tolerated; a majority-drop throws transient). Better an honest
@@ -276,8 +279,8 @@ export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
     title,
     selftext,
     subredditSlug: post.subreddit != null ? post.subreddit.toLowerCase() : null,
-    author: post.author ?? null,
-    authorFullname: post.author_fullname ?? null,
+    author: authorDeleted ? null : (post.author ?? null),
+    authorFullname: authorDeleted ? null : (post.author_fullname ?? null),
     raw: {
       score: typeof post.score === "number" ? post.score : null,
       upvoteRatio: typeof post.upvote_ratio === "number" ? post.upvote_ratio : null,
@@ -285,6 +288,7 @@ export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
       // ABSENT from ScrapeCreators — always null (forward-compat column).
       numCrossposts: typeof post.num_crossposts === "number" ? post.num_crossposts : null,
       removedByCategory: post.removed_by_category ?? null,
+      authorDeleted,
     },
   };
 }
@@ -303,8 +307,8 @@ export function normalizeSingleRedditPost(raw: unknown): NormalizedSinglePost {
     metrics: full.metrics,
     caption: full.caption,
     thumbnailUrl: full.thumbnailUrl,
-    ownerId: post.author_fullname ?? null,
-    ownerUsername: post.author ?? null,
+    ownerId: full.authorFullname,
+    ownerUsername: full.author,
   };
 }
 
@@ -314,7 +318,9 @@ export function normalizeSingleRedditPost(raw: unknown): NormalizedSinglePost {
 export function normalizeRedditOwner(raw: unknown): ResolvedAccount | null {
   const post = REDDIT_POST.parse(raw);
   const username = post.author ?? null;
-  if (username === null || username === "") return null;
+  if (username === null || username === "" || username.trim().toLowerCase() === "[deleted]") {
+    return null;
+  }
   return {
     accountId: post.author_fullname ?? username,
     displayName: username,

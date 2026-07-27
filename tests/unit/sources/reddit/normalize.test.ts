@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRedditTitle,
   normalizeRedditFeed,
+  normalizeRedditOwner,
   normalizeRedditPost,
 } from "$lib/sources/reddit/server/normalize.js";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -80,6 +81,22 @@ describe("reddit normalize (D-09 mapping — Phase 12)", () => {
     });
     expect(withRemoved.raw.numCrossposts).toBe(2);
     expect(withRemoved.raw.removedByCategory).toBe("deleted");
+  });
+
+  it("[review] treats Reddit's [deleted] author tombstone as deletion evidence", () => {
+    const raw = {
+      name: "t3_deletedauthor",
+      id: "deletedauthor",
+      author: "[deleted]",
+      author_fullname: null,
+      created_utc: 1700000000,
+    };
+
+    const post = normalizeRedditPost(raw);
+    expect(post.author).toBeNull();
+    expect(post.authorFullname).toBeNull();
+    expect(post.raw.authorDeleted).toBe(true);
+    expect(normalizeRedditOwner(raw)).toBeNull();
   });
 
   it("[12-03] type derivation (is_self/thumbnail ABSENT): post_hint / domain / url-vs-permalink / selftext / is_video → self|link|image|gallery", () => {
