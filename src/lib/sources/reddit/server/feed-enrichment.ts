@@ -14,7 +14,10 @@
 //   3. data_source_channel_state — the per-source operator-budget-paused hint. The
 //      walker flips metadata.reddit.operatorPaused on the source's channel-state row
 //      (source of truth); we overlay it onto each event's metadata.operator_paused
-//      so the PollingBadge renders the paused variant.
+//      so the PollingBadge renders the paused variant. Resolved via the EVENT'S OWN
+//      source (dto.sourceId → data_sources.kind/channel_id → channel state), never
+//      via the post's author/subreddit: a post's author may be tracked by an
+//      UNRELATED paused account source, which must not light this event's badge.
 //
 // THUMBNAIL (D-06, hotlink-first, NO proxy per Pitfall 5 YAGNI): thumbnail_url is
 // the raw Reddit CDN URL (i.redd.it). It is FREQUENTLY NULL — ScrapeCreators omits
@@ -31,9 +34,10 @@
 // subreddit_slug (the intrinsic URL-identity-safe slug) but never a renameable
 // display value.
 
-import { and, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { redditPosts } from "$lib/server/db/schema/index.js";
+import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { dataSourceChannelState } from "$lib/server/db/schema/data-source-channel-state.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
@@ -73,10 +77,10 @@ export interface RedditEnrichment {
 type RedditDecorated = EventDto & { redditEnrichment?: RedditEnrichment };
 
 export async function redditEnrichFeedDtos(
-  /** userId required by the SourceAdapter.enrichFeedDtos contract; unused here
-   *  because both Reddit tables are PUBLIC-DATA. Tenant scope comes from the upstream
-   *  events SELECT in mapEventsToDtos. */
-  _userId: string,
+  /** Scopes the operator-paused source lookup (data_sources is tenant-owned); the
+   *  Reddit post/snapshot tables stay PUBLIC-DATA. Tenant scope for the dtos
+   *  themselves comes from the upstream events SELECT in mapEventsToDtos. */
+  userId: string,
   dtos: EventDto[],
 ): Promise<void> {
   // Internal filter — caller does NOT pre-filter.
@@ -92,9 +96,13 @@ export async function redditEnrichFeedDtos(
       externalIds.map((id) => sql`${id}`),
       sql`, `,
     );
-    // Queries 1 + 2 are independent (both key on externalIds) — run them
-    // concurrently. Query 3 (operator-paused) depends on subredditSlugs from query 2.
-    const [latestRows, postRows] = await Promise.all([
+    // Queries 1 + 2 key on externalIds, query 3a (the events' own sources) keys on
+    // sourceIds — all independent, run them concurrently. Query 3b (channel state)
+    // depends on 3a's kind/channelId pairs.
+    const sourceIds = [
+      ...new Set(rdDtos.map((d) => d.sourceId).filter((id): id is string => id !== null)),
+    ];
+    const [latestRows, postRows, sourceRows] = await Promise.all([
       db.execute<{
         post_id: string;
         polled_at: Date;
@@ -115,11 +123,29 @@ export async function redditEnrichFeedDtos(
           thumbnailUrl: redditPosts.thumbnailUrl,
           mediaType: redditPosts.mediaType,
           subredditSlug: redditPosts.subredditSlug,
-          author: redditPosts.author,
           deletionDetectedAt: redditPosts.deletionDetectedAt,
         })
         .from(redditPosts)
         .where(inArray(redditPosts.postId, externalIds)),
+      // 3a. The events' OWN sources (tenant-scoped) — kind + channel_id resolve the
+      //     operator-paused channel-state row for exactly this event's source.
+      sourceIds.length === 0
+        ? Promise.resolve([])
+        : db
+            .select({
+              id: dataSources.id,
+              kind: dataSources.kind,
+              channelId: dataSources.channelId,
+            })
+            .from(dataSources)
+            .where(
+              and(
+                eq(dataSources.userId, userId),
+                inArray(dataSources.id, sourceIds),
+                inArray(dataSources.kind, ["reddit_account", "reddit_subreddit"]),
+                isNull(dataSources.deletedAt),
+              ),
+            ),
     ]);
     const latest = new Map<string, RedditEnrichment["stats"]>();
     for (const s of latestRows.rows) {
@@ -140,7 +166,6 @@ export async function redditEnrichFeedDtos(
         thumbnailUrl: string | null;
         mediaType: string | null;
         subredditSlug: string | null;
-        author: string | null;
         deletionDetectedAt: Date | null;
       }
     >();
@@ -149,32 +174,25 @@ export async function redditEnrichFeedDtos(
         thumbnailUrl: r.thumbnailUrl,
         mediaType: r.mediaType,
         subredditSlug: r.subredditSlug,
-        author: r.author,
         deletionDetectedAt: r.deletionDetectedAt,
       });
     }
 
-    // 3. Operator-budget-paused sources. The walker flips metadata.reddit.
-    //    operatorPaused on the per-source channel-state row when a poll/backfill tick
-    //    is paused by the operator's prepaid budget, and clears it on a successful
-    //    unpaused tick. We overlay it onto each event's metadata.operator_paused so
-    //    the PollingBadge lights up. NO per-event denormalization: one channel-state
-    //    row drives every event of the source. Keyed on the subreddit_slug channelKey
-    //    (reddit_subreddit sources) OR the LOWERCASE username channelKey (reddit_account
-    //    sources — reddit_posts.author is stored verbatim, so lowercase it to match the
-    //    channel-state key). Both are gathered so a paused account source lights too.
-    const channelKeys = [
-      ...new Set(
-        postRows
-          .flatMap((r) => [r.subredditSlug, r.author === null ? null : r.author.toLowerCase()])
-          .filter((k): k is string => k !== null && k !== ""),
-      ),
-    ];
-    // Namespaced `${kind}:${channelKey}` — a subreddit slug and an account username
-    // can be the SAME string (r/gamedev vs u/gamedev), so a flat key set would let a
-    // paused account spuriously light the paused badge on an unrelated subreddit's posts.
-    const pausedKeys = new Set<string>();
-    if (channelKeys.length > 0) {
+    // 3b. Operator-budget-paused overlay, resolved through the event's OWN source
+    //     (review fix). The walker flips metadata.reddit.operatorPaused on the
+    //     (kind, channelKey) channel-state row when a poll/backfill tick is paused by
+    //     the operator's prepaid budget, and clears it on a successful unpaused tick.
+    //     Each event inherits ONLY its own source's state: matching by the post's
+    //     author/subreddit instead lit the badge whenever ANY channel sharing the post
+    //     (e.g. an unrelated paused account source tracking the same author) was
+    //     paused. The `${kind}:${channelKey}` namespacing stays — r/gamedev and
+    //     u/gamedev are the same string in different keyspaces. A source-less pasted
+    //     event has no pollable source, so it never renders the paused variant.
+    const pausedSourceIds = new Set<string>();
+    if (sourceRows.length > 0) {
+      const channelKeys = [
+        ...new Set(sourceRows.map((r) => r.channelId).filter((k): k is string => k !== null)),
+      ];
       const stateRows = await db
         .select({
           kind: dataSourceChannelState.kind,
@@ -188,9 +206,15 @@ export async function redditEnrichFeedDtos(
             inArray(dataSourceChannelState.channelKey, channelKeys),
           ),
         );
+      const pausedChannels = new Set<string>();
       for (const r of stateRows) {
         const rd = (r.metadata as { reddit?: { operatorPaused?: unknown } } | null)?.reddit;
-        if (rd?.operatorPaused === true) pausedKeys.add(`${r.kind}:${r.channelKey}`);
+        if (rd?.operatorPaused === true) pausedChannels.add(`${r.kind}:${r.channelKey}`);
+      }
+      for (const s of sourceRows) {
+        if (s.channelId !== null && pausedChannels.has(`${s.kind}:${s.channelId}`)) {
+          pausedSourceIds.add(s.id);
+        }
       }
     }
 
@@ -208,11 +232,8 @@ export async function redditEnrichFeedDtos(
         deletionDetectedAt: meta?.deletionDetectedAt ? meta.deletionDetectedAt.toISOString() : null,
         subredditSlug: meta?.subredditSlug ?? null,
       };
-      // A post is paused if EITHER its subreddit source OR its account source is paused.
-      // Match on the kind-namespaced key so the two keyspaces can't collide.
-      const isPaused =
-        (meta?.subredditSlug != null && pausedKeys.has(`reddit_subreddit:${meta.subredditSlug}`)) ||
-        (meta?.author != null && pausedKeys.has(`reddit_account:${meta.author.toLowerCase()}`));
+      // Paused iff the EVENT'S OWN source's channel is operator-paused (3b above).
+      const isPaused = dto.sourceId !== null && pausedSourceIds.has(dto.sourceId);
       if (isPaused) {
         const base =
           dto.metadata !== null && typeof dto.metadata === "object"

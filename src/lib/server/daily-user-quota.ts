@@ -53,8 +53,12 @@ async function readDailyUserQuotaUsage(
 export async function getUserQuotaUsedToday(
   userId: string,
   platform?: string,
+  // Callers already inside a transaction MUST pass their tx: reading via the
+  // module-level `db` from within a held transaction checks out a SECOND pool
+  // connection while the first is still held — the pool-deadlock pattern.
+  dbCtx: DbOrTx = db,
 ): Promise<DailyUserQuotaUsage> {
-  return readDailyUserQuotaUsage(db, userId, platform, new Date());
+  return readDailyUserQuotaUsage(dbCtx, userId, platform, new Date());
 }
 
 export async function lockAndAssertDailyUserRequestQuota(

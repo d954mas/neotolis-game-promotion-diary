@@ -29,6 +29,10 @@
 //                                    editable/refreshable)
 //   events.metadata.subreddit      → `u_<name>` ⇒ null (the card then renders no
 //                                    subreddit line instead of the username)
+//   events.author_handle           → NULL — the source-less Reddit paste path stores
+//                                    the preview's username here (events-mutation),
+//                                    so leaving it would keep the purged author
+//                                    mechanically recoverable from the diary row
 //
 // A SUBREDDIT post (/r/<sub>/comments/<id>/<slug>) carries no author anywhere in its
 // URL or slug, so only the three columns change for it. The events UPDATE is
@@ -114,8 +118,8 @@ export async function handleDeletionPropagationCron(): Promise<{
     if (purgedCount > 0) {
       // Derived-copy scrub on the diary rows themselves. CROSS-TENANT by design
       // (operator compliance job), scoped to the purged post ids + kind='reddit_post'.
-      // Content columns (title, notes, occurred_at) are untouched — only the two
-      // author-derivable fields are.
+      // Content columns (title, notes, occurred_at) are untouched — only the
+      // author-derivable fields (url, metadata.subreddit, author_handle) are.
       // Drizzle spreads a JS array into separate placeholders, which would build a row
       // constructor — join the ids into an explicit IN list (same pattern as
       // feed-enrichment's DISTINCT ON query).
@@ -135,10 +139,15 @@ export async function handleDeletionPropagationCron(): Promise<{
                 THEN jsonb_set(metadata, '{subreddit}', 'null'::jsonb)
               ELSE metadata
             END,
+            author_handle = NULL,
             updated_at = NOW()
         WHERE kind::text = 'reddit_post'
           AND external_id IN (${purgedIdList})
-          AND (url ~* '/user/[^/]+/comments/' OR left(metadata->>'subreddit', 2) = 'u_')
+          AND (
+            url ~* '/user/[^/]+/comments/'
+            OR left(metadata->>'subreddit', 2) = 'u_'
+            OR author_handle IS NOT NULL
+          )
       `);
 
       if (operatorId === null) {
@@ -193,12 +202,28 @@ const ORPHAN_AUTHOR_RETENTION_DAYS = 90;
  * mirroring the "anonymize, don't delete" rule of the purge above. ZERO-HTTP.
  */
 async function anonymizeOrphanedAuthors(): Promise<number> {
+  // Same erase-every-recoverable-field posture as the purge above: a PROFILE post
+  // keeps the username inside its /user/<name>/comments/… permalink and its
+  // `u_<name>` pseudo-subreddit slug, so nulling author/author_fullname alone
+  // leaves the identity mechanically recoverable. Rewrite both with the same CASE
+  // scrubs the main purge uses (permalink rebuilt from the t3_ post_id fullname).
   const result = await db.execute<{ post_id: string }>(sql`
     UPDATE reddit_posts p
     SET author = NULL,
         author_fullname = NULL,
+        permalink = CASE
+          WHEN p.permalink ~* '/user/[^/]+/comments/'
+            THEN 'https://www.reddit.com/comments/' || substring(p.post_id from 4)
+          ELSE p.permalink
+        END,
+        subreddit_slug = CASE WHEN left(p.subreddit_slug, 2) = 'u_' THEN NULL ELSE p.subreddit_slug END,
         updated_at = NOW()
-    WHERE (p.author IS NOT NULL OR p.author_fullname IS NOT NULL)
+    WHERE (
+        p.author IS NOT NULL
+        OR p.author_fullname IS NOT NULL
+        OR p.permalink ~* '/user/[^/]+/comments/'
+        OR left(p.subreddit_slug, 2) = 'u_'
+      )
       AND p.updated_at < NOW() - ${sql.raw(`INTERVAL '${ORPHAN_AUTHOR_RETENTION_DAYS} days'`)}
       AND NOT EXISTS (
         SELECT 1 FROM events e

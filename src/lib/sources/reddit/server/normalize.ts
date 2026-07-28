@@ -149,15 +149,47 @@ function toPortKind(mediaType: RedditMediaType, raw: RedditPostRaw): NormalizedP
   }
 }
 
-/** Thumbnail by-presence: a real URL survives; a Reddit "no image" literal → null;
- *  otherwise DERIVE from the post url for image posts (i.redd.it). `thumbnail` is
- *  absent from ScrapeCreators, so the image path is the live one (spike #2). */
+/** BOUNDARY VALIDATION for provider-supplied absolute URLs (review fix): permalink
+ *  lands in href and thumbnail in img src, so an EXTERNAL provider must not be able
+ *  to persist an arbitrary host (broken Reddit permalink contract + third-party
+ *  tracking requests on render). HTTPS + an allowlisted host family or nothing. */
+function urlHostAllowed(value: string, allowed: (host: string) => boolean): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && allowed(parsed.hostname.toLowerCase());
+}
+
+/** reddit.com + subdomains (www / old / new / mobile spellings all resolve). */
+function isRedditPermalinkHost(host: string): boolean {
+  return host === "reddit.com" || host.endsWith(".reddit.com");
+}
+
+/** The Reddit media CDN families (i.redd.it / preview.redd.it / *.redditmedia.com). */
+function isRedditCdnHost(host: string): boolean {
+  return host === "redd.it" || host.endsWith(".redd.it") || host.endsWith(".redditmedia.com");
+}
+
+/** Thumbnail by-presence: a real Reddit-CDN URL survives; a Reddit "no image"
+ *  literal or an off-CDN host → null; otherwise DERIVE from the post url for image
+ *  posts (i.redd.it). `thumbnail` is absent from ScrapeCreators, so the image path
+ *  is the live one (spike #2). An external image host (e.g. an imgur link post)
+ *  yields null — the card renders no image chip rather than hotlinking a
+ *  third-party host from every feed view. */
 function pickThumbnail(raw: RedditPostRaw, mediaType: RedditMediaType): string | null {
   const thumb = raw.thumbnail ?? null;
-  if (thumb !== null && !THUMBNAIL_NON_URLS.has(thumb) && /^https?:\/\//i.test(thumb)) {
+  if (thumb !== null && !THUMBNAIL_NON_URLS.has(thumb) && urlHostAllowed(thumb, isRedditCdnHost)) {
     return thumb;
   }
-  if (mediaType === "image" && typeof raw.url === "string" && IMAGE_URL_RE.test(raw.url)) {
+  if (
+    mediaType === "image" &&
+    typeof raw.url === "string" &&
+    IMAGE_URL_RE.test(raw.url) &&
+    urlHostAllowed(raw.url, isRedditCdnHost)
+  ) {
     return raw.url;
   }
   return null;
@@ -165,12 +197,15 @@ function pickThumbnail(raw: RedditPostRaw, mediaType: RedditMediaType): string |
 
 /** Canonical permalink. ScrapeCreators returns `permalink` as a path (e.g.
  *  `/r/<sub>/comments/<id>/<slug>/`); prefix the host. `url` may be an EXTERNAL
- *  link (link posts), so never use it as the permalink. */
+ *  link (link posts), so never use it as the permalink. An absolute permalink on a
+ *  non-Reddit host is a provider anomaly → null (the walker then falls back to the
+ *  canonical /comments/<id> URL rebuilt from the post id). */
 function pickPermalink(raw: RedditPostRaw): string | null {
   if (typeof raw.permalink === "string" && raw.permalink !== "") {
-    return raw.permalink.startsWith("http")
-      ? raw.permalink
-      : `https://www.reddit.com${raw.permalink}`;
+    // A path MUST be root-relative ("/r/…") so the prefix cannot be smuggled into a
+    // different authority; anything else must parse as an https reddit.com URL.
+    if (raw.permalink.startsWith("/")) return `https://www.reddit.com${raw.permalink}`;
+    return urlHostAllowed(raw.permalink, isRedditPermalinkHost) ? raw.permalink : null;
   }
   return null;
 }

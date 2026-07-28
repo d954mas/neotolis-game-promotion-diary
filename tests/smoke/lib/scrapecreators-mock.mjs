@@ -12,11 +12,13 @@
 //   GET /v1/reddit/search?query=author:<h>&sort=new&timeframe=all[&after]
 //   GET /v1/reddit/subreddit?subreddit=<slug>&sort=new[&after]
 // Both return the spike-frozen envelope { success, posts:[...], after }. Beyond the
-// happy path the mock reproduces three real behaviours, so the gate can actually fail
+// happy path the mock reproduces four real behaviours, so the gate can actually fail
 // on them: it REQUIRES the x-api-key header (401 otherwise), it 400s a subreddit
-// request carrying `timeframe` without sort=top (12-SPIKE Q6, confirmed live), and the
-// author feed PAGINATES — page 1 hands out a cursor, page 2 is terminal (after:null),
-// so the walker's pagination + end-of-feed handling runs for real.
+// request carrying `timeframe` without sort=top (12-SPIKE Q6, confirmed live), it 400s
+// an author search missing the exact query=author:<h> + sort=new + timeframe=all
+// contract (no silent defaults — a mangled request must fail here, not only live), and
+// the author feed PAGINATES — page 1 hands out a cursor, page 2 is terminal
+// (after:null), so the walker's pagination + end-of-feed handling runs for real.
 //
 // PORT is read from SCRAPECREATORS_MOCK_PORT (exported by the smoke flow before spawn).
 
@@ -79,15 +81,47 @@ const server = createServer((req, res) => {
   }
 
   if (url.pathname === "/v1/reddit/search") {
-    // query=author:<handle> → echo the handle as the post author.
+    // ENFORCE the author-search contract instead of defaulting the gaps away: the
+    // provider must send query=author:<handle>, sort=new and timeframe=all
+    // (provider/scrapecreators-reddit.ts). The pre-fix mock silently substituted
+    // "smokeauthor" for a missing/mangled query and ignored sort/timeframe, so a
+    // regression in any of the three shipped green here and only failed live.
     const q = url.searchParams.get("query") || "";
-    const author = q.replace(/^author:/, "") || "smokeauthor";
+    const author = q.startsWith("author:") ? q.slice("author:".length) : "";
+    if (
+      author === "" ||
+      url.searchParams.get("sort") !== "new" ||
+      url.searchParams.get("timeframe") !== "all"
+    ) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          success: false,
+          error: `author search contract violated: query=${q || "(missing)"} sort=${url.searchParams.get("sort")} timeframe=${url.searchParams.get("timeframe")}`,
+        }),
+      );
+      return;
+    }
     // TWO pages when no cursor is given, so the walker's pagination + terminal
     // null-`after` handling is exercised end-to-end rather than assumed. Page 1 hands
-    // out a cursor; page 2 is terminal.
-    body = url.searchParams.has("after")
-      ? { success: true, posts: [post(`${author}`, "gamedev", "smoke02")], after: null }
-      : { success: true, posts: [post(author, "gamedev")], after: "smoke-page-2" };
+    // out a cursor; page 2 is terminal. The cursor VALUE is enforced like the rest of
+    // the contract: presence alone used to earn page 2, so a walker round-tripping a
+    // corrupted cursor ("undefined", "", a stale value) shipped green here.
+    if (url.searchParams.has("after")) {
+      if (url.searchParams.get("after") !== "smoke-page-2") {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            success: false,
+            error: `author search contract violated: after=${url.searchParams.get("after") || "(empty)"} is not the cursor page 1 issued`,
+          }),
+        );
+        return;
+      }
+      body = { success: true, posts: [post(author, "gamedev", "smoke02")], after: null };
+    } else {
+      body = { success: true, posts: [post(author, "gamedev")], after: "smoke-page-2" };
+    }
   } else if (url.pathname === "/v1/reddit/subreddit") {
     const slug = url.searchParams.get("subreddit") || "gamedev";
     body = { success: true, posts: [post("smokeauthor", slug)], after: null };

@@ -331,4 +331,108 @@ describe("reddit feed inbox + metric series (VIZ-05 + PLAT-04)", () => {
       .redditEnrichment;
     expect(enr?.deletionDetectedAt).toBe("2026-07-01T00:00:00.000Z");
   });
+
+  it("[review-P2] the operator-paused badge follows the EVENT'S OWN source, not any channel sharing the post", async () => {
+    // The failure case: a subreddit source's event whose post AUTHOR is also tracked
+    // by a PAUSED account channel. Pre-fix the enrichment matched paused state by the
+    // post's author/subreddit, so the unrelated paused account lit the badge on the
+    // healthy subreddit source's event.
+    const { dataSourceChannelState } =
+      await import("../../src/lib/server/db/schema/data-source-channel-state.js");
+    const author = `paused_${uniq()}`;
+    const sub = `viz_${uniq()}`;
+    const postA = `a${uniq()}`; // event owned by the (healthy) subreddit source
+    const postB = `b${uniq()}`; // event owned by the (paused) account source
+    const u = await seedUserDirectly({ email: `rdt-viz-paused-${uniq()}@t.io` });
+    const [subSource] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_subreddit",
+        handleUrl: `https://www.reddit.com/r/${sub}`,
+        channelId: sub,
+        autoImport: true,
+        metadata: { slug: sub },
+      })
+      .returning({ id: dataSources.id });
+    const [accountSource] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_account",
+        handleUrl: `https://www.reddit.com/user/${author}`,
+        channelId: author,
+        autoImport: true,
+        metadata: { handle: author },
+      })
+      .returning({ id: dataSources.id });
+    // ONLY the account channel is operator-paused.
+    await db.insert(dataSourceChannelState).values([
+      {
+        kind: "reddit_account",
+        channelKey: author,
+        metadata: { reddit: { operatorPaused: true } },
+      },
+      {
+        kind: "reddit_subreddit",
+        channelKey: sub,
+        metadata: { reddit: { operatorPaused: false } },
+      },
+    ]);
+    // Both posts are authored by the paused account's author; A lives in the subreddit.
+    await db.insert(redditPosts).values([
+      { postId: `t3_${postA}`, subredditSlug: sub, author, title: "in the sub" },
+      { postId: `t3_${postB}`, subredditSlug: sub, author, title: "from the account" },
+    ]);
+    const inserted = await db
+      .insert(events)
+      .values([
+        {
+          userId: u.id,
+          sourceId: subSource!.id,
+          kind: "reddit_post",
+          occurredAt: new Date(),
+          title: "in the sub",
+          externalId: `t3_${postA}`,
+          metadata: { subreddit: sub },
+        },
+        {
+          userId: u.id,
+          sourceId: accountSource!.id,
+          kind: "reddit_post",
+          occurredAt: new Date(),
+          title: "from the account",
+          externalId: `t3_${postB}`,
+          metadata: { subreddit: sub },
+        },
+      ])
+      .returning({ id: events.id });
+    const evs = await db
+      .select()
+      .from(events)
+      .where(
+        inArray(
+          events.id,
+          inserted.map((r) => r.id),
+        ),
+      );
+    const dtos = await mapEventsToDtos(u.id, evs);
+    await redditEnrichFeedDtos(u.id, dtos);
+
+    const byId = new Map(
+      (dtos as Array<{ externalId: string | null; metadata: unknown }>).map((d) => [
+        d.externalId,
+        d,
+      ]),
+    );
+    const pausedOf = (id: string): unknown =>
+      (byId.get(id)!.metadata as { operator_paused?: unknown } | null)?.operator_paused;
+    expect(pausedOf(`t3_${postB}`), "the paused account source's own event lights the badge").toBe(
+      true,
+    );
+    expect(
+      pausedOf(`t3_${postA}`),
+      "the healthy subreddit source's event must NOT inherit the unrelated paused account",
+    ).toBeUndefined();
+  });
 });

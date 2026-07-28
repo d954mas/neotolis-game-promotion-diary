@@ -88,6 +88,18 @@ export interface RedditBackfillState {
    * corroborating misses before needs_reconnect; one transient provider 404 must not
    * strand every tenant subscribed to the shared channel. */
   notFoundPasses: number;
+  /** The deepest depth-target (ISO) any COMPLETED deep pass has walked for — the
+   *  "this request was already served" memory. A deep pass can complete WITHOUT its
+   *  frontier reaching the target (feed bottom above the target, or the
+   *  SOCIAL_BACKFILL_MAX_POSTS cap), and `target < frontier` alone then holds forever:
+   *  every manual pull would relabel as `initial` and re-pay a deep re-walk that
+   *  imports nothing. Targets not strictly deeper than this value are settled — the
+   *  `initial` relabel (backfillSource) and the widened-subscriber recursion
+   *  (walk-core) both fire at most once per (source, target). Survives the non-deep
+   *  cursor resets (cross-pass memory, like emptyPasses); a PATCH-widen reset wipes it
+   *  on purpose — an explicit widen buys exactly one fresh deep attempt. A FAILED /
+   *  paused deep pass never sets it, so retry-by-re-request keeps working. */
+  servedDeepTargetIso: string | null;
 }
 
 const EMPTY: RedditBackfillState = {
@@ -98,6 +110,7 @@ const EMPTY: RedditBackfillState = {
   deepTargetIso: null,
   emptyPasses: 0,
   notFoundPasses: 0,
+  servedDeepTargetIso: null,
 };
 
 /** Read the Reddit backfill sub-state from a channel-state row's metadata, with
@@ -115,6 +128,7 @@ export function readRedditBackfillState(
     deepTargetIso: typeof r?.deepTargetIso === "string" ? r.deepTargetIso : null,
     emptyPasses: typeof r?.emptyPasses === "number" ? r.emptyPasses : 0,
     notFoundPasses: typeof r?.notFoundPasses === "number" ? r.notFoundPasses : 0,
+    servedDeepTargetIso: typeof r?.servedDeepTargetIso === "string" ? r.servedDeepTargetIso : null,
   };
 }
 

@@ -48,7 +48,17 @@ import {
   redditSubreddits,
 } from "$lib/server/db/schema/index.js";
 
-export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
+// `inconclusive` = a PAID bounded lookup (Refresh-Now resolves the post from the
+// subreddit's page 1 — ScrapeCreators has no lookup-by-id) that did not find the post.
+// NOT deletion evidence: it stamps polling state so the attempt is visible and the
+// button settles, but never inserts a metrics row and never starts the deletion clock.
+export type SnapshotStatus =
+  | "ok"
+  | "not_found"
+  | "private"
+  | "auth_error"
+  | "rate_limited"
+  | "inconclusive";
 
 export interface WriteSnapshotArgs {
   /** reddit_posts.post_id — the t3_<base36> fullname. Keys the UPSERT + the snapshot
@@ -183,6 +193,25 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
           updatedAt: now,
         },
       });
+
+    // ★ Author-tombstone derived-copy scrub (review P1): the paste path stores the
+    //   preview's username on events.author_handle (events-mutation), and the purge
+    //   cron never reaches a tombstoned-but-ALIVE post (its scrub is gated on
+    //   deletion_detected_at, which this path deliberately never sets — the post is
+    //   still public). Without this, the diary row keeps the deleted account's
+    //   username forever. CROSS-TENANT by design (compliance write, mirrors the
+    //   cron's events scrub), scoped to this exact post id + kind. No grace window:
+    //   Reddit account deletion is irreversible — upstream already anonymized.
+    if (authorDeleted) {
+      await tx.execute(sql`
+        UPDATE events
+        SET author_handle = NULL,
+            updated_at = NOW()
+        WHERE kind::text = 'reddit_post'
+          AND external_id = ${args.postId}
+          AND author_handle IS NOT NULL
+      `);
+    }
 
     // 2. Snapshot row — only on success. ON CONFLICT DO NOTHING makes
     //    within-the-same-minute retries idempotent. like_count=score,

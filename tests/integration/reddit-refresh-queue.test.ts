@@ -79,6 +79,7 @@ vi.mock("../../src/lib/sources/reddit/server/quota.js", async (importOriginal) =
 const { db } = await import("../../src/lib/server/db/client.js");
 const { redditPosts, redditPostSnapshots, adapterRefreshQueue } =
   await import("../../src/lib/server/db/schema/index.js");
+const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { createEvent } = await import("../../src/lib/server/services/events-mutation.js");
 const { redditAdapter } = await import("../../src/lib/sources/reddit/server/index.js");
 const { redditRefreshQueueTick, __resetRedditRefreshQueueWorkerForTest } =
@@ -216,6 +217,9 @@ describe("reddit per-post refresh lane", () => {
       deletionDetectedAt: null,
     });
     const evId = await seedEvent(u.id, s, url);
+    // The paste path stores the preview's username on the diary row itself
+    // (events.author_handle) — the derived copy the tombstone scrub must clear.
+    await db.update(events).set({ authorHandle: "former_author" }).where(eq(events.id, evId));
     single.next = singlePost({
       id: `t3_${s}`,
       shortcode: s,
@@ -233,6 +237,14 @@ describe("reddit per-post refresh lane", () => {
     expect(post!.authorFullname).toBeNull();
     expect(post!.deletionDetectedAt).toBeNull();
     expect(post!.lastPollStatus).toBe("ok");
+    const [ev] = await db
+      .select({ authorHandle: events.authorHandle })
+      .from(events)
+      .where(eq(events.id, evId));
+    expect(
+      ev!.authorHandle,
+      "the diary row's derived author copy is scrubbed with the tombstone",
+    ).toBeNull();
     const [snapshot] = await db
       .select()
       .from(redditPostSnapshots)
@@ -260,11 +272,12 @@ describe("reddit per-post refresh lane", () => {
     expect(await snapshotCount(s)).toBe(0);
   });
 
-  it("[review] a bounded page-1 miss is inconclusive and does not write terminal not_found", async () => {
+  it("[review-P1] a bounded page-1 miss writes an EXPLICIT inconclusive status — never terminal not_found, never a silent no-op", async () => {
     const u = await seedUserDirectly({ email: `rdtrq-notfound-${uniq()}@t.io` });
     const s = uniq().slice(0, 6);
     const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
     const flaggedAt = new Date(Date.now() - 3_600_000); // flagged 1h ago, within 48h grace
+    const seededPolledAt = new Date("2026-06-02T00:00:00Z"); // seedCachedPost default
     await seedCachedPost(s, url, { deletionDetectedAt: flaggedAt });
     const evId = await seedEvent(u.id, s, url);
     single.next = null; // bounded subreddit page did not contain this older post
@@ -272,15 +285,30 @@ describe("reddit per-post refresh lane", () => {
 
     await redditRefreshQueueTick();
 
-    expect(single.calls).toHaveLength(1); // the fetch happened
+    expect(single.calls).toHaveLength(1); // the fetch happened (credit + quota spent)
     const post = await readPost(s);
-    expect(post!.lastPollStatus, "a bounded feed miss is not deletion evidence").toBe("ok");
-    expect(post!.pollFailureCount).toBe(0);
-    // The 48h GDPR grace clock is also preserved.
+    // The spent attempt is VISIBLE (review fix): the pre-fix silent return left no
+    // trace at all — quota, provider credit, and cooldown consumed with nothing to
+    // show, and the button only settled by accident of the cooldown.
+    expect(post!.lastPollStatus, "a bounded feed miss is explicit, not terminal").toBe(
+      "inconclusive",
+    );
+    expect(
+      post!.lastPolledAt!.getTime(),
+      "last_polled_at stamps so the Refresh-Now button settles",
+    ).toBeGreaterThan(seededPolledAt.getTime());
+    // The 48h GDPR grace clock is preserved (a miss is not deletion evidence).
     expect(post!.deletionDetectedAt).not.toBeNull();
     expect(post!.deletionDetectedAt!.getTime()).toBe(flaggedAt.getTime());
-    // No snapshot row on a non-ok poll.
+    // No snapshot row on a non-ok poll — the previous metrics stay intact.
     expect(await snapshotCount(s)).toBe(0);
+    // The queue row still completes (no infinite retry of a lookup that cannot succeed).
+    const [row] = await db
+      .select({ status: adapterRefreshQueue.status })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id))
+      .limit(1);
+    expect(row!.status).toBe("done");
   });
 
   it("[review-P2] an ok per-post refresh does NOT clear deletion_detected_at (no cross-mechanism clobber)", async () => {

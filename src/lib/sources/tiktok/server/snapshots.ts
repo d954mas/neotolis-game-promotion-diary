@@ -30,7 +30,15 @@ import { db } from "$lib/server/db/client.js";
 import { tiktokAccounts, tiktokPosts, tiktokPostSnapshots } from "$lib/server/db/schema/index.js";
 import { fetchCoverBytes, coverCacheKey } from "./thumbnail-proxy.js";
 
-export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
+// `inconclusive` exists for the shared refresh lane's bounded-lookup platforms
+// (Reddit); this tree never writes it but accepts the shared lane status union.
+export type SnapshotStatus =
+  | "ok"
+  | "not_found"
+  | "private"
+  | "auth_error"
+  | "rate_limited"
+  | "inconclusive";
 
 export interface WriteSnapshotArgs {
   /** tiktok_posts.aweme_id — keys the UPSERT + the snapshot INSERT. */

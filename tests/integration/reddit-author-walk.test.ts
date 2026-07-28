@@ -259,6 +259,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       deepTargetIso: new Date(0).toISOString(),
       emptyPasses: 0,
       notFoundPasses: 0,
+      servedDeepTargetIso: null,
     });
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -442,6 +443,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       deepTargetIso: "1970-01-01T00:00:00Z",
       emptyPasses: 0,
       notFoundPasses: 0,
+      servedDeepTargetIso: null,
     });
     await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 30 * DAY));
     await markChannelLastPolledAt("reddit_account", handle);
@@ -599,6 +601,7 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       deepTargetIso: null,
       emptyPasses: 0,
       notFoundPasses: 0,
+      servedDeepTargetIso: null,
     });
     await markChannelBackfillFrontier("reddit_account", handle, new Date(Date.now() - 7 * DAY));
     const { markChannelBackfillComplete } =
@@ -761,6 +764,200 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
       (await getUserQuotaUsedToday(subscriber!.userId, "reddit_account")).requests,
       "a cron pass must not consume the subscriber's personal daily quota",
     ).toBe(0);
+  });
+
+  it("[review-P1] a COMPLETED deep pass records its target as served — the settle memory for unreachable targets", async () => {
+    const handle = `served_${Math.random().toString(36).slice(2, 7)}`;
+    await seedAccountSource(handle);
+    const target = new Date(Date.now() - 30 * DAY);
+    // The whole feed is ONE post at 12d — the walk exhausts ABOVE the 30d target, so
+    // the frontier (12d) stays shallower than the target forever. Without the served
+    // memory every later pull relabels initial and re-pays this exact walk.
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: "t3_young01",
+            id: "young01",
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "gamedev",
+            title: "Only post",
+            selftext: "body",
+            score: 1,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - 12 * DAY) / 1000),
+            permalink: "/r/gamedev/comments/young01/x/",
+          },
+        ],
+        after: null,
+      }),
+    ];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: target.toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const state = await getRedditBackfillState("reddit_account", handle);
+    expect(state.complete).toBe(true);
+    expect(
+      state.servedDeepTargetIso,
+      "the completed deep pass records the target it walked FOR",
+    ).toBe(target.toISOString());
+  });
+
+  it("[review-P2] an EMPTY successful rehab pass keeps needs_reconnect; a sighting clears it", async () => {
+    const handle = `rehab_${Math.random().toString(36).slice(2, 7)}`;
+    const sourceId = await seedAccountSource(handle);
+    await markChannelLastPolledAt("reddit_account", handle);
+    // Flagged earlier (empty first page on a new source / three 404s) — the weekly
+    // rehab lane re-enqueues one walk to probe recovery.
+    await db.update(dataSources).set({ needsReconnect: true }).where(eq(dataSources.id, sourceId));
+
+    const readFlag = async () => {
+      const [src] = await db
+        .select({ needsReconnect: dataSources.needsReconnect })
+        .from(dataSources)
+        .where(eq(dataSources.id, sourceId));
+      return src!.needsReconnect;
+    };
+    const walk = () =>
+      handleBackfillAccount({
+        data: {
+          kind: "reddit_account",
+          channelKey: handle,
+          depthBoundIso: new Date(Date.now() - 14 * DAY).toISOString(),
+          flow: "auto_passive",
+        },
+      });
+
+    // The author search answers a typo'd/private/empty subject with an empty 200 —
+    // an empty pass proves nothing and must NOT return the source to daily paid
+    // polling (nothing could ever re-flag it: the search path never 404s).
+    provider.pages = [emptyPage()];
+    await walk();
+    expect(await readFlag(), "an empty rehab pass is not recovery evidence").toBe(true);
+
+    // A page WITH posts is direct evidence the subject exists — the flag clears.
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: "t3_rehab01",
+            id: "rehab01",
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "gamedev",
+            title: "Back alive",
+            selftext: "body",
+            score: 1,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - 2 * DAY) / 1000),
+            permalink: "/r/gamedev/comments/rehab01/x/",
+          },
+        ],
+        after: null,
+      }),
+    ];
+    await walk();
+    expect(await readFlag(), "a sighted post clears the flag").toBe(false);
+  });
+
+  it("[review-P2] a parse-lossy pass leaves an ARCHIVE intent pending; a lossless pass coalesces it", async () => {
+    const { outbox } = await import("../../src/lib/server/db/schema/outbox.js");
+    const { QUEUES } = await import("../../src/lib/server/queues.js");
+    const { redditWalkSingletonKey } =
+      await import("../../src/lib/sources/reddit/server/backfill-state.js");
+
+    const mkPage = (id: string, handle: string, dropped: number) => ({
+      ...normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: `t3_${id}`,
+            id,
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "gamedev",
+            title: `Devlog ${id}`,
+            selftext: "body",
+            score: 1,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - 2 * DAY) / 1000),
+            permalink: `/r/gamedev/comments/${id}/x/`,
+          },
+        ],
+        after: null,
+      }),
+      // Simulate mapPostsResilient minority-drops: malformed provider rows silently
+      // excluded from posts[] — one of them may BE the archive the intent wants.
+      droppedCount: dropped,
+    });
+    const seedIntent = async (handle: string) => {
+      const [row] = await db
+        .insert(outbox)
+        .values({
+          queue: QUEUES.REDDIT_BACKFILL_ACCOUNT,
+          payload: {
+            kind: "reddit_account",
+            channelKey: handle,
+            flow: "initial",
+            depthBoundIso: new Date(Date.now() - 7 * DAY).toISOString(),
+          },
+          options: {
+            singletonKey: redditWalkSingletonKey("reddit_account", handle),
+            retrySingletonConflict: true,
+          },
+        })
+        .returning({ id: outbox.id });
+      return row!.id;
+    };
+    const readForwarded = async (id: string) => {
+      const [row] = await db
+        .select({ forwardedAt: outbox.forwardedAt })
+        .from(outbox)
+        .where(eq(outbox.id, id));
+      return row!.forwardedAt;
+    };
+    const walk = (handle: string) =>
+      handleBackfillAccount({
+        data: {
+          kind: "reddit_account",
+          channelKey: handle,
+          depthBoundIso: new Date(Date.now() - 14 * DAY).toISOString(),
+          flow: "initial",
+        },
+      });
+
+    // LOSSY: the pass completed, but a dropped row may be exactly what the archive
+    // intent asked for — it must stay pending for a real (lossless) walk.
+    const lossyHandle = `lossy_${Math.random().toString(36).slice(2, 7)}`;
+    await seedAccountSource(lossyHandle);
+    const lossyIntent = await seedIntent(lossyHandle);
+    provider.pages = [mkPage(`l${Math.random().toString(36).slice(2, 7)}`, lossyHandle, 1)];
+    await walk(lossyHandle);
+    expect(
+      await readForwarded(lossyIntent),
+      "a parse-lossy pass must not settle an archive intent",
+    ).toBeNull();
+
+    // LOSSLESS: the same-shaped pass with zero drops settles the intent for free.
+    const cleanHandle = `clean_${Math.random().toString(36).slice(2, 7)}`;
+    await seedAccountSource(cleanHandle);
+    const cleanIntent = await seedIntent(cleanHandle);
+    provider.pages = [mkPage(`c${Math.random().toString(36).slice(2, 7)}`, cleanHandle, 0)];
+    await walk(cleanHandle);
+    expect(
+      await readForwarded(cleanIntent),
+      "a lossless complete pass coalesces the covered intent",
+    ).not.toBeNull();
   });
 
   it("[CR-01] real pg-boss defers a same-channel outbox intent and delivers it once after release", async () => {

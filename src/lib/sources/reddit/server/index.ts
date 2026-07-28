@@ -69,6 +69,7 @@ import { getSocialProvider } from "./provider/registry.js";
 import type { RedditSocialProvider } from "./provider/scrapecreators-reddit.js";
 import { writeSnapshot } from "./snapshots.js";
 import {
+  readRedditBackfillState,
   resetRedditBackfillState,
   redditWalkSingletonKey,
   type RedditSourceKind,
@@ -213,6 +214,19 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
  * source.kind: reddit_subreddit → the native subreddit walker; else → the
  * author-search walker. The trigger user pays the per-user cap (origin==="user");
  * subscribers free-ride on the channel-wide fan-out.
+ *
+ * The depth bound is the SOURCE'S OWN backfillTargetSince (the route threads it into
+ * metadata) — never the epoch sentinel. On a never-walked channel the walk-core deep
+ * branch walks to the bound, so an epoch bound would pay for the whole archive and
+ * then throw the surplus away at the fan-out's per-subscriber target filter (review
+ * fix: an autoImport=false source's first manual pull over-fetched paid pages).
+ *
+ * Flow is `initial` — not `incremental` — when this pull is effectively the source's
+ * first walk request: the channel was never polled (autoImport=false skipped
+ * onSourceCreated), or the channel is already backfill-complete but this source wants
+ * strictly deeper history than the walked frontier. walk-core re-opens a complete
+ * channel's deep branch ONLY for an `initial` flow with a deeper target, so an
+ * `incremental` label there silently drops the subscriber's history request.
  */
 async function backfillSource(
   source: PollableSource,
@@ -221,17 +235,48 @@ async function backfillSource(
   // PollableSource carries no `kind`, so discriminate on the metadata canonicalize
   // persisted: a subreddit source has metadata.slug, an account source has
   // metadata.handle.
-  const md = (source.metadata ?? {}) as { handle?: string; slug?: string };
+  const md = (source.metadata ?? {}) as {
+    handle?: string;
+    slug?: string;
+    backfillTargetSince?: string;
+  };
   const isSubreddit = typeof md.slug === "string" && md.slug !== "";
   const kind = isSubreddit ? "reddit_subreddit" : "reddit_account";
   const channelKey = md.handle ?? md.slug ?? source.id;
   const queue = isSubreddit ? QUEUES.REDDIT_BACKFILL_SUBREDDIT : QUEUES.REDDIT_BACKFILL_ACCOUNT;
+
+  const parsedTarget =
+    typeof md.backfillTargetSince === "string" ? new Date(md.backfillTargetSince) : null;
+  const targetSince =
+    parsedTarget !== null && !Number.isNaN(parsedTarget.getTime()) ? parsedTarget : null;
+
+  let flow: "initial" | "incremental" | "auto_passive" =
+    ctx.origin === "user" ? "incremental" : "auto_passive";
+  if (ctx.origin === "user") {
+    const channelState = await getChannelState(kind, channelKey, ctx.tx);
+    const neverWalked = channelState === undefined || channelState.lastPolledAt === null;
+    // The `target < frontier` half alone never settles when the frontier CANNOT reach
+    // the target (feed bottom above it, or the maxPosts cap): every routine pull would
+    // relabel as `initial` and re-pay a deep re-walk that imports nothing. The
+    // servedDeepTargetIso memory (walk-core records it on every completed deep pass)
+    // settles such targets: only a target strictly deeper than every already-served
+    // one earns the `initial` relabel — at most once per (source, target).
+    const servedDeep = readRedditBackfillState(channelState).servedDeepTargetIso;
+    const wantsDeeperThanCompleteWalk =
+      channelState?.backfillComplete === true &&
+      channelState.backfillOldestAt !== null &&
+      targetSince !== null &&
+      targetSince.getTime() < channelState.backfillOldestAt.getTime() &&
+      (servedDeep === null || targetSince.getTime() < new Date(servedDeep).getTime());
+    if (neverWalked || wantsDeeperThanCompleteWalk) flow = "initial";
+  }
+
   const payload = {
     kind,
     channelKey,
     triggerUserId: ctx.origin === "user" ? source.userId : undefined,
-    depthBoundIso: EPOCH_ISO,
-    flow: ctx.origin === "user" ? "incremental" : "auto_passive",
+    depthBoundIso: targetSince?.toISOString() ?? EPOCH_ISO,
+    flow,
   };
   const jobId = await db.transaction((tx) =>
     enqueueViaOutbox(tx, queue, payload, {
@@ -399,7 +444,10 @@ async function resetWalkerStateOnWidening(
   if (ctx.previousTarget !== null && ctx.newTarget.getTime() >= ctx.previousTarget.getTime()) {
     return;
   }
-  const state = await getChannelState(kind, channelKey);
+  // BOTH reads ride ctx.tx: this hook runs inside updateSource's transaction, and a
+  // module-level `db` read here checks out a SECOND pool connection per request while
+  // the first is held — concurrent widens could occupy the whole pool and deadlock.
+  const state = await getChannelState(kind, channelKey, ctx.tx);
   if (!state) return;
   if (state.backfillComplete !== true) return;
   if (state.backfillOldestAt === null) return;
@@ -411,7 +459,7 @@ async function resetWalkerStateOnWidening(
   // per-kind keyspace; using "reddit" would read 0 forever, Phase 10 two-keyspace lesson).
   const cap = redditAccountAdapterCore.observability.userQuotaCap;
   if (cap?.requestsPerDay !== undefined) {
-    const used = await getUserQuotaUsedToday(ctx.triggerUserId, kind);
+    const used = await getUserQuotaUsedToday(ctx.triggerUserId, kind, ctx.tx);
     const resetAt = nextPacificMidnight();
     const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
     if (used.requests >= cap.requestsPerDay) {

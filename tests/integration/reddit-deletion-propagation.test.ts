@@ -255,6 +255,7 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       deepTargetIso: null,
       emptyPasses: 0,
       notFoundPasses: 0,
+      servedDeepTargetIso: null,
     });
 
     // Tick 2 resumes deep + returns only an OLDER page (C@10d), reaching end-of-feed.
@@ -316,6 +317,9 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
         deletionDetectedBy: `reddit_subreddit:gamedev`,
       },
     ]);
+    // Both events carry author_handle the way the SOURCE-LESS paste path persists it
+    // (the preview's username lands on the event row) — the purge must erase it for
+    // EVERY purged post, community posts included (review fix: it was left behind).
     const [profileEvent] = await db
       .insert(events)
       .values({
@@ -325,6 +329,7 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
         title: "Profile devlog",
         url: profileUrl,
         externalId: `t3_${profileId}`,
+        authorHandle: author,
         metadata: { subreddit: `u_${author.toLowerCase()}` },
       })
       .returning({ id: events.id });
@@ -337,6 +342,7 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
         title: "Community devlog",
         url: communityUrl,
         externalId: `t3_${communityId}`,
+        authorHandle: author,
         metadata: { subreddit: "gamedev" },
       })
       .returning({ id: events.id });
@@ -356,18 +362,25 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     expect(profilePost!.caption).toBe("the body excerpt");
 
     const [scrubbedEvent] = await db
-      .select({ url: events.url, metadata: events.metadata, title: events.title })
+      .select({
+        url: events.url,
+        metadata: events.metadata,
+        title: events.title,
+        authorHandle: events.authorHandle,
+      })
       .from(events)
       .where(eq(events.id, profileEvent!.id));
     expect(scrubbedEvent!.url).toBe(`https://www.reddit.com/comments/${profileId}`);
     expect((scrubbedEvent!.metadata as { subreddit?: unknown }).subreddit).toBeNull();
+    expect(scrubbedEvent!.authorHandle, "the pasted-preview username is scrubbed").toBeNull();
     expect(scrubbedEvent!.title, "the user's own diary title is untouched").toBe("Profile devlog");
     expect(
       redditParsePostUrl(scrubbedEvent!.url!),
       "the anonymized url still parses as a reddit_post (PATCH stays possible)",
     ).not.toBeNull();
 
-    // Nothing in a COMMUNITY post's url/slug identifies the author, so those stay as-is.
+    // Nothing in a COMMUNITY post's url/slug identifies the author, so those stay as-is
+    // — but the event's author_handle DOES, so it is scrubbed for every purged post.
     const communityPost = await readPost(communityId);
     expect(communityPost!.author, "author still nulled").toBeNull();
     expect(communityPost!.permalink, "an /r/ permalink carries no author → untouched").toBe(
@@ -375,11 +388,12 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
     );
     expect(communityPost!.subredditSlug).toBe("gamedev");
     const [keptEvent] = await db
-      .select({ url: events.url, metadata: events.metadata })
+      .select({ url: events.url, metadata: events.metadata, authorHandle: events.authorHandle })
       .from(events)
       .where(eq(events.id, communityEvent!.id));
     expect(keptEvent!.url).toBe(communityUrl);
     expect((keptEvent!.metadata as { subreddit?: unknown }).subreddit).toBe("gamedev");
+    expect(keptEvent!.authorHandle, "author_handle scrubbed on the community event too").toBeNull();
 
     // Idempotent: a second tick finds no residue left to scrub.
     expect((await handleDeletionPropagationCron()).purged).toBe(0);
@@ -503,6 +517,74 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       expect(row!.author, "an orphaned third-party username must not be kept forever").toBeNull();
       expect(row!.authorFullname, "the stable t2_ id goes with it").toBeNull();
       expect(row!.title, "content is anonymized, not deleted").toBe(`Devlog ${shortId}`);
+    });
+
+    it("[review-P2] scrubs an orphan PROFILE post's permalink + u_<name> slug, not just the author columns", async () => {
+      // A profile post keeps the username inside /user/<name>/comments/… and its
+      // u_<name> pseudo-subreddit slug — nulling author/author_fullname alone leaves
+      // the identity mechanically recoverable (the same gap the main purge closed).
+      const stranger = `Stranger${uniq()}`;
+      const shortId = `oprof${uniq()}`;
+      await db.insert(redditPosts).values({
+        postId: `t3_${shortId}`,
+        subredditSlug: `u_${stranger.toLowerCase()}`,
+        permalink: `https://www.reddit.com/user/${stranger}/comments/${shortId}/my_devlog/`,
+        author: stranger,
+        authorFullname: `t2_${stranger}`,
+        title: "Orphan profile devlog",
+        publishedAt: new Date(Date.now() - 400 * DAY),
+        lastPollStatus: "ok",
+      });
+      await db
+        .update(redditPosts)
+        .set({ updatedAt: new Date(Date.now() - 200 * DAY) })
+        .where(eq(redditPosts.postId, `t3_${shortId}`));
+
+      await handleDeletionPropagationCron();
+
+      const row = await readPost(shortId);
+      expect(row!.author).toBeNull();
+      expect(row!.authorFullname).toBeNull();
+      expect(row!.permalink, "the /user/<name>/ segment is gone").toBe(
+        `https://www.reddit.com/comments/${shortId}`,
+      );
+      expect(row!.subredditSlug, "the u_<name> pseudo-slug is gone").toBeNull();
+      expect(row!.title, "content is anonymized, not deleted").toBe("Orphan profile devlog");
+      expect(JSON.stringify(row).toLowerCase()).not.toContain(stranger.toLowerCase());
+    });
+
+    it("[review-P2] scrubs RESIDUE left by pre-fix runs: author columns already NULL, but the /user/<name>/ permalink + u_<name> slug survive", async () => {
+      // A pre-fix GC tick nulled author/author_fullname but left the profile
+      // permalink + pseudo-slug intact — so the row no longer matches an
+      // author-columns-only WHERE, yet the username is still mechanically
+      // recoverable. The widened predicate (permalink ~* '/user/…' OR
+      // left(slug,2)='u_') must re-select exactly this state and finish the scrub.
+      const stranger = `Stranger${uniq()}`;
+      const shortId = `ores${uniq()}`;
+      await db.insert(redditPosts).values({
+        postId: `t3_${shortId}`,
+        subredditSlug: `u_${stranger.toLowerCase()}`,
+        permalink: `https://www.reddit.com/user/${stranger}/comments/${shortId}/my_devlog/`,
+        author: null,
+        authorFullname: null,
+        title: "Residue profile devlog",
+        publishedAt: new Date(Date.now() - 400 * DAY),
+        lastPollStatus: "ok",
+      });
+      await db
+        .update(redditPosts)
+        .set({ updatedAt: new Date(Date.now() - 200 * DAY) })
+        .where(eq(redditPosts.postId, `t3_${shortId}`));
+
+      await handleDeletionPropagationCron();
+
+      const row = await readPost(shortId);
+      expect(row!.permalink, "the /user/<name>/ segment is gone despite NULL author columns").toBe(
+        `https://www.reddit.com/comments/${shortId}`,
+      );
+      expect(row!.subredditSlug, "the u_<name> pseudo-slug is gone").toBeNull();
+      expect(row!.title, "content is anonymized, not deleted").toBe("Residue profile devlog");
+      expect(JSON.stringify(row).toLowerCase()).not.toContain(stranger.toLowerCase());
     });
 
     it("keeps the author while a diary event still references the post", async () => {

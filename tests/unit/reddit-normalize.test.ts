@@ -10,7 +10,7 @@
 //
 // Pure unit test — no DB, no live HTTP.
 import { describe, it, expect } from "vitest";
-import { normalizeRedditFeed } from "$lib/sources/reddit/server/normalize.js";
+import { normalizeRedditFeed, normalizeRedditPost } from "$lib/sources/reddit/server/normalize.js";
 import { AdapterError } from "$lib/sources/errors.js";
 
 function post(id: string, name = `t3_${id}`) {
@@ -84,5 +84,57 @@ describe("normalizeRedditFeed envelope belts (review fixes)", () => {
 
     expect(page.posts.map((item) => item.id)).toEqual(["t3_aaa", "t3_ccc", "t3_ddd", "t3_eee"]);
     expect(page.droppedCount).toBe(3);
+  });
+});
+
+// Provider-owned URLs land in href (permalink) and img src (thumbnail), so the
+// boundary must reject arbitrary hosts (review-P2): HTTPS + reddit.com family for
+// permalinks, HTTPS + the redd.it / redditmedia.com CDN families for thumbnails.
+describe("provider URL boundary validation (review-P2)", () => {
+  it("permalink: a path is prefixed; an https reddit.com absolute survives; foreign/insecure hosts → null", () => {
+    expect(normalizeRedditPost(post("aaa")).permalink).toBe(
+      "https://www.reddit.com/r/gamedev/comments/aaa/x/",
+    );
+    expect(
+      normalizeRedditPost({
+        ...post("bbb"),
+        permalink: "https://old.reddit.com/r/gamedev/comments/bbb/x/",
+      }).permalink,
+    ).toBe("https://old.reddit.com/r/gamedev/comments/bbb/x/");
+    for (const bad of [
+      "https://evil.example.com/r/gamedev/comments/ccc/x/",
+      "http://www.reddit.com/r/gamedev/comments/ccc/x/", // not HTTPS
+      "https://notreddit.com/r/gamedev/comments/ccc/x/",
+      "https://evilreddit.com/x/", // suffix-spoof: not reddit.com nor *.reddit.com
+    ]) {
+      expect(normalizeRedditPost({ ...post("ccc"), permalink: bad }).permalink, bad).toBeNull();
+    }
+  });
+
+  it("thumbnail: derived i.redd.it image url survives; an external image host is dropped (no third-party hotlink)", () => {
+    const image = (url: string) => ({
+      ...post("ddd"),
+      selftext: "",
+      post_hint: "image",
+      url,
+    });
+    expect(normalizeRedditPost(image("https://i.redd.it/abc.jpg")).thumbnailUrl).toBe(
+      "https://i.redd.it/abc.jpg",
+    );
+    expect(normalizeRedditPost(image("https://i.imgur.com/abc.jpg")).thumbnailUrl).toBeNull();
+    expect(normalizeRedditPost(image("http://i.redd.it/abc.jpg")).thumbnailUrl).toBeNull();
+  });
+
+  it("thumbnail: the forward-compat `thumbnail` field is honored only on the Reddit CDN over HTTPS", () => {
+    const withThumb = (thumbnail: string) => ({ ...post("eee"), thumbnail });
+    expect(
+      normalizeRedditPost(withThumb("https://b.thumbs.redditmedia.com/x.jpg")).thumbnailUrl,
+    ).toBe("https://b.thumbs.redditmedia.com/x.jpg");
+    expect(normalizeRedditPost(withThumb("https://preview.redd.it/x.png")).thumbnailUrl).toBe(
+      "https://preview.redd.it/x.png",
+    );
+    expect(
+      normalizeRedditPost(withThumb("https://tracking.example.com/x.png")).thumbnailUrl,
+    ).toBeNull();
   });
 });

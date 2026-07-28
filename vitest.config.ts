@@ -89,6 +89,14 @@ export default defineConfig({
             // without asking anyone to gut their dev config.
             TWITTER_PROVIDER: "",
             TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: "5000",
+            // Reddit-off baseline (same reasoning as the Twitter pins): the
+            // not-configured / isolation / degrade suites assert the D-08 kill-switch
+            // DEFAULT, which a developer's Reddit-enabled .env silently overrides.
+            // The kill-switch is an independent AND-term, so pinning it alone keeps
+            // isRedditConfigured() false regardless of the shared ScrapeCreators key.
+            // Reddit-ON suites re-enable via `process.env.REDDIT_IMPORT_ENABLED =
+            // "true"` at file top (before env.ts loads), which wins over this pin.
+            REDDIT_IMPORT_ENABLED: "false",
           },
           setupFiles: ["./tests/setup.ts"],
           testTimeout: 30_000,

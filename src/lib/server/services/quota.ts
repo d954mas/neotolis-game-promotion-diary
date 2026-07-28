@@ -380,7 +380,7 @@ export async function enforceAdapterUserQuota(
   if (cap.requestsPerDay === undefined && cap.eventsPerDay === undefined) return;
 
   const platform = opts.platform ?? adapter.kind;
-  const used = await getUserQuotaUsedToday(userId, platform);
+  const used = await getUserQuotaUsedToday(userId, platform, dbCtx);
   const resetAt = nextPacificMidnight();
   const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
 

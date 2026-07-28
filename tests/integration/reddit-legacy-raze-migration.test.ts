@@ -115,6 +115,19 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
         metadata: { username: legacyHandle },
       })
       .returning({ id: dataSources.id });
+    // A LEGACY-shaped subreddit source (old metadata key `subreddit`, no channel_id) —
+    // the raze targets BOTH reddit kinds; account fixtures alone would stay green if the
+    // shape discriminator only handled `handle`.
+    const legacySlug = `legacysub_${uniq()}`;
+    const [redditSubSrc] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_subreddit",
+        handleUrl: `https://www.reddit.com/r/${legacySlug}`,
+        metadata: { subreddit: legacySlug },
+      })
+      .returning({ id: dataSources.id });
     // A non-reddit source that MUST survive.
     const [ytSrc] = await db
       .insert(dataSources)
@@ -154,6 +167,20 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
         externalId: legacyFullId,
       })
       .returning({ id: events.id });
+    // A t3_-keyed event on the legacy SUBREDDIT source. Its deletion rides ENTIRELY on
+    // the metadata-shape discriminator recognizing {subreddit:…} as legacy — a typo like
+    // `? 'slug'` → `? 'subreddit'` there would keep this row (and its source) alive.
+    const [legacySubEv] = await db
+      .insert(events)
+      .values({
+        userId: u.id,
+        sourceId: redditSubSrc!.id,
+        kind: "reddit_post",
+        occurredAt: new Date("2026-01-01T00:00:00Z"),
+        title: "legacy subreddit import",
+        externalId: `t3_${uniq()}`,
+      })
+      .returning({ id: events.id });
     const [game] = await db
       .insert(games)
       .values({ userId: u.id, title: `raze-game-${uniq()}` })
@@ -191,6 +218,10 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
       .insert(dataSourceChannelState)
       .values({ kind: "reddit_account", channelKey: legacyHandle })
       .onConflictDoNothing();
+    await db
+      .insert(dataSourceChannelState)
+      .values({ kind: "reddit_subreddit", channelKey: legacySlug })
+      .onConflictDoNothing();
 
     await runMigration();
 
@@ -206,6 +237,16 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
       .from(events)
       .where(eq(events.id, legacyFullnameEv!.id));
     expect(goneFullnameEv, "legacy t3_-keyed event deleted (not merely detached)").toBeUndefined();
+    const [goneSubSrc] = await db
+      .select({ id: dataSources.id })
+      .from(dataSources)
+      .where(eq(dataSources.id, redditSubSrc!.id));
+    expect(goneSubSrc, "legacy reddit_subreddit source deleted").toBeUndefined();
+    const [goneSubEv] = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(eq(events.id, legacySubEv!.id));
+    expect(goneSubEv, "legacy subreddit t3_-keyed event deleted").toBeUndefined();
     const [goneManual] = await db
       .select({ id: events.id })
       .from(events)
@@ -234,6 +275,11 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
       .from(dataSourceChannelState)
       .where(eq(dataSourceChannelState.channelKey, legacyHandle));
     expect(goneState, "legacy channel-state deleted").toBeUndefined();
+    const [goneSubState] = await db
+      .select({ channelKey: dataSourceChannelState.channelKey })
+      .from(dataSourceChannelState)
+      .where(eq(dataSourceChannelState.channelKey, legacySlug));
+    expect(goneSubState, "legacy subreddit channel-state deleted").toBeUndefined();
 
     // Forward-only migrations must be safe to re-run against an already-razed DB.
     await runMigration();
@@ -350,6 +396,33 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
       title: "pasted after the upgrade",
       externalId: pastedT3,
     });
+    // A REBUILT-shape SUBREDDIT source (metadata {slug}, channel_id set) + channel state
+    // + a t3_-keyed event. The shape discriminator must recognize `slug` as rebuilt — a
+    // typo like `? 'slug'` → `? 'subreddit'` would wipe all three on a re-run.
+    const slug = `rebuiltsub_${uniq()}`;
+    const [subSrc] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_subreddit",
+        handleUrl: `https://www.reddit.com/r/${slug}`,
+        channelId: slug,
+        metadata: { slug },
+      })
+      .returning({ id: dataSources.id });
+    await db
+      .insert(dataSourceChannelState)
+      .values({ kind: "reddit_subreddit", channelKey: slug })
+      .onConflictDoNothing();
+    const subT3 = `t3_${uniq()}`;
+    await db.insert(events).values({
+      userId: u.id,
+      sourceId: subSrc!.id,
+      kind: "reddit_post",
+      occurredAt: new Date("2026-07-01T00:00:00Z"),
+      title: "imported by the rebuilt subreddit walker",
+      externalId: subT3,
+    });
 
     await runMigration();
     await runMigration();
@@ -359,8 +432,16 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
       .from(dataSources)
       .where(eq(dataSources.id, src!.id));
     expect(survivingSources, "a rebuilt-shape source must survive a re-run").toHaveLength(1);
+    const survivingSubSources = await db
+      .select({ id: dataSources.id })
+      .from(dataSources)
+      .where(eq(dataSources.id, subSrc!.id));
+    expect(
+      survivingSubSources,
+      "a rebuilt-shape subreddit source must survive a re-run",
+    ).toHaveLength(1);
 
-    for (const id of [t3, pastedT3]) {
+    for (const id of [t3, pastedT3, subT3]) {
       const rows = await db.select({ id: events.id }).from(events).where(eq(events.externalId, id));
       expect(rows, `a rebuilt-shape event (${id}) must survive a re-run`).toHaveLength(1);
     }
@@ -375,5 +456,18 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
         ),
       );
     expect(state, "channel state with a live source must survive a re-run").toHaveLength(1);
+    const subState = await db
+      .select({ channelKey: dataSourceChannelState.channelKey })
+      .from(dataSourceChannelState)
+      .where(
+        and(
+          eq(dataSourceChannelState.kind, "reddit_subreddit"),
+          eq(dataSourceChannelState.channelKey, slug),
+        ),
+      );
+    expect(
+      subState,
+      "subreddit channel state with a live source must survive a re-run",
+    ).toHaveLength(1);
   });
 });

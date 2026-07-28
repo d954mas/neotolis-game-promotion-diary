@@ -231,9 +231,11 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     // A COMPLETE channel is exhausted for every flow EXCEPT a new subscriber's
     // `initial` walk whose target is DEEPER than the walked frontier (review fix):
     // trusting `exhausted` there silently discards the new tenant's history request.
-    // Only `initial` re-opens — a manual "Pull new content" (flow incremental,
-    // EPOCH_ISO target) must stay the cheap newest-first sweep, and the PATCH-widen
-    // path re-opens via resetWalkerStateOnWidening + forceDeep.
+    // Only `initial` re-opens — a routine manual "Pull new content" arrives as flow
+    // incremental (backfillSource labels a pull `initial` only when the channel was
+    // never walked or this source wants deeper than the frontier) and stays the
+    // cheap newest-first sweep; the PATCH-widen path re-opens via
+    // resetWalkerStateOnWidening + forceDeep.
     branch =
       flow === "initial" && deepestWalked !== null && jobTarget.getTime() < deepestWalked.getTime()
         ? "deep"
@@ -263,9 +265,11 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
       operatorPaused: state0.operatorPaused,
       deepTargetIso: null,
       // Cross-pass corroboration, NOT walk progress — a cursor reset must not
-      // forget that the previous passes came back empty.
+      // forget that the previous passes came back empty, nor which deep target was
+      // already served (the once-per-target settle memory).
       emptyPasses: state0.emptyPasses,
       notFoundPasses: state0.notFoundPasses,
+      servedDeepTargetIso: state0.servedDeepTargetIso,
     };
   } else {
     // A deep pass RE-OPENED on a COMPLETED sub-state (initial-deeper / forceDeep
@@ -280,6 +284,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         deepTargetIso: null,
         emptyPasses: state0.emptyPasses,
         notFoundPasses: state0.notFoundPasses,
+        servedDeepTargetIso: state0.servedDeepTargetIso,
       };
     }
     state.deepTargetIso = target.toISOString();
@@ -302,7 +307,13 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   let notFoundAtPage = -1;
   let walkedThisTick = false;
   let fetchedThisTick = 0;
-  let droppedThisTick = 0;
+  // TWO drop classes with different consequences: a PARSE drop (malformed provider
+  // row) means a subject post may have been silently lost from the import — an
+  // archive intent must not be settled against such a pass. An OFF-SUBJECT drop
+  // (broad-search fuzz) loses nothing the subject owns and is routine on the author
+  // path. Both make coverage lossy for the disappearance reconcile.
+  let parseDroppedThisTick = 0;
+  let offSubjectDroppedThisTick = 0;
   let crossedBound = false;
   let feedExhausted = false;
 
@@ -358,7 +369,9 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
           notFound = true;
           notFoundAtPage = pageNo;
         } else {
-          throw err; // transient / permanent → pg-boss retry / dead-letter
+          // transient / permanent → dead-letter (retryLimit 0 by design — the daily
+          // poll cron is the natural retry, see REDDIT_WALK_QUEUE_OPTIONS).
+          throw err;
         }
       } else {
         throw err;
@@ -368,13 +381,19 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
 
     requestsUsed += page.creditsUsed;
     fetchedThisTick += page.posts.length;
-    droppedThisTick += page.droppedCount;
+    parseDroppedThisTick += page.droppedCount;
+    if (page.droppedCount > 0) {
+      logger.warn(
+        { jobId: job.id, channelKey, mode: config.mode, parseDropped: page.droppedCount },
+        `${config.queue}: dropped malformed posts from provider page`,
+      );
+    }
 
     // Subject-identity belt (review fix): the author walk is a broad
     // `search?query=author:<handle>` — a page may carry posts NOT by the walked
     // subject (fuzzy match / provider drift). An off-subject post must never be
     // cached under this walk or fan out into diaries as the subject's own content.
-    // Dropped rows count as lossy coverage (droppedThisTick), which suppresses the
+    // Dropped rows count as lossy coverage (offSubjectDroppedThisTick), which suppresses the
     // disappearance reconcile this tick — a mismatch is never deletion evidence.
     // Author mode is STRICT (the search endpoint is the fuzzy one); subreddit mode
     // drops only a PRESENT-but-different slug — the native subreddit feed is scoped
@@ -388,7 +407,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     );
     const offSubject = page.posts.length - subjectPosts.length;
     if (offSubject > 0) {
-      droppedThisTick += offSubject;
+      offSubjectDroppedThisTick += offSubject;
       logger.warn(
         { jobId: job.id, channelKey, mode: config.mode, offSubject },
         `${config.queue}: dropped off-subject posts from provider page`,
@@ -500,13 +519,22 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     walkedFrontier !== null && walkedFrontier.getTime() < target.getTime()
       ? walkedFrontier
       : target;
+  // The once-per-target settle memory (servedDeepTargetIso): a target a completed
+  // deep pass already walked FOR is settled even when the frontier never reached it
+  // (feed bottom above the target, or the SOCIAL_BACKFILL_MAX_POSTS cap) — re-firing
+  // the recursion for it re-pays the same capped pages daily, forever, importing
+  // nothing. A failed/paused deep pass never records it, so recovery re-fires.
+  const servedDeepTarget =
+    state.servedDeepTargetIso === null ? null : new Date(state.servedDeepTargetIso);
   const widenedSubscriber =
     state.complete && !pausedThisTick && !feedExhausted
       ? subscribers
           .filter(
             (subscriber) =>
               subscriber.backfillTargetSince !== null &&
-              subscriber.backfillTargetSince.getTime() < coverageFrontier.getTime(),
+              subscriber.backfillTargetSince.getTime() < coverageFrontier.getTime() &&
+              (servedDeepTarget === null ||
+                subscriber.backfillTargetSince.getTime() < servedDeepTarget.getTime()),
           )
           .sort(
             (left, right) =>
@@ -632,6 +660,12 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     startedFromTop,
     walkedComplete: state.complete,
     paused: pausedThisTick || notFound,
+    // PARSE drops only: a malformed row may BE a subject post this pass silently
+    // lost, so an archive intent settled against it would drop history for good.
+    // Off-subject drops lose nothing the subject owns (routine broad-search fuzz)
+    // and must not block coalescing — that would resurrect the duplicate-paid-walk
+    // problem on every fuzzy author page.
+    lossy: parseDroppedThisTick > 0,
     branch,
   });
 
@@ -652,7 +686,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   // coverage: a dropped-but-alive post is absent from seenIds and the disappearance
   // reconcile would false-flag it deleted → purge. Suppress reconcile on a lossy pass;
   // clearReappearedDeletions above stays safe (it only touches posts we DID see).
-  const lossyPass = droppedThisTick > 0;
+  const lossyPass = parseDroppedThisTick + offSubjectDroppedThisTick > 0;
   const coveragePassComplete =
     !pausedThisTick &&
     !notFound &&
@@ -697,6 +731,15 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   }
   state.operatorPaused = pausedByBudget;
   const walkComplete = !pausedThisTick && state.complete;
+  // Record the once-per-target settle memory: a COMPLETED deep pass walked FOR
+  // `target`, so re-requesting a target at or above it can never advance the
+  // frontier (the remaining gap is the feed bottom / the maxPosts cap, not missing
+  // work). A strictly deeper NEW target still earns one fresh deep pass.
+  if (isDeep && walkComplete) {
+    if (servedDeepTarget === null || target.getTime() < servedDeepTarget.getTime()) {
+      state.servedDeepTargetIso = target.toISOString();
+    }
+  }
   await writeRedditBackfillState(config.kind, channelKey, state);
 
   if (isDeep && oldestSeenPublishedAt !== null) {
@@ -711,8 +754,14 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   if (walkComplete) await markChannelBackfillComplete(config.kind, channelKey);
   await markChannelLastPolledAt(config.kind, channelKey);
 
-  // A successful (unpaused, found) walk proves upstream healthy — clear reconnect.
-  if (!pausedThisTick && !notFound) {
+  // Clearing needs_reconnect requires EVIDENCE the subject exists — at least one
+  // fetched post (raw page-1 count, so a healthy-but-quiet source still clears: its
+  // page 1 returns old posts). An EMPTY successful pass proves nothing: the author
+  // search path answers a typo'd/private/empty subject with an empty 200 (never a
+  // 404), so an unconditional clear here would un-flag it after the weekly rehab
+  // pass and return it to daily paid polling forever — with no path that ever
+  // re-flags it (markSourceNeedsReconnect needs a 404 or a never-polled channel).
+  if (!pausedThisTick && !notFound && fetchedThisTick > 0) {
     for (const sub of subscribers) {
       await clearNeedsReconnect(sub.userId, sub.id).catch((err) =>
         logger.warn(
@@ -1051,7 +1100,7 @@ async function selectPendingIntents(
 /** Does THIS pass already deliver what the pending intent asked for? */
 function intentCoveredByPass(
   payload: Record<string, unknown>,
-  args: { coveredTarget: Date; walkedComplete: boolean },
+  args: { coveredTarget: Date; walkedComplete: boolean; lossy: boolean },
 ): boolean {
   const flow = payload.flow;
   // A newest-first sweep (daily cron / manual "Pull new content"). The caller only
@@ -1059,9 +1108,11 @@ function intentCoveredByPass(
   // coverage such an intent wants — the page cap is irrelevant to it.
   if (flow === undefined || flow === "auto_passive" || flow === "incremental") return true;
   // An archive request (initial / historical, incl. forceDeep widen). Only collapse it
-  // when this pass reached its coverage boundary AND walked at least as deep as the
-  // intent asks — otherwise the tenant's history request would be silently dropped.
-  if (!args.walkedComplete) return false;
+  // when this pass reached its coverage boundary LOSSLESSLY (a parse-lossy pass may
+  // have silently dropped the very posts the archive request wants — leave the intent
+  // pending so the forwarder replays it as a real walk) AND walked at least as deep as
+  // the intent asks — otherwise the tenant's history request would be silently dropped.
+  if (!args.walkedComplete || args.lossy) return false;
   if (typeof payload.depthBoundIso !== "string") return false;
   const depth = new Date(payload.depthBoundIso);
   if (Number.isNaN(depth.getTime())) return false;
@@ -1096,6 +1147,9 @@ async function coalescePendingIntents(args: {
   startedFromTop: boolean;
   walkedComplete: boolean;
   paused: boolean;
+  /** This pass dropped malformed provider rows (parse drops) — its coverage cannot
+   *  settle an archive intent. */
+  lossy: boolean;
   branch: string;
 }): Promise<number> {
   if (args.pendingIntents.length === 0) return 0;

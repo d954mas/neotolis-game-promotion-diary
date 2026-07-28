@@ -21,6 +21,9 @@ const { getRedditBackfillState, writeRedditBackfillState } =
   await import("../../src/lib/sources/reddit/server/backfill-state.js");
 const { markChannelBackfillComplete, markChannelBackfillFrontier, markChannelLastPolledAt } =
   await import("../../src/lib/server/services/channel-state.js");
+const { env } = await import("../../src/lib/server/config/env.js");
+const { writeAuditTx } = await import("../../src/lib/server/audit.js");
+const { getUserQuotaUsedToday } = await import("../../src/lib/server/daily-user-quota.js");
 
 const DAY = 86_400_000;
 const uniq = (): string => Math.random().toString(36).slice(2, 8);
@@ -48,6 +51,7 @@ async function seedCompleteAccount(handle: string, frontier: Date): Promise<stri
     deepTargetIso: null,
     emptyPasses: 0,
     notFoundPasses: 0,
+    servedDeepTargetIso: null,
   });
   await markChannelBackfillFrontier("reddit_account", handle, frontier);
   await markChannelBackfillComplete("reddit_account", handle);
@@ -141,5 +145,68 @@ describe("reddit resetWalkerStateOnWidening (review P1)", () => {
       .where(eq(outbox.queue, QUEUES.REDDIT_BACKFILL_ACCOUNT));
     const reopen = rows.find((r) => (r.payload as { channelKey?: string }).channelKey === handle);
     expect(reopen).toBeUndefined();
+  });
+
+  it("channel-state + quota reads ride the caller's tx (pool self-deadlock guard)", async () => {
+    // The hook runs INSIDE updateSource's db.transaction. getChannelState and
+    // getUserQuotaUsedToday both default `dbCtx` to the module-level `db`, so a
+    // revert of the hook's explicit `ctx.tx` arguments COMPILES and passes any
+    // test that only uses committed fixtures — while checking out a SECOND pool
+    // connection per held transaction, the prod pool-self-deadlock pattern under
+    // concurrent widens. Tx-visibility probe (deterministic at any pool size):
+    // write the channel state AND cap-exhausting usage UNCOMMITTED inside the tx.
+    // The hook can only see them — and therefore only throws
+    // requests_quota_exhausted — if BOTH reads ride ctx.tx. Reverted to the
+    // default-db reads, a second connection (READ COMMITTED) sees neither: the
+    // hook either early-returns on missing channel state or sails past the cap
+    // gate, the transaction resolves, and the `rejects` assertion fails.
+    const handle = `txwiden_${uniq()}`;
+    const sevenDaysAgo = new Date(Date.now() - 7 * DAY);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * DAY);
+    const u = await seedUserDirectly({ email: `rdt-widen-tx-${uniq()}@t.io` });
+    const cap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
+
+    await expect(
+      db.transaction(async (tx) => {
+        // Uncommitted fixtures — visible only through `tx`.
+        await markChannelBackfillFrontier("reddit_account", handle, sevenDaysAgo, tx);
+        await markChannelBackfillComplete("reddit_account", handle, tx);
+        await writeAuditTx(tx, {
+          userId: u.id,
+          action: "source.refresh_content_requested",
+          ipAddress: "0.0.0.0",
+          metadata: {
+            kind: "reddit_account",
+            platform: "reddit_account",
+            flow: "incremental",
+            requests_used: cap,
+            events_inserted: 0,
+          },
+        });
+        // Direct probe: the tx-threaded read sees the uncommitted usage row.
+        const used = await getUserQuotaUsedToday(u.id, "reddit_account", tx);
+        expect(used.requests).toBe(cap);
+
+        await redditAdapter.resetWalkerStateOnWidening!(
+          {
+            id: "ignored",
+            userId: u.id,
+            kind: "reddit_account",
+            channelId: handle,
+            autoImport: true,
+            isOwnedByMe: true,
+            backfillTargetSince: thirtyDaysAgo,
+            metadata: { handle },
+          } as never,
+          {
+            previousTarget: sevenDaysAgo,
+            newTarget: thirtyDaysAgo,
+            triggerUserId: u.id,
+            ipAddress: "0.0.0.0",
+            tx,
+          },
+        );
+      }),
+    ).rejects.toMatchObject({ code: "requests_quota_exhausted" });
   });
 });

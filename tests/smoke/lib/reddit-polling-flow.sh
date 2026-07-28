@@ -181,7 +181,11 @@ reddit_provider_on_smoke() {
   log "(RDT-ON.1) PASS — reddit_account create ACCEPTED provider-ON (the kill-switch flips the gate)"
 
   # ----- 4. wait for the backfill walk to import via the mock (full HTTP seam) -----
-  log "waiting up to 60s for the walk to import t3_smoke01 (event + snapshot via the mock)"
+  # BOTH mock pages must land: t3_smoke01 is page 1, t3_smoke02 is only reachable by
+  # passing the page-1 `after` cursor back (the mock's author feed paginates). Waiting
+  # only for smoke01 let a broken cursor hand-off, an early end-of-feed, or a repeated
+  # first page ship green — the pagination this gate exists to pin.
+  log "waiting up to 60s for the walk to import t3_smoke01 + t3_smoke02 (both mock pages, cursor followed)"
   local imported=false
   for _ in $(seq 1 60); do
     local found
@@ -191,9 +195,9 @@ reddit_provider_on_smoke() {
         const c = new Client({ connectionString: process.env.DATABASE_URL });
         await c.connect();
         try {
-          const e = await c.query("SELECT 1 FROM events WHERE external_id=$1 AND kind=$2 LIMIT 1", ["t3_smoke01","reddit_post"]);
-          const s = await c.query("SELECT 1 FROM reddit_post_snapshots WHERE post_id=$1 LIMIT 1", ["t3_smoke01"]);
-          console.log(e.rowCount>0 && s.rowCount>0 ? "yes":"no");
+          const e = await c.query("SELECT COUNT(DISTINCT external_id)::int AS n FROM events WHERE external_id = ANY($1) AND kind=$2", [["t3_smoke01","t3_smoke02"],"reddit_post"]);
+          const s = await c.query("SELECT COUNT(DISTINCT post_id)::int AS n FROM reddit_post_snapshots WHERE post_id = ANY($1)", [["t3_smoke01","t3_smoke02"]]);
+          console.log(e.rows[0].n === 2 && s.rows[0].n === 2 ? "yes":"no");
         } finally { await c.end(); }
       }).catch((err)=>{console.error(err);process.exit(1);});
     ' 2>/dev/null || echo "no")
@@ -203,9 +207,9 @@ reddit_provider_on_smoke() {
   if [[ "$imported" != "true" ]]; then
     docker logs smoke-worker 2>&1 | tail -80 || true
     kill -TERM "$mock_pid" 2>/dev/null || true
-    fail "(RDT-ON.2) the provider-ON walk never imported t3_smoke01 (event + snapshot) via the mock"
+    fail "(RDT-ON.2) the provider-ON walk never imported BOTH t3_smoke01 and t3_smoke02 (events + snapshots) — pagination through the mock cursor is broken"
   fi
-  log "(RDT-ON.2) PASS — walk imported the event + snapshot through the hermetic mock (real HTTP seam live)"
+  log "(RDT-ON.2) PASS — walk imported both pages' events + snapshots (cursor hand-off + end-of-feed live)"
 
   # ----- 5. the reserve-before-HTTP budget seam charged the SHARED ledger (P0) -----
   local balance
@@ -225,16 +229,19 @@ reddit_provider_on_smoke() {
   # (2>&1) and only reject the literals "missing"/"1000" — so a probe that CRASHED
   # produced a stack trace, matched neither, and read as "the ledger was debited".
   # The strongest P0 assertion in this gate was the one that could silently stop
-  # asserting. Require a real integer strictly between 0 and the seeded 1000.
+  # asserting. Require a real integer, and pin the EXACT debit: the walk fetches
+  # exactly the two mock pages, 1 credit each, so the seeded 1000 must land on 998.
+  # "any positive debit" let a page-1 retry loop (over-charging) or a missing page 2
+  # (under-fetching) both ship green.
   if ! [[ "$balance" =~ ^[0-9]+$ ]]; then
     kill -TERM "$mock_pid" 2>/dev/null || true
     fail "(RDT-ON.3) the balance probe did not return a number (got: '${balance}') — cannot verify the shared-ledger debit"
   fi
-  if (( balance >= 1000 )); then
+  if (( balance != 998 )); then
     kill -TERM "$mock_pid" 2>/dev/null || true
-    fail "(RDT-ON.3) the shared 'scrapecreators' balance was not debited ($balance of 1000) — reddit spend did not charge the shared ledger (P0 budget-key regression)"
+    fail "(RDT-ON.3) the shared 'scrapecreators' balance is $balance, expected exactly 998 (seeded 1000 − 2 pages × 1 credit) — reddit spend did not charge the shared ledger correctly"
   fi
-  log "(RDT-ON.3) PASS — reddit spend debited the SHARED 'scrapecreators' balance (P0 seam live in the image)"
+  log "(RDT-ON.3) PASS — reddit spend debited the SHARED 'scrapecreators' balance by exactly 2 credits (P0 seam + pagination cost live)"
 
   kill -TERM "$mock_pid" 2>/dev/null || true
   log "=== Reddit provider-ON smoke PASSED ==="

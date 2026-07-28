@@ -18,7 +18,8 @@
 // shared concurrency knob and no acquirePacerSlot is threaded.
 //
 // The single-post fetch resolves the post from the subreddit feed (ScrapeCreators
-// exposes no single-post-by-id endpoint). A bounded page-1 miss is inconclusive and
+// exposes no single-post-by-id endpoint). A bounded page-1 miss writes an EXPLICIT
+// `inconclusive` poll status (the paid attempt stays visible, the button settles) and
 // leaves the previous snapshot intact; the account walk remains the authoritative path.
 
 import { and, eq, isNotNull, isNull } from "drizzle-orm";

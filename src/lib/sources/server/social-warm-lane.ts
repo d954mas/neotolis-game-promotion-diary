@@ -393,12 +393,14 @@ export interface SocialRefreshLaneConfig {
   resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | null>;
   /** Write a per-post snapshot. This is the ONE genuine per-platform delta: TikTok
    *  threads `shares` (PLAT-02) into its snapshot; IG nulls it. Each tree binds its
-   *  own writeSnapshot with the right key field (postId/awemeId) + metric set. */
+   *  own writeSnapshot with the right key field (postId/awemeId) + metric set.
+   *  `inconclusive` is written only for platforms that set nullResultIsInconclusive
+   *  (Reddit's bounded page-1 lookup) — a paid fetch that could not decide. */
   writeSnapshot(args: {
     postId: string;
     permalink: string;
     post: NormalizedSinglePost | null;
-    status: "ok" | "not_found" | "auth_error" | "rate_limited" | "private";
+    status: "ok" | "not_found" | "auth_error" | "rate_limited" | "private" | "inconclusive";
   }): Promise<void>;
 }
 
@@ -559,7 +561,14 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
       });
       if (post === null) {
         if (config.nullResultIsInconclusive === true) {
+          // The paid fetch happened (credit + user quota + cooldown are spent) but the
+          // bounded lookup could not find the post — that is NOT deletion evidence.
+          // Write an EXPLICIT inconclusive snapshot instead of returning silently
+          // (review fix): it stamps last_polled_at so the Refresh-Now button settles
+          // and the spent attempt is visible, while the previous metrics stay intact
+          // (no snapshot row is inserted for a non-ok status).
           logger.info({ postId }, `${platform} refresh: bounded provider lookup was inconclusive`);
+          await config.writeSnapshot({ postId, permalink, post: null, status: "inconclusive" });
           return;
         }
         // Deleted / private — the envelope carried no media object.
