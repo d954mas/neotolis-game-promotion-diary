@@ -20,6 +20,8 @@
 // glyph + label in ONE pill treatment (white on a dark scrim) used by every
 // source — no per-card fork.
 
+import { m } from "$lib/paraglide/messages.js";
+
 /** The media_type values that earn a corner pill (photo → none). */
 export type OverlayMediaType = "short" | "carousel" | "video";
 
@@ -32,12 +34,11 @@ export interface OverlayPill {
   inner: string;
 }
 
-const GLYPHS: Record<OverlayMediaType, Omit<OverlayPill, "type">> = {
+const GLYPHS: Record<OverlayMediaType, { inner: string }> = {
   // Short — a clapperboard-style play marker: rounded film frame + play
   // triangle. Reads as "short-form video" without any platform brand mark
   // ("Short" is the unified IG-Reels / YT-Shorts / TikTok term).
   short: {
-    label: "Short",
     inner: `<rect x="3" y="3" width="18" height="18" rx="4" />
       <path d="M3 8h18" />
       <path d="M8.5 3.5 11 8" />
@@ -46,13 +47,11 @@ const GLYPHS: Record<OverlayMediaType, Omit<OverlayPill, "type">> = {
   },
   // Carousel — stacked / overlapping squares (the multi-photo album marker).
   carousel: {
-    label: "Carousel",
     inner: `<rect x="8" y="3" width="13" height="13" rx="2.5" />
       <path d="M16 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2" />`,
   },
   // Video — a plain play triangle (long-form feed video, not a short).
   video: {
-    label: "Video",
     inner: `<path d="M8 5v14l11-7z" fill="currentColor" stroke="none" />`,
   },
 };
@@ -63,9 +62,18 @@ const GLYPHS: Record<OverlayMediaType, Omit<OverlayPill, "type">> = {
  * maps its per-source media-type field through this and passes the pill to
  * BaseFeedCard, which renders the icon+text markup only when non-null.
  */
+/** Visible pill text. Resolved PER CALL, never at module init: Paraglide messages are
+ *  locale-bound functions, so baking them into the GLYPHS constant would freeze the
+ *  label at whichever locale happened to be active when this module first loaded. */
+function pillLabel(type: OverlayMediaType): string {
+  if (type === "short") return m.media_type_pill_short();
+  if (type === "carousel") return m.media_type_pill_carousel();
+  return m.media_type_pill_video();
+}
+
 export function mediaTypeOverlay(mediaType: string | null | undefined): OverlayPill | null {
   if (mediaType === "short" || mediaType === "carousel" || mediaType === "video") {
-    return { type: mediaType, ...GLYPHS[mediaType] };
+    return { type: mediaType, label: pillLabel(mediaType), ...GLYPHS[mediaType] };
   }
   return null;
 }
@@ -82,6 +90,7 @@ export interface MediaTypeOverlayEvent {
   tiktokEnrichment?: { mediaType?: string | null } | null;
   twitterEnrichment?: { mediaType?: string | null } | null;
   youtubeEnrichment?: { mediaType?: string | null } | null;
+  redditEnrichment?: { mediaType?: string | null } | null;
 }
 
 /**
@@ -142,6 +151,12 @@ export function deriveMediaTypeOverlay(event: MediaTypeOverlayEvent): OverlayPil
     // A native-video tweet → "Video"; a photo / animated_gif ("image") or a
     // text-only tweet ("text") → no pill (a photo/text needs no marker).
     return event.twitterEnrichment?.mediaType === "video" ? mediaTypeOverlay("video") : null;
+  }
+  if (event.kind === "reddit_post") {
+    // Reddit FORM (12-SPIKE #2 — derived from post_hint/url, not is_self): a gallery
+    // post → "Carousel" (the multi-image album affordance); self / link / single
+    // image → no pill (a plain image needs no marker, self/link have no image).
+    return event.redditEnrichment?.mediaType === "gallery" ? mediaTypeOverlay("carousel") : null;
   }
   return null;
 }

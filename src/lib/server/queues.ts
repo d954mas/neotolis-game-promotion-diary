@@ -63,20 +63,36 @@ export const QUEUES = {
    *  refresh-click. */
   YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
 
-  // Per-kind: reddit (Phase 03.1 DV-RDT-7). FOUR cron-only pg-boss
-  // queues — handlers ENQUEUE rows into adapter_refresh_queue (ZERO
-  // Reddit HTTP per D-RDT-CRON-BURST) and return; the 8-tick worker
-  // setInterval (src/worker/index.ts) drains the reddit_account lanes at
-  // the 8 req/min effective ceiling.
-  //
-  // The Reddit batch worker does NOT subscribe via pg-boss.work — the
-  // SQL FOR UPDATE SKIP LOCKED tick pattern is the load-bearing answer
-  // to Reddit's 10 req/min hard limit under multi-replica deploys
-  // (D-RDT-WORKER).
-  REDDIT_CRON_ENQUEUE_SERVICE_SOURCES: "reddit.cron.enqueue-service-sources",
-  REDDIT_CRON_ENQUEUE_SERVICE_POSTS: "reddit.cron.enqueue-service-posts",
-  REDDIT_CRON_BASELINES: "reddit.cron.baselines",
-  REDDIT_CRON_DELETION_PROPAGATION: "reddit.cron.deletion-propagation",
+  // Per-kind: reddit (Phase 12, PAID ScrapeCreators scraper — the 4th consumer of
+  // the shared ScrapeCreators prepaid pool, D-01). Mirrors the TikTok/Twitter cron
+  // topology (two resumable feed walkers — author-search + native subreddit —
+  // age-tiered ongoing poll + warm per-post producer, midnight-PT daily-cap reset)
+  // PLUS the carry-over daily deletion-propagation purge (the GDPR control, D-06/D-08).
+  /** Author-scoped resumable walker (the D-02 ScrapeCreators author-search path).
+   *  Loops the `after` cursor to end-of-feed / SOCIAL_BACKFILL_MAX_POSTS (initial)
+   *  or K=2 pages (incremental, the firehose bound — 12-SPIKE cost caps). Fans out
+   *  INSERT events to all active subscribers; Variant-A disappearance reconciliation
+   *  sets deletion_detected_at for tracked posts absent from a completed walk. */
+  REDDIT_BACKFILL_ACCOUNT: "reddit.backfill.account.v2",
+  /** Subreddit-scoped resumable walker (the native /v1/reddit/subreddit path). Same
+   *  walk shape as the author walker, keyed on the subreddit slug. */
+  REDDIT_BACKFILL_SUBREDDIT: "reddit.backfill.subreddit.v2",
+  /** Upgrade bridge: workers move pre-v2 jobs into the exclusive v2 queues. */
+  REDDIT_BACKFILL_ACCOUNT_LEGACY: "reddit.backfill.account",
+  REDDIT_BACKFILL_SUBREDDIT_LEGACY: "reddit.backfill.subreddit",
+  /** Active + cold ongoing poll + warm per-post producer collapsed via pg-boss
+   *  key-based schedules ({ tier } payload — active daily 06:00 UTC / cold daily /
+   *  warm hourly). The poll-cron handler dispatches on job.data.tier. */
+  REDDIT_POLL_CRON: "reddit.poll.cron",
+  /** Midnight-Pacific daily-cap counter reset. Clears ONLY the daily-cap spend
+   *  counter / audit-transition Set — NEVER the shared ScrapeCreators prepaid
+   *  balance (the monotonic hard ceiling, D-01 / Pitfall 3). */
+  REDDIT_QUOTA_RESET: "reddit.quota_reset",
+  /** Daily @05:00 UTC zero-HTTP purge of author/author_fullname on reddit_posts
+   *  whose deletion_detected_at is older than the 48h grace, with the
+   *  reddit.deletion_propagated audit written IN-TX (the legally load-bearing GDPR
+   *  control — D-06/D-08). */
+  REDDIT_DELETION_PROPAGATION: "reddit.deletion_propagation",
 
   // Per-kind: instagram (Phase 8). Mirrors the YouTube cron topology.
   /** Account-scoped resumable walker — one page (12 posts) per tick, fans
@@ -145,13 +161,45 @@ export const QUEUES = {
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
+/**
+ * A Reddit walk is PAID and multi-page: one invocation can fetch up to
+ * DEEP_PAGE_CAP pages, each costing a prepaid ScrapeCreators credit, and it
+ * persists its resume cursor only after the whole page loop has been fanned out.
+ * pg-boss's queue defaults (retryLimit 2, retryDelay 0, expireInSeconds 900) are
+ * therefore actively harmful here:
+ *
+ *   - retryLimit 2 + retryDelay 0 turns one transient 5xx on the last page into
+ *     three immediate full re-walks — ~3x the credits for zero extra coverage,
+ *     multiplied across every channel when the provider has an incident.
+ *   - expireInSeconds 900 can elapse mid-walk against a slow provider, so pg-boss
+ *     re-activates the job while the original handler is still running (expiry does
+ *     not abort the Node handler) — two concurrent PAID walks of the same channel,
+ *     defeating the `exclusive` policy.
+ *
+ * The daily poll cron is the natural retry for a walk, so the queue must not add
+ * one of its own. NOTE: pg-boss applies these at queue CREATION; an already-created
+ * queue keeps its original settings.
+ */
+export const REDDIT_WALK_QUEUE_OPTIONS = {
+  policy: "exclusive" as const,
+  retryLimit: 0,
+  expireInSeconds: 3600,
+};
+
 interface MinimalBoss {
-  createQueue(name: string): Promise<unknown>;
+  createQueue(
+    name: string,
+    options?: { policy?: string; retryLimit?: number; expireInSeconds?: number },
+  ): Promise<unknown>;
 }
 
 export async function declareAllQueues(boss: MinimalBoss): Promise<void> {
   for (const name of Object.values(QUEUES)) {
     // pg-boss v10+ createQueue is idempotent — safe to call on every boot.
-    await boss.createQueue(name);
+    const options =
+      name === QUEUES.REDDIT_BACKFILL_ACCOUNT || name === QUEUES.REDDIT_BACKFILL_SUBREDDIT
+        ? REDDIT_WALK_QUEUE_OPTIONS
+        : undefined;
+    await boss.createQueue(name, options);
   }
 }

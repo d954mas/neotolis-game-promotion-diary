@@ -258,11 +258,13 @@
         );
       }
       if (k === "reddit_post") {
+        // Mirrors sources/reddit/server/url.ts REDDIT_HOSTS + SHORT_LINK_HOST — must stay in sync.
         return (
           host === "reddit.com" ||
           host === "www.reddit.com" ||
           host === "old.reddit.com" ||
-          host === "new.reddit.com"
+          host === "m.reddit.com" ||
+          host === "redd.it"
         );
       }
       if (k === "instagram_post") {
@@ -297,7 +299,14 @@
         // (rate-limited / reddit_not_configured / network / …).
         try {
           const body = (await res.json()) as { error?: string; message?: string };
-          urlError = body.error ?? body.message ?? m.add_event_modal_url_error_invalid();
+          // A few codes are dead-ends the user CAN act on — spell those out instead of
+          // showing the raw wire code. redd.it short links carry no subreddit, so the
+          // preview can never resolve (recognition-only): tell the user to paste the
+          // full permalink, and that saving without stats still works.
+          urlError =
+            body.error === "reddit_short_link_unsupported"
+              ? m.add_event_modal_url_error_reddit_short_link()
+              : (body.error ?? body.message ?? m.add_event_modal_url_error_invalid());
         } catch {
           urlError = `${res.status} ${res.statusText}`;
         }

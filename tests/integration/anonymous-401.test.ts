@@ -94,11 +94,12 @@ describe("anonymous-401 sweep", () => {
     // only; anonymous → 401 from tenantScope before the videos.list
     // lookup ever fires.
     "/api/youtube/fetch-metadata",
-    // /events/new "Get from Reddit" button (same pattern as YouTube
-    // above). Phase 03.1 adapter.registerRoutes mounts this; the
-    // tenantScope middleware fires before redditFetch ever reaches
-    // the Reddit servers, so anonymous probes never burn a unit.
-    "/api/reddit/fetch-metadata",
+    // NOTE: the rebuilt Phase-12 Reddit adapter mounts NO /api/reddit/* route
+    // (it has NO registerRoutes — hotlink + onerror, no same-origin proxy;
+    // 12-SPIKE Pitfall 5). The "Get from Reddit" paste-preview goes through the
+    // UNIVERSAL /api/events/preview-url route (above, line 67) which dispatches
+    // to redditAdapter.fetchEventPreviewMetadata by kind — so Reddit's anonymous
+    // -401 coverage rides on that shared route, not a dedicated reddit endpoint.
     // Instagram same-origin thumbnail proxy (#69). IG's CDN sends
     // Cross-Origin-Resource-Policy: same-origin, so a raw <img> hotlink is
     // browser-blocked; the feed card loads /api/instagram/thumbnail/<postId>

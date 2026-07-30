@@ -29,7 +29,7 @@
 // existing vi.mock seam working unchanged (same reasoning as the 9e3b963 provider-
 // registry shim). This factory NEVER imports a platform tree directly.
 
-import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { db, type Tx } from "$lib/server/db/client.js";
 import { events } from "$lib/server/db/schema/events.js";
@@ -68,6 +68,19 @@ export interface WarmEligibilityConfig {
   windowDays(): number;
   stalenessHours(): number;
   maxFailures(): number;
+  /** OPTIONAL extra AND-predicate ANDed into the eligibility WHERE. Reddit binds
+   *  `isNull(reddit_posts.deletion_detected_at)` so a post detected as removed stops
+   *  being warm-refreshed (spending credit re-polling a dead post is pure waste).
+   *  IG/TikTok/Twitter omit it — they have no deletion-detect column. */
+  extraWhere?: SQL;
+  /** OPTIONAL per-subject warm cap. When set (with `subjectColumn`), the eligible set
+   *  is trimmed to the N newest posts per subject via a ROW_NUMBER window, so a single
+   *  firehose subject (e.g. a busy subreddit added by mistake) can't fan its off-walk
+   *  posts into an unbounded per-tick warm batch and dominate the shared prepaid budget.
+   *  Reddit binds `subredditSlug` + 5; IG/TikTok/Twitter omit it → the plain path runs. */
+  perSubjectCap?: number;
+  /** The column to PARTITION BY for `perSubjectCap` (Reddit: reddit_posts.subredditSlug). */
+  subjectColumn?: PgColumn;
 }
 
 /**
@@ -95,28 +108,60 @@ export function createWarmEligibilitySelector(
     const windowStart = new Date(now.getTime() - config.windowDays() * DAY_MS);
     const staleBefore = new Date(now.getTime() - config.stalenessHours() * HOUR_MS);
 
+    const eligibilityWhere = and(
+      sql`${events.kind} = ${config.eventKind}`,
+      isNotNull(events.externalId),
+      isNull(events.deletedAt),
+      // Young: within the warm window. NULL published_at (pre-backfill 'pending') is
+      // excluded — we don't know the age yet; the account poll fills it.
+      gt(config.publishedAtColumn, windowStart),
+      // Stale: never polled, or last poll older than the staleness gate.
+      or(isNull(config.lastPolledAtColumn), lt(config.lastPolledAtColumn, staleBefore)),
+      // Terminal exclusion — own (not_found/private only). See header (#70 P1-A).
+      sql`(${config.lastPollStatusColumn} IS NULL OR ${config.lastPollStatusColumn} NOT IN ('not_found','private'))`,
+      // Bounded-failure exclusion — stop churning credits on a persistent failure.
+      lt(config.pollFailureCountColumn, config.maxFailures()),
+      // Optional per-platform extra predicate (Reddit: skip deletion-detected posts).
+      config.extraWhere,
+    );
+
+    // Per-subject cap path (Reddit): keep only the N newest eligible posts per subject so
+    // a firehose subreddit's off-walk posts can't fan into an unbounded warm batch. A
+    // window function can't live in WHERE, so rank in a subquery then filter the outer.
+    if (config.perSubjectCap !== undefined && config.subjectColumn !== undefined) {
+      // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out is service-wide by design; the posts table is public-data (justification threaded per platform via config).
+      const base = db
+        .selectDistinct({
+          id: config.idColumn,
+          subject: config.subjectColumn,
+          pub: config.publishedAtColumn,
+        })
+        .from(events)
+        .innerJoin(config.postsTable, eq(events.externalId, config.idColumn))
+        .where(eligibilityWhere)
+        .as("warm_base");
+      const ranked = db
+        .select({
+          id: base.id,
+          rn: sql<number>`ROW_NUMBER() OVER (PARTITION BY ${base.subject} ORDER BY ${base.pub} DESC NULLS LAST)`.as(
+            "rn",
+          ),
+        })
+        .from(base)
+        .as("warm_ranked");
+      const capped = await db
+        .select({ id: ranked.id })
+        .from(ranked)
+        .where(sql`${ranked.rn} <= ${config.perSubjectCap}`);
+      return capped.map((r) => r.id as string);
+    }
+
     // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out is service-wide by design; one warm tick batches eligible posts across ALL tenants. The posts table is public-data; the per-post writeSnapshot downstream is public-data; tenant scope does not apply (justification threaded per platform via config).
     const rows = await db
       .selectDistinct({ id: config.idColumn })
       .from(events)
       .innerJoin(config.postsTable, eq(events.externalId, config.idColumn))
-      .where(
-        and(
-          sql`${events.kind} = ${config.eventKind}`,
-          isNotNull(events.externalId),
-          isNull(events.deletedAt),
-          // Young: within the warm window. NULL published_at (pre-backfill
-          // 'pending') is excluded — we don't know the age yet; the account poll
-          // fills it.
-          gt(config.publishedAtColumn, windowStart),
-          // Stale: never polled, or last poll older than the staleness gate.
-          or(isNull(config.lastPolledAtColumn), lt(config.lastPolledAtColumn, staleBefore)),
-          // Terminal exclusion — own (not_found/private only). See header (#70 P1-A).
-          sql`(${config.lastPollStatusColumn} IS NULL OR ${config.lastPollStatusColumn} NOT IN ('not_found','private'))`,
-          // Bounded-failure exclusion — stop churning credits on a persistent failure.
-          lt(config.pollFailureCountColumn, config.maxFailures()),
-        ),
-      );
+      .where(eligibilityWhere);
     return rows.map((r) => r.id as string);
   };
 }
@@ -299,7 +344,7 @@ interface RefreshProvider {
   ): Promise<NormalizedSinglePost | null>;
 }
 
-/** The claimGate permit shape (mirrors Reddit's `{ pacer: "already-acquired" }`):
+/** The claimGate permit shape (Twitter's QPS-pacer seam — the only pacer platform):
  *  `pacerAlreadyAcquired` is true iff the lane acquired the global pacer slot in the
  *  claimGate this tick, so the per-row HTTP seam skips its own acquire. */
 interface SocialRefreshPermit {
@@ -319,9 +364,16 @@ export interface SocialRefreshLaneConfig {
   maxBatchSize: number;
   /** Tree-local getSocialProvider (so per-tree vi.mock intercepts). */
   getSocialProvider(platform: SocialPlatform): RefreshProvider | null;
-  /** Tree-local getSocialSpendToday (so per-tree vi.mock intercepts). */
-  getSocialSpendToday(
-    platform: string,
+  /** Some providers can only search a bounded newest-feed page. For those adapters a
+   * null match is inconclusive, not proof that the post is deleted/private. */
+  nullResultIsInconclusive?: boolean;
+  /** Tree-local PROVIDER-WIDE spend read (so per-tree vi.mock intercepts). The
+   *  claimGate's 95% defer must see the JOINT spend across every platform sharing
+   *  the provider's prepaid pool (D-01) — a platform-filtered read under-counts and
+   *  lets rows through to a reserve that then denies them (`rate_limited` snapshot
+   *  instead of a clean defer-to-reset). Per-platform reads stay in the UI /
+   *  attribution paths only. */
+  getSocialProviderSpendToday(
     provider: string,
   ): Promise<{ creditsUsed: number; dailyCap: number; prepaidBalance: number }>;
   /** OPTIONAL global QPS pacer acquire, run AFTER the budget gate passes (Twitter
@@ -329,23 +381,26 @@ export interface SocialRefreshLaneConfig {
    *  it reach the seam, fail rate-limited, write a snapshot, and complete `done` with no
    *  retry — which is how a manual Refresh-Now silently no-ops under contention. When
    *  acquired, the permit threads `pacerAlreadyAcquired` so the seam does NOT
-   *  re-acquire. Runs on the claim `tx` so a claim-tx rollback rolls the slot back too
-   *  (mirrors Reddit's acquireRedditPacerSlotWith(ctx.tx)). IG/TikTok omit this (no
-   *  pacer) and keep their budget-only gate. */
+   *  re-acquire. Runs on the claim `tx` so a claim-tx rollback rolls the slot back too.
+   *  IG/TikTok/Reddit omit this (no QPS pacer) and keep their budget-only gate. */
   acquirePacerSlot?(tx: Tx): Promise<{ acquired: boolean; waitMs: number }>;
   /** Resolve the post's permalink from the public-data posts cache, or null on a
-   *  cache miss (e.g. a paste before the first account poll → graceful skip). */
-  resolvePermalink(postId: string): Promise<string | null>;
+   *  cache miss (e.g. a paste before the first account poll → graceful skip). The
+   *  claimed row rides along so a tenant-owned fallback (Reddit's events lookup)
+   *  can scope by row.userId — single-param implementations just ignore it. */
+  resolvePermalink(postId: string, row: AdapterLaneWorkerRow): Promise<string | null>;
   /** Resolve the MANUAL (user_post) row's post id from its event, TENANT-SCOPED. */
   resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | null>;
   /** Write a per-post snapshot. This is the ONE genuine per-platform delta: TikTok
    *  threads `shares` (PLAT-02) into its snapshot; IG nulls it. Each tree binds its
-   *  own writeSnapshot with the right key field (postId/awemeId) + metric set. */
+   *  own writeSnapshot with the right key field (postId/awemeId) + metric set.
+   *  `inconclusive` is written only for platforms that set nullResultIsInconclusive
+   *  (Reddit's bounded page-1 lookup) — a paid fetch that could not decide. */
   writeSnapshot(args: {
     postId: string;
     permalink: string;
     post: NormalizedSinglePost | null;
-    status: "ok" | "not_found" | "auth_error" | "rate_limited" | "private";
+    status: "ok" | "not_found" | "auth_error" | "rate_limited" | "private" | "inconclusive";
   }): Promise<void>;
 }
 
@@ -386,7 +441,7 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
   //   - Daily cap >= 95% (balance still funded) resets at midnight Pacific — DEFER;
   //     it recovers on its own (mirrors the YouTube/Reddit "wait for reset" defer).
   //
-  // Two-pool coupling (#70 P2-B, accepted): getSocialSpendToday SUMS both pools, so
+  // Two-pool coupling (#70 P2-B, accepted): getSocialProviderSpendToday SUMS both pools, so
   // this coarse gate can defer a service_post tick on user-pool spend (or vice-versa).
   // That's fine — the real per-pool ceiling is the in-fetch origin-scoped reserve
   // (user_post→user pool, service_post→cron pool); this stays a cheap tick throttle.
@@ -395,9 +450,9 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
   ): Promise<AdapterLaneClaimGateResult<SocialRefreshPermit>> {
     // Budget gate FIRST — a budget-defer must NOT consume a pacer slot (it would pace
     // out unrelated twitter traffic by a slot interval without making any fetch). Only
-    // once budget passes do we touch the pacer.
-    const { creditsUsed, dailyCap, prepaidBalance } = await config.getSocialSpendToday(
-      platform,
+    // once budget passes do we touch the pacer. PROVIDER-WIDE spend (D-01 joint cap)
+    // — mirrors the reserve's own joint band math.
+    const { creditsUsed, dailyCap, prepaidBalance } = await config.getSocialProviderSpendToday(
       config.provider,
     );
     if (prepaidBalance > 0 && dailyCap > 0 && creditsUsed >= Math.floor(dailyCap * 0.95)) {
@@ -411,9 +466,9 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
     // Global QPS pacer (Twitter): acquire AFTER budget passes, on the claim tx so a
     // claim-tx rollback rolls the slot back too. A denied slot DEFERS — the row stays
     // pending and is retried, so a manual Refresh-Now is never consumed against a busy
-    // slot. Acquiring here (not at the seam) mirrors Reddit's claimRedditPacerSlot; the
-    // permit then tells the seam to skip its own acquire so the slot isn't double-spent.
-    // IG/TikTok pass no acquirePacerSlot → pacerAlreadyAcquired stays false.
+    // slot. Acquiring here (not at the seam) keeps the slot on the claim tx; the permit
+    // then tells the seam to skip its own acquire so the slot isn't double-spent.
+    // IG/TikTok/Reddit pass no acquirePacerSlot → pacerAlreadyAcquired stays false.
     let pacerAlreadyAcquired = false;
     if (config.acquirePacerSlot !== undefined) {
       const slot = await config.acquirePacerSlot(ctx.tx);
@@ -451,7 +506,7 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
           ? resolveServicePostId(row)
           : await config.resolveUserPostId(row);
       if (postId === null) return; // skip reasons are logged inside the resolvers
-      const permalink = await config.resolvePermalink(postId);
+      const permalink = await config.resolvePermalink(postId, row);
       if (permalink === null) {
         // Accepted wasted slot: the pacer slot was claimed in the claimGate but this
         // row no-ops on a cache miss. Rare, and a cache-miss row would no-op anyway.
@@ -505,6 +560,17 @@ export function createSocialRefreshLane(config: SocialRefreshLaneConfig): Social
         pacerAlreadyAcquired,
       });
       if (post === null) {
+        if (config.nullResultIsInconclusive === true) {
+          // The paid fetch happened (credit + user quota + cooldown are spent) but the
+          // bounded lookup could not find the post — that is NOT deletion evidence.
+          // Write an EXPLICIT inconclusive snapshot instead of returning silently
+          // (review fix): it stamps last_polled_at so the Refresh-Now button settles
+          // and the spent attempt is visible, while the previous metrics stay intact
+          // (no snapshot row is inserted for a non-ok status).
+          logger.info({ postId }, `${platform} refresh: bounded provider lookup was inconclusive`);
+          await config.writeSnapshot({ postId, permalink, post: null, status: "inconclusive" });
+          return;
+        }
         // Deleted / private — the envelope carried no media object.
         await config.writeSnapshot({ postId, permalink, post: null, status: "not_found" });
         return;

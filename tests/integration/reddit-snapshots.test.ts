@@ -1,332 +1,396 @@
-// Phase 03.1 Plan 05A Task 1 — Reddit snapshot + upsert idempotency.
+// Reddit snapshot writer + subject-entity upserts (Phase 12, Plan 12-04) — driven
+// directly against real Postgres (only the provider is ever mocked elsewhere; this
+// storage layer needs no provider). Proves:
+//   - writeSnapshot UPSERTs reddit_posts + INSERTs reddit_post_snapshots with the
+//     raw D-09 columns (score / upvote_ratio / num_comments / num_crossposts /
+//     removed_by_category) and the D-09 metric mapping (like_count=score,
+//     comment_count=num_comments; NO view/share columns).
+//   - the ★write-path deletion-detect belt: removed_by_category != null sets
+//     deletion_detected_at, idempotent first-detect (a second write does NOT move
+//     it). NOTE: dormant with ScrapeCreators (never returns the field) — the live
+//     mechanism is Variant A (disappearance-from-walk) in Plan 05; this asserts the
+//     unit-level belt with a synthetic snapshot.
+//   - (post_id, polled_at) idempotency (ON CONFLICT DO NOTHING).
+//   - upsertRedditAccount (by lowercase username) + upsertRedditSubreddit (by slug)
+//     COALESCE-preserve prior good fields on a partial parse.
 //
-// V20 (idempotent snapshot — UNIQUE(post_id, polled_at) on minute-truncated
-// polled_at, ON CONFLICT DO NOTHING) is the load-bearing invariant under
-// worker retries within the same minute window. Tests prove:
-//
-//   1. Two writeRedditPostSnapshot calls within the same minute → only one
-//      reddit_post_snapshots row (V20).
-//   2. Two calls 61s apart (truncate to different minutes) → two rows.
-//   3. upsertRedditPost called twice with different metadata → second
-//      UPDATEs existing row (subreddit/title/permalink/metadata refresh).
-//   4. upsertRedditUser idempotent across calls.
-//   5. upsertRedditSubreddit idempotent.
-//   6. status='not_found' snapshot succeeds (no CHECK constraint blocking
-//      the documented 4-value vocabulary).
-//
-// Real Postgres via the integration service container; no mocks.
+// Requirements: PLAT-04.
+import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { sql, eq, and } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
 import {
-  writeRedditPostSnapshot,
-  writeRedditUserSnapshot,
-  writeRedditSubredditSnapshot,
-} from "../../src/lib/sources/reddit/server/snapshots.js";
-import {
-  upsertRedditPost,
-  upsertRedditUser,
-  upsertRedditSubreddit,
-} from "../../src/lib/sources/reddit/server/upsert.js";
-import {
-  redditPostSnapshots,
+  redditAccounts,
   redditPosts,
-  redditUsersCache,
-  redditUserSnapshots,
-  redditSubredditsCache,
-  redditSubredditSnapshots,
+  redditPostSnapshots,
+  redditSubreddits,
 } from "../../src/lib/server/db/schema/index.js";
+import {
+  writeSnapshot,
+  upsertRedditAccount,
+  upsertRedditSubreddit,
+} from "../../src/lib/sources/reddit/server/snapshots.js";
 
-beforeEach(async () => {
-  // afterEach TRUNCATE in tests/setup.ts wipes everything between specs;
-  // explicit deletes here are redundant but harmless and self-document the
-  // tables under test.
-  await db.execute(sql`DELETE FROM reddit_post_snapshots`);
-  await db.execute(sql`DELETE FROM reddit_user_snapshots`);
-  await db.execute(sql`DELETE FROM reddit_subreddit_snapshots`);
-  await db.execute(sql`DELETE FROM reddit_posts`);
-  await db.execute(sql`DELETE FROM reddit_users_cache`);
-  await db.execute(sql`DELETE FROM reddit_subreddits_cache`);
-});
+const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-describe("Reddit snapshots V20 idempotency", () => {
-  it("V20: two writeRedditPostSnapshot calls within the same minute → only one row", async () => {
-    await upsertRedditSubreddit(db, {
-      name: "test",
-      subredditId: "t5_test",
-      subscribers: 1,
-      accountsActive: null,
-      description: null,
-      publicDescription: null,
-    });
-    await upsertRedditPost(db, {
-      postId: "t3_test_idem",
-      subreddit: "test",
-      author: "op",
-      authorFullname: "t2_op",
-      permalink: "/r/test/comments/test_idem",
-      title: "test",
-      submittedAt: new Date(),
-      metadata: {},
-    });
-    await writeRedditPostSnapshot(db, {
-      postId: "t3_test_idem",
-      score: 5,
-      numComments: 1,
-      awardsTotal: 0,
-      upvoteRatio: 0.9,
-      removedByCategory: null,
+async function readPost(postId: string) {
+  const [row] = await db.select().from(redditPosts).where(eq(redditPosts.postId, postId)).limit(1);
+  return row;
+}
+
+describe("reddit snapshots write path (Phase 12)", () => {
+  it("[12-04] writeSnapshot UPSERTs reddit_posts + INSERTs reddit_post_snapshots with raw D-09 columns", async () => {
+    const postId = `t3_${uniq()}`;
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      mediaType: "self",
+      title: "My devlog #3",
+      caption: "Long selftext body…",
+      permalink: `https://www.reddit.com/r/gamedev/comments/${uniq()}/my-devlog-3/`,
+      thumbnailUrl: null,
+      publishedAt: new Date("2026-06-01T12:00:00Z"),
+      author: "d954mas",
+      authorFullname: "t2_abc123",
+      metrics: { likes: 42, comments: 7 },
+      raw: {
+        score: 42,
+        upvoteRatio: 0.97,
+        numComments: 7,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
       status: "ok",
     });
-    await writeRedditPostSnapshot(db, {
-      postId: "t3_test_idem",
-      score: 6,
-      numComments: 2,
-      awardsTotal: 0,
-      upvoteRatio: 0.91,
-      removedByCategory: null,
-      status: "ok",
-    });
-    const rows = await db
+
+    const post = await readPost(postId);
+    expect(post).toBeDefined();
+    expect(post!.subredditSlug).toBe("gamedev");
+    expect(post!.mediaType).toBe("self");
+    expect(post!.title).toBe("My devlog #3");
+    expect(post!.author).toBe("d954mas");
+    expect(post!.authorFullname).toBe("t2_abc123");
+    expect(post!.lastPollStatus).toBe("ok");
+    expect(post!.deletionDetectedAt).toBeNull();
+
+    const [snap] = await db
       .select()
       .from(redditPostSnapshots)
-      .where(eq(redditPostSnapshots.postId, "t3_test_idem"));
-    expect(rows.length).toBe(1);
-    // First write wins under ON CONFLICT DO NOTHING (score=5).
-    expect(rows[0]!.score).toBe(5);
+      .where(eq(redditPostSnapshots.postId, postId));
+    expect(snap).toBeDefined();
+    // D-09 metric mapping.
+    expect(snap!.likeCount).toBe(42);
+    expect(snap!.commentCount).toBe(7);
+    // The raw D-09 columns stored verbatim.
+    expect(snap!.score).toBe(42);
+    expect(snap!.upvoteRatio).toBeCloseTo(0.97, 5);
+    expect(snap!.numComments).toBe(7);
+    // Absent from ScrapeCreators → null-by-presence, never 0.
+    expect(snap!.numCrossposts).toBeNull();
+    expect(snap!.removedByCategory).toBeNull();
   });
 
-  it("two writes 61s apart (different minute buckets) → two rows", async () => {
-    await upsertRedditSubreddit(db, {
-      name: "test",
-      subredditId: null,
-      subscribers: null,
-      accountsActive: null,
-      description: null,
-      publicDescription: null,
-    });
-    await upsertRedditPost(db, {
-      postId: "t3_test_2min",
-      subreddit: "test",
-      author: "op",
-      authorFullname: "t2_op",
-      permalink: "/r/test/comments/test_2min",
-      title: "t",
-      submittedAt: new Date(),
-      metadata: {},
-    });
-    // First snapshot at minute N.
-    await writeRedditPostSnapshot(db, {
-      postId: "t3_test_2min",
-      score: 1,
-      numComments: 0,
-      awardsTotal: 0,
-      upvoteRatio: 0.8,
-      removedByCategory: null,
+  it("[12-04] metrics are null-by-presence — an absent metric stores null, never 0", async () => {
+    const postId = `t3_${uniq()}`;
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      mediaType: "link",
+      metrics: { likes: null, comments: null },
+      raw: {
+        score: null,
+        upvoteRatio: null,
+        numComments: null,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
       status: "ok",
     });
-    // Force a row at minute N-2 by inserting directly with a back-dated
-    // polled_at (date_trunc'd). The schema's UNIQUE on (post_id, polled_at)
-    // accepts this since polled_at differs.
-    await db.execute(sql`
-      INSERT INTO reddit_post_snapshots (post_id, polled_at, status, score, num_comments, awards_total, upvote_ratio, removed_by_category)
-      VALUES ('t3_test_2min', date_trunc('minute', NOW() - INTERVAL '2 minutes'), 'ok', 2, 0, 0, 0.85, NULL)
-    `);
-    const rows = await db
+
+    const [snap] = await db
       .select()
       .from(redditPostSnapshots)
-      .where(eq(redditPostSnapshots.postId, "t3_test_2min"));
-    expect(rows.length).toBe(2);
+      .where(eq(redditPostSnapshots.postId, postId));
+    expect(snap!.likeCount).toBeNull();
+    expect(snap!.commentCount).toBeNull();
+    expect(snap!.score).toBeNull();
   });
 
-  it("upsertRedditPost twice with different metadata → second UPDATEs existing row", async () => {
-    await upsertRedditSubreddit(db, {
-      name: "indiedev",
-      subredditId: null,
-      subscribers: null,
-      accountsActive: null,
-      description: null,
-      publicDescription: null,
+  it("[12-04] a non-ok poll updates polling state, writes NO snapshot, and COALESCE-preserves prior fields", async () => {
+    const postId = `t3_${uniq()}`;
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      mediaType: "image",
+      thumbnailUrl: "https://i.redd.it/good.jpg",
+      author: "d954mas",
+      metrics: { likes: 5, comments: 1 },
+      raw: {
+        score: 5,
+        upvoteRatio: 0.8,
+        numComments: 1,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
+      status: "ok",
     });
-    await upsertRedditPost(db, {
-      postId: "t3_post_upd",
-      subreddit: "indiedev",
-      author: "op",
-      authorFullname: "t2_op",
-      permalink: "/r/indiedev/comments/post_upd",
-      title: "original title",
-      submittedAt: new Date("2026-01-01T00:00:00Z"),
-      metadata: { v: 1 },
-    });
-    await upsertRedditPost(db, {
-      postId: "t3_post_upd",
-      subreddit: "indiedev",
-      author: "op",
-      authorFullname: "t2_op",
-      permalink: "/r/indiedev/comments/post_upd/slug-changed",
-      title: "edited title",
-      submittedAt: new Date("2026-01-01T00:00:00Z"),
-      metadata: { v: 2 },
-    });
-    const rows = await db.select().from(redditPosts).where(eq(redditPosts.postId, "t3_post_upd"));
-    expect(rows.length).toBe(1);
-    expect(rows[0]!.title).toBe("edited title");
-    expect(rows[0]!.permalink).toBe("/r/indiedev/comments/post_upd/slug-changed");
-    expect(rows[0]!.metadata).toEqual({ v: 2 });
-  });
+    // A failed refresh carries no metrics + all-null snippet fields.
+    await writeSnapshot({ postId, metrics: null, status: "not_found" });
 
-  it("upsertRedditUser is idempotent across calls", async () => {
-    await upsertRedditUser(db, {
-      username: "alice",
-      redditId: "t2_alice",
-      accountAgeDays: 100,
-      linkKarma: 10,
-      commentKarma: 5,
-      totalKarma: 15,
-      isSuspended: false,
-    });
-    await upsertRedditUser(db, {
-      username: "alice",
-      redditId: "t2_alice",
-      accountAgeDays: 101,
-      linkKarma: 20,
-      commentKarma: 15,
-      totalKarma: 35,
-      isSuspended: false,
-    });
-    const rows = await db
+    const post = await readPost(postId);
+    expect(post!.lastPollStatus).toBe("not_found");
+    expect(post!.pollFailureCount).toBe(1);
+    // The working values were PRESERVED (not blanked by the failed poll).
+    expect(post!.thumbnailUrl).toBe("https://i.redd.it/good.jpg");
+    expect(post!.author).toBe("d954mas");
+    expect(post!.subredditSlug).toBe("gamedev");
+
+    // Exactly one snapshot (the ok poll); the not_found poll wrote none.
+    const snaps = await db
       .select()
-      .from(redditUsersCache)
-      .where(eq(redditUsersCache.username, "alice"));
-    expect(rows.length).toBe(1);
-    expect(rows[0]!.linkKarma).toBe(20);
-    expect(rows[0]!.totalKarma).toBe(35);
+      .from(redditPostSnapshots)
+      .where(eq(redditPostSnapshots.postId, postId));
+    expect(snaps).toHaveLength(1);
   });
 
-  it("upsertRedditSubreddit is idempotent and preserves rules_raw_json across calls without it", async () => {
-    await upsertRedditSubreddit(db, {
-      name: "gamedev",
-      subredditId: "t5_gd",
-      subscribers: 1000,
-      accountsActive: 50,
-      description: "Game dev sub",
-      publicDescription: "Indie gamedev community",
-      submissionMetadata: { submission_type: "any" },
-      rulesRawJson: { rules: [{ short_name: "no-spam" }] },
+  it("[review] clears a deleted author without marking the still-visible post deleted", async () => {
+    const postId = `t3_${uniq()}`;
+    await writeSnapshot({
+      postId,
+      author: "former_author",
+      authorFullname: "t2_former",
+      metrics: null,
+      status: "rate_limited",
     });
-    // Second call without rulesRawJson — COALESCE preserves existing rules.
-    await upsertRedditSubreddit(db, {
-      name: "gamedev",
-      subredditId: "t5_gd",
-      subscribers: 1050,
-      accountsActive: 60,
-      description: "Game dev sub",
-      publicDescription: "Indie gamedev community",
-      submissionMetadata: { submission_type: "any" },
-    });
-    const rows = await db
-      .select()
-      .from(redditSubredditsCache)
-      .where(eq(redditSubredditsCache.name, "gamedev"));
-    expect(rows.length).toBe(1);
-    expect(rows[0]!.subscribers).toBe(1050);
-    expect(rows[0]!.rulesRawJson).toEqual({ rules: [{ short_name: "no-spam" }] });
-  });
 
-  it("status='not_found' snapshot row succeeds (vocabulary accepts 4 values)", async () => {
-    await upsertRedditSubreddit(db, {
-      name: "test",
-      subredditId: null,
-      subscribers: null,
-      accountsActive: null,
-      description: null,
-      publicDescription: null,
-    });
-    await upsertRedditPost(db, {
-      postId: "t3_gone",
-      subreddit: "test",
+    await writeSnapshot({
+      postId,
       author: null,
       authorFullname: null,
-      permalink: "/r/test/comments/gone",
-      title: "[deleted]",
-      submittedAt: new Date(),
-      metadata: {},
+      metrics: { likes: 6, comments: 2 },
+      raw: {
+        score: 6,
+        upvoteRatio: null,
+        numComments: 2,
+        numCrossposts: null,
+        removedByCategory: null,
+        authorDeleted: true,
+      },
+      status: "ok",
     });
-    await writeRedditPostSnapshot(db, {
-      postId: "t3_gone",
-      score: null,
-      numComments: null,
-      awardsTotal: null,
-      upvoteRatio: null,
-      removedByCategory: null,
-      status: "not_found",
-    });
-    const rows = await db
+
+    const post = await readPost(postId);
+    expect(post!.deletionDetectedAt, "the returned post remains reachable").toBeNull();
+    expect(post!.author, "the deleted account identity is removed immediately").toBeNull();
+    expect(post!.authorFullname).toBeNull();
+    expect(post!.lastPollStatus).toBe("ok");
+    expect(post!.pollFailureCount).toBe(0);
+
+    const [snapshot] = await db
       .select()
       .from(redditPostSnapshots)
-      .where(eq(redditPostSnapshots.postId, "t3_gone"));
-    expect(rows.length).toBe(1);
-    expect(rows[0]!.status).toBe("not_found");
+      .where(eq(redditPostSnapshots.postId, postId));
+    expect(snapshot!.likeCount).toBe(6);
+    expect(snapshot!.commentCount).toBe(2);
   });
 
-  it("writeRedditUserSnapshot — minute-trunc idempotency on (username, polled_at)", async () => {
-    await upsertRedditUser(db, {
-      username: "bob",
-      redditId: null,
-      accountAgeDays: null,
-      linkKarma: 50,
-      commentKarma: 20,
-      totalKarma: 70,
-      isSuspended: false,
+  it("[review-P1] a PURGED author is FROZEN — a later cross-subject snapshot never restores it", async () => {
+    const postId = `t3_${uniq()}`;
+    // A live post, tracked with its author.
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      author: "gallowboob",
+      authorFullname: "t2_boob",
+      metrics: { likes: 3, comments: 1 },
+      raw: {
+        score: 3,
+        upvoteRatio: 0.9,
+        numComments: 1,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
+      status: "ok",
     });
-    await writeRedditUserSnapshot(db, {
-      username: "bob",
-      linkKarma: 50,
-      commentKarma: 20,
-      totalKarma: 70,
+    // The author-walk flagged it deleted and the Plan-05 purge cron nulled author* after
+    // the 48h grace window.
+    await db
+      .update(redditPosts)
+      .set({
+        deletionDetectedAt: new Date(Date.now() - 72 * 3_600_000),
+        author: null,
+        authorFullname: null,
+      })
+      .where(eq(redditPosts.postId, postId));
+
+    // The SAME post is STILL ALIVE in some subreddit's feed, so a cross-subject
+    // writeSnapshot carries the (public) author again. Pre-fix the plain COALESCE
+    // resurrected the purged identity while deletion_detected_at stayed set — a GDPR leak.
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      author: "gallowboob",
+      authorFullname: "t2_boob",
+      metrics: { likes: 4, comments: 2 },
+      raw: {
+        score: 4,
+        upvoteRatio: 0.9,
+        numComments: 2,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
+      status: "ok",
     });
-    await writeRedditUserSnapshot(db, {
-      username: "bob",
-      linkKarma: 51,
-      commentKarma: 21,
-      totalKarma: 72,
-    });
-    const rows = await db
-      .select()
-      .from(redditUserSnapshots)
-      .where(eq(redditUserSnapshots.username, "bob"));
-    expect(rows.length).toBe(1);
+
+    const post = await readPost(postId);
+    expect(post!.author, "purged author stays null while deletion_detected_at is set").toBeNull();
+    expect(post!.authorFullname).toBeNull();
+    // The flag itself is untouched (the write path never clears it).
+    expect(post!.deletionDetectedAt).not.toBeNull();
   });
 
-  it("writeRedditSubredditSnapshot — minute-trunc idempotency on (subreddit, polled_at)", async () => {
-    await upsertRedditSubreddit(db, {
-      name: "indiedev",
-      subredditId: null,
-      subscribers: 5000,
-      accountsActive: 100,
-      description: null,
-      publicDescription: null,
-    });
-    await writeRedditSubredditSnapshot(db, {
-      subreddit: "indiedev",
-      subscribers: 5000,
-      accountsActive: 100,
-    });
-    await writeRedditSubredditSnapshot(db, {
-      subreddit: "indiedev",
-      subscribers: 5001,
-      accountsActive: 110,
-    });
-    const rows = await db
+  it("[12-04] (post_id, polled_at) UNIQUE → within-the-minute retries idempotent (ON CONFLICT DO NOTHING)", async () => {
+    const postId = `t3_${uniq()}`;
+    const args = {
+      postId,
+      subredditSlug: "gamedev",
+      mediaType: "self",
+      metrics: { likes: 1, comments: 0 },
+      raw: {
+        score: 1,
+        upvoteRatio: 1,
+        numComments: 0,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
+      status: "ok" as const,
+    };
+    // Two writes in the same minute (polled_at = date_trunc('minute', now())).
+    await writeSnapshot(args);
+    await writeSnapshot({ ...args, metrics: { likes: 999, comments: 999 } });
+
+    const snaps = await db
       .select()
-      .from(redditSubredditSnapshots)
-      .where(
-        and(
-          eq(redditSubredditSnapshots.subreddit, "indiedev"),
-          sql`${redditSubredditSnapshots.polledAt} >= NOW() - INTERVAL '2 minutes'`,
-        ),
-      );
-    expect(rows.length).toBe(1);
+      .from(redditPostSnapshots)
+      .where(eq(redditPostSnapshots.postId, postId));
+    // Collapsed to one row — the second INSERT hit ON CONFLICT DO NOTHING.
+    expect(snaps).toHaveLength(1);
+    expect(snaps[0]!.likeCount).toBe(1);
+  });
+
+  it("[12-04] deletion-detect belt: removed_by_category != null sets deletion_detected_at idempotently (first-detect only)", async () => {
+    const postId = `t3_${uniq()}`;
+    // A clean poll first — no deletion signal.
+    await writeSnapshot({
+      postId,
+      subredditSlug: "gamedev",
+      mediaType: "self",
+      metrics: { likes: 3, comments: 2 },
+      raw: {
+        score: 3,
+        upvoteRatio: 0.9,
+        numComments: 2,
+        numCrossposts: null,
+        removedByCategory: null,
+      },
+      status: "ok",
+    });
+    expect((await readPost(postId))!.deletionDetectedAt).toBeNull();
+
+    // A synthetic snapshot carrying removed_by_category — the write-path belt fires.
+    await writeSnapshot({
+      postId,
+      metrics: { likes: 3, comments: 2 },
+      raw: {
+        score: 3,
+        upvoteRatio: 0.9,
+        numComments: 2,
+        numCrossposts: null,
+        removedByCategory: "moderator",
+      },
+      status: "ok",
+    });
+    const detected = (await readPost(postId))!.deletionDetectedAt;
+    expect(detected).not.toBeNull();
+    expect((await readPost(postId))!.deletionDetectedBy).toBe("reddit_post_detail");
+
+    // A THIRD write with the field still set must NOT move the timestamp
+    // (idempotent first-detect — the grace clock never resets).
+    await new Promise((r) => setTimeout(r, 5));
+    await writeSnapshot({
+      postId,
+      metrics: { likes: 3, comments: 2 },
+      raw: {
+        score: 3,
+        upvoteRatio: 0.9,
+        numComments: 2,
+        numCrossposts: null,
+        removedByCategory: "moderator",
+      },
+      status: "ok",
+    });
+    expect((await readPost(postId))!.deletionDetectedAt!.getTime()).toBe(detected!.getTime());
+  });
+
+  it("[12-04] upsertRedditAccount (by lowercase username) COALESCE-preserves richer fields on partial parse", async () => {
+    const username = `User_${uniq()}`;
+    await upsertRedditAccount({
+      username,
+      title: "Indie Dev",
+      iconUrl: "https://icon/good.png",
+      karma: 1234,
+      followerCount: 50,
+    });
+    const canonical = username.toLowerCase();
+    const [first] = await db
+      .select()
+      .from(redditAccounts)
+      .where(eq(redditAccounts.username, canonical));
+    // Keyed on the lowercase username (rename-proof intrinsic PK).
+    expect(first!.username).toBe(canonical);
+    expect(first!.title).toBe("Indie Dev");
+
+    // A transient miss (all rich fields null) must NOT blank the prior good values.
+    await upsertRedditAccount({
+      username,
+      title: null,
+      iconUrl: null,
+      karma: null,
+      followerCount: null,
+    });
+    const [second] = await db
+      .select()
+      .from(redditAccounts)
+      .where(eq(redditAccounts.username, canonical));
+    expect(second!.title).toBe("Indie Dev");
+    expect(second!.iconUrl).toBe("https://icon/good.png");
+    expect(second!.karma).toBe(1234);
+    expect(second!.followerCount).toBe(50);
+  });
+
+  it("[12-04] upsertRedditSubreddit (by slug) COALESCE-preserves richer fields on partial parse", async () => {
+    const slug = `GameDev_${uniq()}`;
+    await upsertRedditSubreddit({
+      slug,
+      title: "Game Development",
+      subscriberCount: 1_800_000,
+      iconUrl: "https://icon/sub.png",
+    });
+    const canonical = slug.toLowerCase();
+    const [first] = await db
+      .select()
+      .from(redditSubreddits)
+      .where(eq(redditSubreddits.slug, canonical));
+    expect(first!.slug).toBe(canonical);
+    expect(first!.title).toBe("Game Development");
+
+    await upsertRedditSubreddit({ slug, title: null, subscriberCount: null, iconUrl: null });
+    const [second] = await db
+      .select()
+      .from(redditSubreddits)
+      .where(eq(redditSubreddits.slug, canonical));
+    expect(second!.title).toBe("Game Development");
+    expect(second!.subscriberCount).toBe(1_800_000);
+    expect(second!.iconUrl).toBe("https://icon/sub.png");
   });
 });

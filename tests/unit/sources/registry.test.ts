@@ -34,22 +34,14 @@ describe("SourceRegistry", () => {
     const adapter = getAdapter("reddit_account");
     const worker = adapter.workQueue?.scheduledWorkers[0];
     expect(worker?.name).toBe("reddit.refresh");
-    expect(worker?.intervalMs).toBe(7500);
+    expect(worker?.intervalMs).toBe(1000);
     expect(worker?.replicaPolicy).toBe("parallel");
     expect(worker?.laneQueue).toMatchObject({
       strategy: "fixed-slot-round-robin",
       adapterKind: "reddit_account",
-      slots: [
-        "service_source",
-        "user_source",
-        "user_post",
-        "user_source",
-        "service_post",
-        "user_post",
-        "user_source",
-        "user_post",
-      ],
-      fallthrough: ["user_post", "user_source", "service_post", "service_source"],
+      slots: ["user_post", "service_post"],
+      fallthrough: ["user_post", "service_post"],
+      batchScope: "global",
     });
   });
 

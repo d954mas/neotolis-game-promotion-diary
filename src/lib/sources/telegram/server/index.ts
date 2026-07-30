@@ -23,8 +23,8 @@
 // cron queue only.
 //
 // isOperatorConfigured / isEnabled are ALWAYS true: Telegram needs no secret to
-// function (the structural contrast with Reddit's REDDIT_USER_AGENT gate and
-// IG's provider-key gate).
+// function (the structural contrast with Reddit's isRedditConfigured() /
+// REDDIT_IMPORT_ENABLED gate and IG's provider-key gate).
 
 import type {
   AdapterContext,
@@ -283,14 +283,16 @@ async function resetWalkerStateOnWidening(
   });
 }
 
-/** validateEventInput — a telegram_post event requires a t.me post URL. */
+/**
+ * validateEventInput — a telegram_post event's URL, IF present, must be a t.me
+ * post URL. EVENT_KIND_DISPLAY.telegram_post.urlValidation is "match-if-present":
+ * a manual social log may legitimately have no link. Requiring one here would also
+ * make every already-stored url-less row uneditable, since updateEvent re-validates
+ * the MERGED url (existing.url) on every PATCH.
+ */
 function validateEventInput(input: { kind: string; url?: string | null }): void {
   if (input.kind !== "telegram_post") return;
-  if (!input.url) {
-    throw new AppError("url is required when kind=telegram_post", "kind_url_inconsistent", 422, {
-      reason: "telegram_post_requires_url",
-    });
-  }
+  if (!input.url) return;
   const parsed = telegramParsePostUrl(input.url);
   if (parsed === null || parsed.kind !== "telegram_post") {
     throw new AppError("url is not a recognized Telegram post URL", "kind_url_inconsistent", 422, {

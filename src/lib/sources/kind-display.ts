@@ -214,8 +214,10 @@ export const EVENT_KIND_DISPLAY = {
 //
 // `cadence` mirrors each kind's scheduleCronTicks in <kind>/server/index.ts:
 //   - youtube_channel : active poll "0 */6 * * *" (every 6h).
-//   - reddit_*        : enqueue-service-sources "0 0,6,12,18" + posts
-//                        "0 3,9,15,21" → a fresh walk every 6h, no warm lane.
+//   - reddit_*        : active poll "0 6 * * *" (daily) + cold poll "0 5 * * *"
+//                        (daily) + warm one-shot lane "0 * * * *" (hourly next-day
+//                        catch, retired after one refresh — 12-SPIKE: Reddit posts
+//                        stabilize in 1-2 days, so NO long-lived warm loop).
 //   - instagram_account: active poll "0 6 * * *" (daily) + warm per-post lane
 //                        "0 * * * *" (hourly, >26h staleness gate → ~1 paid
 //                        stats refresh/day per recent post).

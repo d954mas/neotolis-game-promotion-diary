@@ -12,7 +12,7 @@
 // seam would have re-acquired by asserting the real twitter_pacer is consumed EXACTLY
 // once per refreshed row.
 //
-// Integration test — real Postgres via ./helpers.js. getSocialProvider + getSocialSpendToday
+// Integration test — real Postgres via ./helpers.js. getSocialProvider + getSocialProviderSpendToday
 // (claimGate throttle) are mocked; the twitter_pacer + adapter_refresh_queue are real.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -63,7 +63,7 @@ vi.mock("../../src/lib/sources/twitter/server/provider/registry.js", async (impo
 
 vi.mock("../../src/lib/sources/twitter/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, getSocialSpendToday: async () => spend };
+  return { ...actual, getSocialProviderSpendToday: async () => spend };
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
@@ -288,5 +288,46 @@ describe("twitter per-post refresh lane — claimGate pacer (Plan 11 P1)", () =>
       }>(sql`SELECT next_allowed_at <= NOW() AS due FROM twitter_pacer WHERE id = 1`)
       .then((r) => (r as unknown as { rows: Array<{ due: boolean }> }).rows);
     expect(pacer!.due).toBe(true);
+  });
+
+  it("[CR-03] a cache miss never resolves another tenant's event URL", async () => {
+    const requester = await seedUserDirectly({ email: `twrq-requester-${uniq()}@t.io` });
+    const other = await seedUserDirectly({ email: `twrq-other-${uniq()}@t.io` });
+    const id = tweetId();
+    const otherUrl = `https://x.com/other/status/${id}`;
+
+    await createEvent(
+      other.id,
+      {
+        kind: "twitter_post",
+        title: "other tenant",
+        externalId: id,
+        url: otherUrl,
+        occurredAt: new Date("2026-06-02T00:00:00Z").toISOString(),
+        gameIds: [],
+      },
+      "127.0.0.1",
+    );
+    const requesterEvent = await createEvent(
+      requester.id,
+      {
+        kind: "twitter_post",
+        title: "requester without URL",
+        externalId: id,
+        occurredAt: new Date("2026-06-02T00:00:00Z").toISOString(),
+        gameIds: [],
+      },
+      "127.0.0.1",
+    );
+    single.next = singleTweet(id);
+    await enqueue(requesterEvent.id, requester.id, id);
+    await db.execute(
+      sql`UPDATE twitter_pacer SET next_allowed_at = NOW() - interval '1 second' WHERE id = 1`,
+    );
+
+    await twitterRefreshQueueTick();
+
+    expect(single.calls, "another tenant's URL must never be used").toHaveLength(0);
+    expect(await snapshotCount(id)).toBe(0);
   });
 });

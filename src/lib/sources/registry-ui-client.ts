@@ -55,8 +55,9 @@ export interface AdapterUiClient {
 
 const uiClientRegistry = new Map<SourceKind, AdapterUiClient>([
   ["youtube_channel", youtubeUiClient as unknown as AdapterUiClient],
-  // reddit_account + reddit_subreddit both map to the same Reddit UI
-  // client module — same reasoning as registry-ui.ts.
+  // reddit_account + reddit_subreddit BOTH map to the same redditUiClient (the
+  // reddit_post card is the same regardless of source.kind); findPreviewAdapter
+  // dedups by distinct module so the shared entry isn't iterated twice.
   ["reddit_account", redditUiClient as unknown as AdapterUiClient],
   ["reddit_subreddit", redditUiClient as unknown as AdapterUiClient],
   ["instagram_account", instagramUiClient as unknown as AdapterUiClient],

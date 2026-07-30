@@ -101,43 +101,42 @@ Compare `.env.example` against your live `.env`:
 diff .env.example .env | grep -E "^<"
 ```
 
-Add any new keys to `.env`. **Phase 03.1 (Reddit) added:**
+Add any new keys to `.env`. **Phase 12 (Reddit) added:**
 
 | Var | Required? | What to set |
 |---|---|---|
-| `REDDIT_USER_AGENT` | yes for Reddit features | `node:com.neotolis.gpd:0.1.0 (by /u/<your-handle>)` — see `.env.example` for the convention. Leave empty to disable Reddit cleanly. |
-| `REDDIT_PROXY_URL` | conditional — see below | `http://user:pass@host:port`. Required only when your VPS IP is in Reddit's datacenter blocklist. |
-| `REDDIT_BASE_URL_OVERRIDE` | no | TEST-ONLY. Leave **unset** in production. |
+| `REDDIT_IMPORT_ENABLED` | yes to enable Reddit | Default `false` (import stays OFF). Set to the literal `true` to turn it on — the legally-hot platform never auto-enables just because a provider + key are present. |
+| `REDDIT_PROVIDER` | yes to enable Reddit | Set to `scrapecreators` (the only buildable value). Empty (default) => Reddit is "not configured": the add-source Reddit chip renders disabled and no scraper credits are spent. |
+| `SCRAPECREATORS_API_KEY` | shared | The SAME prepaid ScrapeCreators key you already use for Instagram + TikTok — Reddit draws from the ONE shared credit balance. No new key, no new budget vars. |
+| `SOCIAL_PROVIDER_DAILY_CAP_CREDITS` | **must be > 0** | Already set if Instagram/TikTok import works. Verify it, because Reddit is now a THIRD consumer of a pool previously sized for two — and a `0` cap (the `.env.example` default) silently rejects every reservation, so Reddit will look enabled and import nothing. |
+| `SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS` | **must be > 0** | Same — the remaining prepaid balance. At `0` no request is ever issued. |
 
-> **⚠️ Reddit + cloud-hosted VPS reality check.** Reddit's edge
-> (Fastly/Varnish) aggressively 403's traffic from datacenter IP ranges
-> — Hetzner, DigitalOcean, Linode, AWS, even Cloudflare Workers. If
-> your VPS is in one of those blocklists, setting `REDDIT_USER_AGENT`
-> to a valid value will NOT help — Reddit returns `HTTP/2 403 server:
-> snooserv` before any UA check. The adapter then triggers an
-> escalating pause (10m → 1h → 3h → 12h) and dead-letters queue rows
-> forever.
+**Delete from `.env`** (removed from the schema in Phase 12 — unknown keys are
+ignored at boot, so nothing breaks, but `REDDIT_PROXY_URL` holds live Webshare
+proxy credentials and should not linger):
+
+```bash
+sed -i '/^REDDIT_USER_AGENT=/d; /^REDDIT_PROXY_URL=/d; /^REDDIT_BASE_URL_OVERRIDE=/d' .env
+```
+
+> The `diff .env.example .env` check above only surfaces keys that were **added**
+> upstream, never ones that were **removed** — hence the explicit delete.
+
+> **Reddit is a paid ScrapeCreators adapter, default-OFF.** Phase 12 razed
+> the old free public-`.json` transport (whole datacenter proxy pools were
+> 403-fenced by Reddit, and self-service OAuth closed Nov 2025) and rebuilt
+> Reddit on **ScrapeCreators** — the same paid provider that serves Instagram
+> + TikTok. Instagram + TikTok + Reddit draw the ONE shared prepaid credit
+> balance (`SOCIAL_PROVIDER_DAILY_CAP_CREDITS` /
+> `SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS`). Two source kinds:
+> `reddit_account` (a user's submitted-post history by handle — the PRIMARY
+> path) and `reddit_subreddit` (a subreddit's recent posts — SECONDARY).
 >
-> **Diagnose** with one curl from the VPS BEFORE setting the UA:
-> ```bash
-> curl -A "node:com.neotolis.gpd:0.1.0 (by /u/test)" -i \
->   'https://www.reddit.com/r/IndieDev/new.json?limit=1' | head -1
-> ```
-> - `HTTP/2 200` → IP is clean. Set `REDDIT_USER_AGENT` only; leave
->   `REDDIT_PROXY_URL` unset. Typical for self-host operators on
->   residential IPs.
-> - `HTTP/2 403` → IP is fenced. Two options:
->   - **Disable cleanly:** leave `REDDIT_USER_AGENT` empty. Reddit
->     features show as "not configured" in the UI; nothing degraded,
->     nothing dead-lettered.
->   - **Route through residential proxy:** set both
->     `REDDIT_USER_AGENT` AND `REDDIT_PROXY_URL`. Tested working with
->     Webshare static-residential ($6/mo, 20 IPs, 250GB bandwidth) —
->     the cheapest path the author found. Other residential providers
->     (Bright Data, Smartproxy, Decodo) work the same shape. Confirm
->     by re-running the curl ABOVE with `--proxy
->     http://user:pass@host:port` and `--ssl-no-revoke` before saving
->     to `.env`; if THAT returns 200, you're set.
+> To enable, set BOTH `REDDIT_IMPORT_ENABLED=true` AND
+> `REDDIT_PROVIDER=scrapecreators` (with the shared `SCRAPECREATORS_API_KEY`
+> present). Leave any of the three empty and Reddit degrades gracefully to
+> "not configured" — the chip is disabled, pasting a Reddit URL returns "not
+> configured", and no credits are ever spent.
 
 **Phase 07 (Observability) added:**
 
@@ -166,6 +165,29 @@ echo "GF_SERVER_SERVE_FROM_SUB_PATH=true" >> .env
 Save and close.
 
 ### 5. Pull the new image and restart
+
+> ### ⚠️ Phase 12 only — back up FIRST, this deploy destroys data
+>
+> Step 5 runs the migrations, and the Phase 12 batch is destructive on live
+> user data:
+>
+> - `0070` — `DROP TABLE ... CASCADE` on the eight legacy Reddit tables.
+> - `0073` — `DELETE` on `events` (**every** `reddit_post` row, auto-imported
+>   *and* hand-pasted, including user-typed `title` / `notes` and their
+>   `event_games` links), `data_sources`, and `data_source_channel_state`.
+>
+> This is a hard delete — no soft-delete, no Trash entry, no in-app undo. A
+> successful destructive migration never trips the Rollback section below,
+> because nothing "breaks". The dump is the only recovery path:
+>
+> ```bash
+> ./scripts/backup.sh              # or: docker compose exec -T postgres pg_dump -U postgres diary > pre-phase12.sql
+> ls -lh pre-phase12.sql           # verify it is non-empty before continuing
+> ```
+>
+> **After deploying, tell users:** their Reddit diary entries and Reddit
+> sources are gone and must be re-added; the rebuilt importer only picks up
+> posts going forward.
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
@@ -244,13 +266,17 @@ For Phase 07 (Observability), also verify:
   Three alert rules: error-rate-spike, high-latency-p95, memory-pressure.
 - Loki receiving logs: in Grafana Explore → Loki → `{service="app"}` should show app logs.
 
-For Phase 03.1 specifically, also verify:
+For Phase 12 (Reddit), also verify — only if you enabled it (`REDDIT_IMPORT_ENABLED=true` + `REDDIT_PROVIDER=scrapecreators`):
 
-- `/admin` → Reddit Ops panel renders (operator-visible queue stats).
-- `/sources/new` → Reddit chip appears, backfill picker shows up after
-  selecting it.
-- `docker compose logs worker | grep -E "reddit (batch-worker|sub_poll|posts-refresh)"`
-  — confirms the 8-tick batch worker started and is draining the queue.
+- `/sources/new` → the Reddit chip is enabled (it renders disabled /
+  "not configured" when either var is unset). Adding a `reddit_account`
+  handle or a `reddit_subreddit` shows the backfill picker.
+- `/admin` → the Reddit section shows the shared ScrapeCreators budget
+  (Instagram + TikTok + Reddit); Reddit spend draws it down. This is the only
+  truthful spend view — the provisioned Grafana "Activity" dashboard still
+  reads a retired audit verb and shows Reddit as `0` regardless of real spend.
+- `docker compose logs worker | grep -i reddit` — confirms the adapter
+  imports posts and runs the active/cold subject walks without errors.
 
 ---
 
@@ -313,44 +339,32 @@ healthy (`curl -fsS http://localhost:3000/healthz` inside the network
 returns 200), the issue is nginx config — `nginx -t` inside the
 container, or restore previous `nginx.conf.template` from `git`.
 
-### Reddit logs `403 (anti-bot fence?)` / `adapter paused`
+### Reddit chip stays disabled / "not configured"
 
-Worker logs show entries like:
-```
-reddit adapter paused after upstream rate-limit/degraded response
-adapter batch lane worker: handler failed  err: Reddit 403 (anti-bot fence?)
-```
-Reddit blocks the VPS IP — see Step 4's warning. The adapter ratchets
-its `paused_until` from 10m → 1h → 3h → 12h with each fresh 403, so
-left alone it'll spend most of the day paused and never serve content.
-
-**Cleanly disable Reddit and stop the cycle:**
+Reddit is a paid ScrapeCreators adapter that ships **default-OFF**. The
+add-source Reddit chip renders disabled until ALL of these are set:
 
 ```bash
-nano .env                                                        # comment out / remove REDDIT_USER_AGENT
-docker compose -f docker-compose.prod.yml up -d --force-recreate app worker scheduler
-
-# Reset the pacer + dead-letter any pending Reddit work so the queue
-# doesn't keep nibbling at the (now-empty) UA on retry:
-docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres -d neotolis -c "
-UPDATE reddit_pacer
-SET paused_until = NULL, pause_level = 0, last_pause_reason = NULL, last_paused_at = NULL
-WHERE id = 1;
-UPDATE adapter_refresh_queue
-SET status = 'dead_letter'
-WHERE adapter_kind = 'reddit_account' AND status IN ('pending','processing');
-"
+REDDIT_IMPORT_ENABLED=true          # literal "true" — the isolation kill-switch
+REDDIT_PROVIDER=scrapecreators      # the only buildable provider
+SCRAPECREATORS_API_KEY=<your-key>   # the SAME key Instagram + TikTok use
 ```
 
-After this:
-- `/sources/new` Reddit chip shows "not configured" (UX-explicit).
-- Paste of a Reddit URL returns 422 `reddit_not_configured`.
-- Existing `reddit_post` events stay in the feed (just no new updates).
-- No more 403 noise in logs.
+With any one empty, Reddit degrades gracefully — the chip is disabled,
+pasting a Reddit URL returns "not configured", and no credits are spent. If
+the chip is still disabled after setting all three, force-recreate so the new
+env is parsed:
 
-Long-term unblock — outbound HTTP proxy on a residential IP, or
-Cloudflare Worker as proxy (Reddit sees Cloudflare edge). Not a
-blocker for v0.1; track separately.
+```bash
+docker compose -f docker-compose.prod.yml up -d --force-recreate app worker scheduler
+```
+
+Reddit shares the ScrapeCreators prepaid balance with Instagram + TikTok, so
+if imports stop, check the shared budget in the `/admin` Reddit section — an
+exhausted daily cap or prepaid balance pauses all three until it refills /
+resets. To stop Reddit spend outright, set `REDDIT_IMPORT_ENABLED=false` and
+force-recreate `app worker scheduler`; that is a hard stop on every Reddit
+request and leaves existing sources rendered as operator-paused.
 
 ---
 

@@ -36,11 +36,13 @@
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
+import { dataSources } from "../db/schema/data-sources.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { writeAudit } from "../audit.js";
+import { writeAudit, writeAuditTx, type AuditEntry } from "../audit.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { enforceAdapterUserQuota } from "./quota.js";
+import { lockAndAssertDailyUserRequestQuota } from "../daily-user-quota.js";
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -89,6 +91,22 @@ export async function requestRefreshPoll(
     });
   }
 
+  let quotaPlatform = sourceKindForPoll;
+  if (event.kind === "reddit_post" && event.sourceId !== null) {
+    // Deliberately NO deletedAt filter: a soft-deleted (tombstoned) source still
+    // owns the truth about the event's quota keyspace — kind is immutable, so
+    // reading it from a tombstone is safe. Only a hard delete (FK nulls the
+    // event's sourceId) legitimately falls back to reddit_account.
+    const [source] = await db
+      .select({ kind: dataSources.kind })
+      .from(dataSources)
+      .where(and(eq(dataSources.id, event.sourceId), eq(dataSources.userId, userId)))
+      .limit(1);
+    if (source?.kind === "reddit_account" || source?.kind === "reddit_subreddit") {
+      quotaPlatform = source.kind;
+    }
+  }
+
   // 3. External-id gate. The poll worker keys upstream calls by external_id
   //    (YouTube videoId). A row without one cannot be polled.
   if (!event.externalId) {
@@ -118,7 +136,7 @@ export async function requestRefreshPoll(
       runGuard.code ?? "platform_quota_exhausted",
       runGuard.status ?? 429,
       {
-        platform: sourceKindForPoll,
+        platform: quotaPlatform,
         reason: runGuard.reason,
         retryAfterSeconds:
           runGuard.retryAfterMs === undefined
@@ -156,7 +174,7 @@ export async function requestRefreshPoll(
   }
 
   await enforceAdapterUserQuota(db, pollableAdapter, userId, ipAddress, "post-refresh", {
-    platform: sourceKindForPoll ?? event.kind,
+    platform: quotaPlatform ?? event.kind,
   });
 
   // 5. Persist last_user_refresh_at BEFORE enqueueing so a crash
@@ -175,7 +193,39 @@ export async function requestRefreshPoll(
   //       returns 0 rows. The 0-rows path treats the slot as "lost" and
   //       throws the same 429 as the in-window check above.
   const cutoffIso = new Date(now.getTime() - COOLDOWN_MS).toISOString();
+  const auditEntry: AuditEntry = {
+    userId,
+    action: "event.poll_refreshed",
+    ipAddress,
+    userAgent,
+    metadata: {
+      event_id: eventId,
+      kind: event.kind,
+      platform: quotaPlatform ?? event.kind,
+      external_id: externalId,
+      flow: "stats_refresh",
+      requests_used: 1,
+      events_inserted: 0,
+    },
+  };
+  const atomicQuotaPlatform =
+    quotaPlatform === "reddit_account" || quotaPlatform === "reddit_subreddit"
+      ? quotaPlatform
+      : undefined;
+  const atomicDailyCap =
+    atomicQuotaPlatform === undefined
+      ? undefined
+      : pollableAdapter.observability.userQuotaCap?.requestsPerDay;
   const { queue, jobId: adapterJobId } = await db.transaction(async (tx) => {
+    if (atomicDailyCap !== undefined && atomicQuotaPlatform !== undefined) {
+      await lockAndAssertDailyUserRequestQuota(tx, {
+        userId,
+        platform: atomicQuotaPlatform,
+        units: 1,
+        requestsPerDay: atomicDailyCap,
+      });
+    }
+
     const updateRes = await tx
       .update(events)
       .set({
@@ -209,45 +259,24 @@ export async function requestRefreshPoll(
     // 6. Enqueue refresh — adapter-driven. Every adapter that can be
     //    refresh-polled exposes refreshQueue. YouTube and Reddit both INSERT
     //    into adapter-owned SQL queues; the response shape stays the same.
-    return refreshQueue.enqueue({
+    const queued = await refreshQueue.enqueue({
       eventId,
       userId,
       externalId,
       eventKind: event.kind,
       tx,
     });
+    if (atomicDailyCap !== undefined) {
+      await writeAuditTx(tx, auditEntry);
+    }
+    return queued;
   });
 
-  // 7. Audit row scoped to the event owner. Written OUTSIDE any tx
-  //    (pool-deadlock-safe pattern). Audit failures are swallowed by
-  //    audit.ts so they never break the user-facing path.
-  //
-  // Extended metadata for the per-user cap counter:
-  //   flow='stats_refresh' (capped) + requests_used=1 (one videos.list
-  //   call, 1 quota unit) + events_inserted=0 (no new event rows; this
-  //   refreshes stats on existing event/snapshot tables).
-  // Cap query (services/quota.ts:getUserQuotaUsedToday) sums these
-  // across user-initiated capped flows (incremental + historical +
-  // stats_refresh).
-  await writeAudit({
-    userId,
-    action: "event.poll_refreshed",
-    ipAddress,
-    userAgent,
-    metadata: {
-      event_id: eventId,
-      kind: event.kind,
-      // Explicit source-kind for cap query (services/quota.ts filters on
-      // metadata->>'platform'). `kind` keeps event-kind for forensic
-      // semantics; `platform` carries the cap-window dimension. See
-      // audit.ts AuditMetadata.platform.
-      platform: sourceKindForPoll ?? event.kind,
-      external_id: externalId,
-      flow: "stats_refresh",
-      requests_used: 1,
-      events_inserted: 0,
-    },
-  });
+  // Reddit's counted enqueue is part of the lock-protected transaction above.
+  // Other adapters retain the existing best-effort, post-enqueue audit semantics.
+  if (atomicDailyCap === undefined) {
+    await writeAudit(auditEntry);
+  }
 
   return adapterJobId === null
     ? { enqueued: true, queue, eventId }

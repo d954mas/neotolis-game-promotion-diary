@@ -8,7 +8,7 @@
 // ../pacer.ts) BEFORE its network call so the global request rate never crosses
 // the floor, regardless of how many concurrent workers/browser sessions exist.
 //
-// Mirrors reddit_pacer (the precedent) MINUS the escalating pause columns:
+// No escalating pause columns:
 // twitter's 429 is a transient per-account QPS ceiling already handled by the
 // http seam's retryAfterMs self-resume — the pacer is only the PROACTIVE slot
 // gate, so a single next_allowed_at suffices.

@@ -1,250 +1,206 @@
 #!/usr/bin/env bash
-# Reddit adapter smoke flow (Phase 03.1, plan 10 — V3 + V24 + V25).
+# Reddit not-configured parity smoke flow (Phase 12 — gated-provider model).
 #
-# Sourced (not exec'd) by tests/smoke/self-host.sh after the YouTube
-# polling flow completes. Covers the two halves of the Reddit parity
-# contract:
+# Sourced (not exec'd) by tests/smoke/self-host.sh after the YouTube polling
+# flow completes. Mirrors the Instagram / TikTok not-configured parity block:
+# the baseline smoke image boots the production image with the Reddit provider
+# UNCONFIGURED (REDDIT_IMPORT_ENABLED is NOT in common_env_args, so the D-08
+# kill-switch keeps Reddit OFF even though the shared SCRAPECREATORS_API_KEY is
+# also absent). This is the load-bearing self-host trust signal: an operator who
+# hasn't explicitly opted Reddit in gets a CLEANLY DISABLED Reddit — identical to
+# SaaS — NOT a 500 and NOT an enabled import path.
 #
-#   Half A — empty REDDIT_USER_AGENT (V3 + V24):
-#     1. /readyz still 200 (smoke-app booted in baseline step proves this
-#        already — the assertion re-confirms it for the Reddit context).
-#     2. /sources HTML page renders "Reddit not configured" (the empty
-#        state on QuotaStatusBanner's Reddit tab — D-RDT-AUTH-EMPTY).
-#     3. POST /api/events with a Reddit URL → 422 reddit_not_configured.
+# Phase 12 razed the old free-`.json` transport (the deleted per-role Reddit
+# user-agent / base-URL-override / proxy envs, the round-robin batch worker, and
+# its old cron schedules). Reddit is now a PAID ScrapeCreators adapter behind a
+# provider gate. There is NO live-import smoke: the paid path has no key in CI
+# (mirrors the YouTube-mock / no-live-API discipline) and is covered by the human
+# UAT + integration tests. The smoke gate's job here is the not-configured
+# degrade + isolation, exactly like Instagram / TikTok.
 #
-#   Half B — configured + mock-Reddit (V25):
-#     4. Re-launch smoke-worker + smoke-scheduler with REDDIT_USER_AGENT
-#        set and REDDIT_BASE_URL_OVERRIDE pointing at the mock.
-#     5. Worker stdout includes the grep contract:
-#        "reddit batch-worker ready: 8-tick round-robin loop".
-#     6. 4 Reddit cron schedules registered in pgboss.schedule
-#        (reddit.cron.enqueue-service-sources, .enqueue-service-posts,
-#         .baselines, .deletion-propagation).
-#     7. Paste a Reddit post URL → 201 + reddit_post_snapshots row written
-#        (handlePostSingle UPSERT + snapshot path exercised end-to-end
-#        through the mock).
+# Two assertions (both against the unconfigured baseline app):
+#   RDT.1  POST /api/sources {kind:"reddit_account", …} → 422 kind_not_configured
+#          (the createSource provider gate — SOURCE_KINDS_NEEDING_PROVIDER →
+#          isRedditConfigured() false because REDDIT_IMPORT_ENABLED != "true").
+#          Never a 500, never a created row. createSource degrades BEFORE any
+#          provider call, so the 422 never touches the network.
+#   RDT.2  /sources/new HTML renders the Reddit chip disabled ("not configured")
+#          AND names REDDIT_IMPORT_ENABLED in that chip's title= tooltip. Both only
+#          render when the chip's kindMatrix entry is disabled+not-configured, so
+#          together they are the user-facing proof Reddit is off + how to enable it.
+#          (12-06 UAT split the two: the compact chip carries the state, the tooltip
+#          carries the variable name — a full env sentence in the chip ate the legend.)
 #
-# All Reddit HTTP traffic is intercepted by tests/smoke/lib/reddit-mock.mjs —
-# NO live Reddit calls in CI. Helpers (log, fail, common_env_args,
-# APP_PORT) are inherited from the caller (tests/smoke/self-host.sh).
+# Helpers (log, fail) are inherited from the caller (tests/smoke/self-host.sh).
 
-# shellcheck disable=SC2154   # APP_PORT, log, fail, common_env_args are inherited.
+# shellcheck disable=SC2154   # log, fail are inherited.
 
-reddit_polling_smoke() {
+reddit_not_configured_smoke() {
   local app_url="$1"
   local session_cookie="$2"
 
-  log "=== Reddit adapter smoke extension ==="
+  log "=== Reddit not-configured parity (Phase 12) ==="
 
-  # ----- Half A: empty REDDIT_USER_AGENT (V3 + V24) -----
-  # The baseline smoke run has REDDIT_USER_AGENT unset in common_env_args,
-  # so smoke-app is already in the empty-env state. Just assert it.
-  log "Half A (V3+V24) — empty REDDIT_USER_AGENT preserves parity"
-
-  # Assertion A.1: /readyz still 200. Re-confirms the env-empty boot path
-  # (already covered by baseline step 1 but kept here for explicit
-  # Reddit-context phrasing in the smoke log).
-  local readyz_status
-  readyz_status=$(curl -s -o /dev/null -w '%{http_code}' "$app_url/readyz")
-  if [[ "$readyz_status" != "200" ]]; then
-    fail "V3: /readyz returned $readyz_status with empty REDDIT_USER_AGENT (expected 200)"
-  fi
-  log "V3 PASS — /readyz 200 with empty REDDIT_USER_AGENT"
-
-  # Assertion A.2: /sources HTML renders the "Reddit not configured" empty
-  # state. /sources is the user-facing surface that hosts QuotaStatusBanner
-  # (D-RDT-QUOTA-UI / D-RDT-AUTH-EMPTY). The plan referenced
-  # /api/admin/quota.reddit.isOperatorConfigured but admin-quota-read.ts
-  # only returns YouTube data — the actual Reddit "not configured" surface
-  # is /sources via QuotaStatusBanner.redditQuota.isOperatorConfigured=false.
-  local sources_html
-  sources_html=$(curl -sL -b <(printf "%s\n" "$session_cookie") -H "cookie: $session_cookie" "$app_url/sources" 2>/dev/null || true)
-  if ! echo "$sources_html" | grep -q "Reddit not configured"; then
-    log "----- /sources HTML (first 1200 chars) -----"
-    echo "${sources_html:0:1200}"
-    log "--------------------------------------------"
-    fail "V24: /sources HTML should render 'Reddit not configured' with empty REDDIT_USER_AGENT"
-  fi
-  log "V24 PASS — /sources renders 'Reddit not configured'"
-
-  # Assertion A.3: paste a Reddit URL with empty REDDIT_USER_AGENT → 201
-  # (mirrors YouTube parity: an unconfigured adapter doesn't BLOCK event
-  # creation, it silently skips the stats fetch — fetchEventStats returns
-  # null, the event row is created without enrichment). The user-facing
-  # signal that Reddit ingest is off lives on /sources (the V24-banner
-  # assertion above), not on the paste path.
-  local paste_resp
-  paste_resp=$(curl -sS -X POST "$app_url/api/events" \
+  # RDT.1: POST /api/sources with a reddit_account handle and the provider env
+  # unset → 422 kind_not_configured (the createSource degrade gate), never a 500,
+  # never a created row. The chip is disabled in the UI; the API is the
+  # server-side guard the smoke gate pins.
+  local rdt_create_code rdt_create_body
+  rdt_create_code=$(curl -sS -o /tmp/rdt-create.txt -w '%{http_code}' \
+    -X POST "$app_url/api/sources" \
     -H "cookie: $session_cookie" \
     -H "content-type: application/json" \
-    -w "\n%{http_code}" \
-    -d '{"kind":"reddit_post","url":"https://www.reddit.com/r/IndieDev/comments/abc/test/","occurredAt":"2026-05-14T00:00:00.000Z","title":"smoke V24 probe"}' || true)
-  local paste_code
-  paste_code=$(echo "$paste_resp" | tail -n1)
-  if [[ "$paste_code" != "201" ]]; then
-    log "----- POST /api/events response -----"
-    echo "$paste_resp"
-    log "-------------------------------------"
-    fail "V24: paste with empty REDDIT_USER_AGENT should return 201 (YouTube parity — silent stats skip), got $paste_code"
+    -d '{"kind":"reddit_account","handleUrl":"https://www.reddit.com/user/spez","isOwnedByMe":false,"autoImport":true}' \
+    || echo "curl-failed")
+  rdt_create_body=$(cat /tmp/rdt-create.txt 2>/dev/null || echo "")
+  if [[ "$rdt_create_code" != "422" ]]; then
+    log "----- POST /api/sources (reddit_account) response -----"
+    echo "$rdt_create_body"
+    log "----- recent app logs -----"
+    docker logs smoke-app 2>&1 | tail -40 || true
+    log "-------------------------------------------------------"
+    fail "(RDT.1) reddit_account create with Reddit provider unset returned $rdt_create_code, expected 422 (clean not-configured degrade, never 500)"
   fi
-  log "V24 PASS — paste returns 201 (stats skipped silently when REDDIT_USER_AGENT empty)"
+  if ! echo "$rdt_create_body" | grep -q 'kind_not_configured'; then
+    log "----- POST /api/sources (reddit_account) response -----"
+    echo "$rdt_create_body"
+    fail "(RDT.1) reddit_account 422 body did not carry 'kind_not_configured'. Got: $rdt_create_body"
+  fi
+  log "(RDT.1) PASS — reddit_account create degrades to 422 kind_not_configured (no 500, no provider call)"
 
-  # ----- Half B: configured + mock-Reddit (V25) -----
-  log "Half B (V25) — configured + mock-Reddit pipeline"
+  # RDT.2: /sources/new HTML renders the Reddit chip visible-but-disabled AND names
+  # the env var that turns it on — the affordance that tells a self-host operator
+  # Reddit is off + how to enable it. /sources/new is the full-page add-source form,
+  # so the disabled Reddit chip renders inline at SSR (the /sources modal is closed
+  # by default, so its chip markup isn't in that page's initial HTML). Both halves
+  # only render when the chip's kindMatrix entry is disabled, and Reddit is in
+  # FUNCTIONAL_KINDS, so a disabled Reddit chip is definitionally not-configured.
+  #
+  # 12-06 UAT moved WHERE each half lives: the chip's status text is now the short
+  # "not configured" (a full env-var sentence inside a compact legend chip blew the
+  # legend up, doubly so across Reddit's u/ + r/ plate pair), and the variable name
+  # moved into the chip's title= tooltip. Both are still in the SSR HTML, so this
+  # gate asserts BOTH — the disabled state and the operator-actionable variable —
+  # instead of one sentence that happened to carry both.
+  local rdt_sources_html
+  rdt_sources_html=$(curl -sL -H "cookie: $session_cookie" "$app_url/sources/new" 2>/dev/null || true)
+  if ! echo "$rdt_sources_html" | grep -q 'REDDIT_IMPORT_ENABLED'; then
+    log "----- /sources/new HTML (first 1500 chars) -----"
+    echo "${rdt_sources_html:0:1500}"
+    log "------------------------------------------------"
+    fail "(RDT.2) /sources/new HTML should NAME REDDIT_IMPORT_ENABLED (disabled-chip tooltip) with the Reddit provider unset — a self-host operator has no other way to learn what to set"
+  fi
+  if ! echo "$rdt_sources_html" | grep -q 'not configured'; then
+    log "----- /sources/new HTML (first 1500 chars) -----"
+    echo "${rdt_sources_html:0:1500}"
+    log "------------------------------------------------"
+    fail "(RDT.2) /sources/new HTML should render the Reddit chip's 'not configured' disabled status with the Reddit provider unset"
+  fi
+  log "(RDT.2) PASS — /sources/new renders Reddit disabled ('not configured') + names REDDIT_IMPORT_ENABLED in the chip tooltip"
 
-  # Boot the mock reverse-proxy.
-  # shellcheck source=tests/smoke/lib/reddit-mock.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/reddit-mock.sh"
-  start_reddit_mock || fail "reddit-mock failed to start"
+  log "=== Reddit not-configured parity PASSED ==="
+}
 
-  # The YouTube polling flow stops smoke-worker (SIGTERM) at the end of
-  # its assertions; smoke-scheduler may also have been stopped. Remove
-  # any leftover containers idempotently before re-creating with Reddit env.
-  # Also need to restart smoke-app with REDDIT_USER_AGENT + override so
-  # the paste flow (server-side) sees the configured state.
-  docker rm -f smoke-app smoke-worker smoke-scheduler 2>/dev/null || true
+# ---------------------------------------------------------------------------
+# Reddit PROVIDER-ON smoke — boots the production image with the D-08 kill-switch
+# FLIPPED ON (REDDIT_IMPORT_ENABLED=true) pointed at a hermetic ScrapeCreators mock,
+# and drives the full seam the OFF parity flow can't reach: provider-ON bootstrap,
+# worker registration of the reddit backfill queues + outbox forwarder, the create-
+# source gate flipping to ACCEPT, the author walk fetching through the mock, and the
+# reserve-before-HTTP budget seam debiting the SHARED "scrapecreators" ledger (the P0
+# fix — a reddit-private key would leave the shared balance untouched). No live
+# ScrapeCreators traffic: every call hits the local stub. Runs LAST so its provider-ON
+# re-launch of smoke-app/smoke-worker doesn't disturb the earlier OFF parity flows.
+reddit_provider_on_smoke() {
+  local app_url="$1"
+  local session_cookie="$2"
 
-  # Compliant operator UA per Reddit ToS regex
-  # (`<platform>:<id>:<version> (by /u/<handle>)`).
-  local reddit_ua="node:com.neotolis.gpd-smoke:0.1.0 (by /u/smoke)"
-  local reddit_base="http://localhost:$REDDIT_MOCK_PORT"
+  log "=== Reddit provider-ON smoke (hermetic ScrapeCreators mock) ==="
 
-  log "booting smoke-app (Reddit configured + mock base URL)"
+  # ----- 1. Boot the ScrapeCreators reddit mock on a free host port -----
+  local mock_port mock_pid
+  mock_port=$(node -e 'const s=require("net").createServer(); s.listen(0,()=>{const p=s.address().port; s.close(()=>console.log(p));});')
+  [[ -n "$mock_port" ]] || fail "(RDT-ON) could not allocate a mock port"
+  SCRAPECREATORS_MOCK_PORT="$mock_port" node "$(dirname "${BASH_SOURCE[0]}")/scrapecreators-mock.mjs" \
+    >/tmp/scrapecreators-mock.log 2>&1 &
+  mock_pid=$!
+  local mock_up=false
+  for _ in $(seq 1 50); do
+    if grep -q "listening on" /tmp/scrapecreators-mock.log 2>/dev/null; then mock_up=true; break; fi
+    sleep 0.1
+  done
+  if [[ "$mock_up" != "true" ]]; then
+    cat /tmp/scrapecreators-mock.log 2>/dev/null || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON) scrapecreators-mock did not bind within 5s"
+  fi
+  log "scrapecreators-mock up on :$mock_port"
+
+  # ----- 2. Re-launch smoke-app + smoke-worker PROVIDER-ON, pointed at the mock -----
+  # REDDIT_IMPORT_ENABLED=true flips the kill-switch; SCRAPECREATORS_BASE_URL routes every
+  # provider request to the stub; a funded budget (cap + prepaid balance) lets the
+  # reserve-before-HTTP gate pass. Same DB as the baseline, so the OAuth session persists.
+  docker rm -f smoke-app smoke-worker 2>/dev/null || true
+  local reddit_env=(
+    -e REDDIT_IMPORT_ENABLED=true
+    -e REDDIT_PROVIDER=scrapecreators
+    -e SCRAPECREATORS_API_KEY=mock-key
+    -e "SCRAPECREATORS_BASE_URL=http://localhost:$mock_port"
+    -e SOCIAL_PROVIDER_DAILY_CAP_CREDITS=100
+    -e SOCIAL_PROVIDER_PREPAID_BALANCE_CREDITS=1000
+    -e LIMIT_SOCIAL_REQUESTS_PER_DAY=50
+  )
   # shellcheck disable=SC2046
   docker run -d --name smoke-app --network host \
-    -e APP_ROLE=app \
-    -e PORT=$APP_PORT \
-    -e REDDIT_USER_AGENT="$reddit_ua" \
-    -e REDDIT_BASE_URL_OVERRIDE="$reddit_base" \
-    $(common_env_args) \
-    neotolis:ci > /dev/null
-
-  # Wait up to 30s for /readyz to come back.
-  local ready=false
-  for _ in $(seq 1 30); do
-    if curl -fsS "$app_url/readyz" > /dev/null 2>&1; then
-      ready=true
-      break
-    fi
-    sleep 1
-  done
-  [[ "$ready" == "true" ]] || fail "V25: smoke-app did not return to /readyz within 30s (Reddit-configured boot)"
-  log "smoke-app booted with REDDIT_USER_AGENT + mock base URL"
-
-  log "booting smoke-worker (Reddit configured)"
+    -e APP_ROLE=app -e PORT="$APP_PORT" "${reddit_env[@]}" $(common_env_args) neotolis:ci >/dev/null
   # shellcheck disable=SC2046
   docker run -d --name smoke-worker --network host \
-    -e APP_ROLE=worker \
-    -e REDDIT_USER_AGENT="$reddit_ua" \
-    -e REDDIT_BASE_URL_OVERRIDE="$reddit_base" \
-    $(common_env_args) \
-    neotolis:ci > /dev/null
+    -e APP_ROLE=worker "${reddit_env[@]}" $(common_env_args) neotolis:ci >/dev/null
 
-  log "booting smoke-scheduler (Reddit configured)"
-  # shellcheck disable=SC2046
-  docker run -d --name smoke-scheduler --network host \
-    -e APP_ROLE=scheduler \
-    -e REDDIT_USER_AGENT="$reddit_ua" \
-    -e REDDIT_BASE_URL_OVERRIDE="$reddit_base" \
-    $(common_env_args) \
-    neotolis:ci > /dev/null
-
-  # Wait for the worker grep contract — V25 assertion 5.
-  # `reddit batch-worker ready: 8-tick round-robin loop` is the exact line
-  # emitted by src/worker/index.ts when REDDIT_USER_AGENT is non-empty.
-  log "waiting for 'reddit batch-worker ready' grep contract"
-  set +o pipefail
-  timeout 30 docker logs -f smoke-worker 2>&1 | grep -q -m1 "reddit batch-worker ready: 8-tick round-robin loop"
-  local reddit_ready=$?
-  set -o pipefail
-  if [ $reddit_ready -ne 0 ]; then
-    log "----- smoke-worker logs (last 80) -----"
-    docker logs smoke-worker 2>&1 | tail -80 || true
-    fail "V25: worker did not print 'reddit batch-worker ready: 8-tick round-robin loop' within 30s"
-  fi
-  log "V25 PASS — worker grep contract"
-
-  # Wait for scheduler ready so cron schedules are registered.
-  set +o pipefail
-  timeout 30 docker logs -f smoke-scheduler 2>&1 | grep -q -m1 "scheduler ready"
-  local scheduler_ready=$?
-  set -o pipefail
-  if [ $scheduler_ready -ne 0 ]; then
-    log "----- smoke-scheduler logs (last 80) -----"
-    docker logs smoke-scheduler 2>&1 | tail -80 || true
-    fail "V25: scheduler did not print 'scheduler ready' within 30s"
-  fi
-
-  # V25 assertion 6: 4 Reddit cron schedules registered in pgboss.schedule.
-  # Mirrors the YouTube polling flow's pgboss.schedule readback pattern —
-  # via `docker exec smoke-app node -e` so the runner doesn't need psql.
-  log "asserting 4 reddit.cron.* schedules in pgboss.schedule"
-  local schedules schedules_rc
-  set +e
-  schedules=$(docker exec smoke-app node -e '
-    import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
-      const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
-      const c = new Client({ connectionString: process.env.DATABASE_URL });
-      await c.connect();
-      try {
-        const r = await c.query("SELECT name FROM pgboss.schedule WHERE name LIKE $1 ORDER BY name", ["reddit.cron.%"]);
-        console.log(r.rows.map((row) => row.name).join("\n"));
-      } finally { await c.end(); }
-    }).catch((e) => { console.error(e); process.exit(1); });
-  ' 2>&1)
-  schedules_rc=$?
-  set -e
-  log "----- pgboss.schedule reddit.cron.* names (exit=$schedules_rc) -----"
-  echo "$schedules"
-  log "-------------------------------------------------------------------"
-  if [ "$schedules_rc" -ne 0 ]; then
-    log "----- smoke-scheduler logs (last 80) -----"
-    docker logs smoke-scheduler 2>&1 | tail -80 || true
-    fail "V25: docker exec smoke-app pgboss.schedule readback exited $schedules_rc"
-  fi
-  for expected in \
-    "reddit.cron.enqueue-service-sources" \
-    "reddit.cron.enqueue-service-posts" \
-    "reddit.cron.baselines" \
-    "reddit.cron.deletion-propagation"; do
-    if ! echo "$schedules" | grep -qx "$expected"; then
-      fail "V25: pgboss.schedule missing entry for '$expected'"
-    fi
+  local ready=false
+  for _ in $(seq 1 60); do
+    if curl -fsS "http://localhost:$APP_PORT/readyz" >/dev/null 2>&1; then ready=true; break; fi
+    sleep 1
   done
-  log "V25 PASS — 4 reddit.cron.* schedules registered"
-
-  # V25 assertion 7: paste a Reddit post URL → 201 + reddit_post_snapshots row.
-  # handlePostSingle calls redditFetch('/comments/abc.json') which hits the
-  # mock and returns canned t3 (id=abc, subreddit=IndieDev). The synchronous
-  # ingest path UPSERTs reddit_posts + writes one reddit_post_snapshots row.
-  #
-  # We re-use the existing session_cookie (cookie A from baseline OAuth).
-  # The paste route does NOT require admin allowlist — any authenticated
-  # user can paste.
-  log "POST /api/events with Reddit URL → expect 201 event_created"
-  local paste_b
-  paste_b=$(curl -sS -X POST "$app_url/api/events" \
-    -H "cookie: $session_cookie" \
-    -H "content-type: application/json" \
-    -d '{"kind":"reddit_post","url":"https://www.reddit.com/r/IndieDev/comments/abc/test/","occurredAt":"2026-05-14T00:00:00.000Z","title":"smoke V25 probe"}')
-  local paste_event_id
-  paste_event_id=$(echo "$paste_b" | jq -r '.id // empty' 2>/dev/null || true)
-  if [[ -z "$paste_event_id" || "$paste_event_id" == "null" ]]; then
-    log "----- POST /api/events response -----"
-    echo "$paste_b"
-    log "----- smoke-app logs (last 80) -----"
-    docker logs smoke-app 2>&1 | tail -80 || true
-    fail "V25: Reddit paste did not return event id (got: $paste_b)"
+  if [[ "$ready" != "true" ]]; then
+    docker logs smoke-app 2>&1 | tail -40 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON) provider-ON app /readyz never came up (bootstrap crashed with Reddit ON?)"
   fi
-  log "V25 PASS — event $paste_event_id created"
+  set +o pipefail
+  timeout 30 docker logs -f smoke-worker 2>&1 | grep -q -m1 "worker ready"
+  local wr=$?
+  set -o pipefail
+  if [ $wr -ne 0 ]; then
+    docker logs smoke-worker 2>&1 | tail -50 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON) provider-ON worker did not print 'worker ready' (queue registration crashed?)"
+  fi
+  log "(RDT-ON.0) PASS — provider-ON app + worker booted (bootstrap + queue/outbox registration OK with Reddit ON)"
 
-  # Wait up to 10s for the reddit_post_snapshots row. handlePostSingle is
-  # synchronous in the paste flow — by the time POST /api/events returns
-  # 201, the snapshot row is already written. We still poll briefly for
-  # eventual-consistency robustness.
-  log "waiting up to 10s for reddit_post_snapshots row (post_id=t3_abc)"
-  local snap_present="false"
-  for _ in $(seq 1 20); do
+  # ----- 3. create a reddit_account source — the gate must now ACCEPT it -----
+  local create_code create_body
+  create_code=$(curl -sS -o /tmp/rdt-on-create.txt -w '%{http_code}' -X POST "$app_url/api/sources" \
+    -H "cookie: $session_cookie" -H "content-type: application/json" \
+    -d '{"kind":"reddit_account","handleUrl":"https://www.reddit.com/user/smokeauthor","isOwnedByMe":true,"autoImport":true}' \
+    || echo "curl-failed")
+  create_body=$(cat /tmp/rdt-on-create.txt 2>/dev/null || echo "")
+  if [[ "$create_code" != "200" && "$create_code" != "201" ]]; then
+    echo "$create_body"
+    docker logs smoke-app 2>&1 | tail -40 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.1) reddit_account create with the provider ON returned $create_code, expected 200/201"
+  fi
+  log "(RDT-ON.1) PASS — reddit_account create ACCEPTED provider-ON (the kill-switch flips the gate)"
+
+  # ----- 4. wait for the backfill walk to import via the mock (full HTTP seam) -----
+  # BOTH mock pages must land: t3_smoke01 is page 1, t3_smoke02 is only reachable by
+  # passing the page-1 `after` cursor back (the mock's author feed paginates). Waiting
+  # only for smoke01 let a broken cursor hand-off, an early end-of-feed, or a repeated
+  # first page ship green — the pagination this gate exists to pin.
+  log "waiting up to 60s for the walk to import t3_smoke01 + t3_smoke02 (both mock pages, cursor followed)"
+  local imported=false
+  for _ in $(seq 1 60); do
     local found
     found=$(docker exec smoke-app node -e '
       import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
@@ -252,24 +208,54 @@ reddit_polling_smoke() {
         const c = new Client({ connectionString: process.env.DATABASE_URL });
         await c.connect();
         try {
-          const r = await c.query("SELECT 1 FROM reddit_post_snapshots WHERE post_id = $1 LIMIT 1", ["t3_abc"]);
-          console.log(r.rowCount > 0 ? "yes" : "no");
+          const e = await c.query("SELECT COUNT(DISTINCT external_id)::int AS n FROM events WHERE external_id = ANY($1) AND kind=$2", [["t3_smoke01","t3_smoke02"],"reddit_post"]);
+          const s = await c.query("SELECT COUNT(DISTINCT post_id)::int AS n FROM reddit_post_snapshots WHERE post_id = ANY($1)", [["t3_smoke01","t3_smoke02"]]);
+          console.log(e.rows[0].n === 2 && s.rows[0].n === 2 ? "yes":"no");
         } finally { await c.end(); }
-      }).catch((e) => { console.error(e); process.exit(1); });
+      }).catch((err)=>{console.error(err);process.exit(1);});
     ' 2>/dev/null || echo "no")
-    if [[ "$found" == "yes" ]]; then
-      snap_present="true"
-      break
-    fi
-    sleep 0.5
+    if [[ "$found" == "yes" ]]; then imported=true; break; fi
+    sleep 1
   done
-  if [[ "$snap_present" != "true" ]]; then
-    log "----- smoke-app logs (last 80) -----"
-    docker logs smoke-app 2>&1 | tail -80 || true
-    fail "V25: reddit_post_snapshots row never appeared for post_id=t3_abc"
+  if [[ "$imported" != "true" ]]; then
+    docker logs smoke-worker 2>&1 | tail -80 || true
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.2) the provider-ON walk never imported BOTH t3_smoke01 and t3_smoke02 (events + snapshots) — pagination through the mock cursor is broken"
   fi
-  log "V25 PASS — reddit_post_snapshots row written for post_id=t3_abc"
+  log "(RDT-ON.2) PASS — walk imported both pages' events + snapshots (cursor hand-off + end-of-feed live)"
 
-  stop_reddit_mock
-  log "=== Reddit adapter smoke extension PASSED ==="
+  # ----- 5. the reserve-before-HTTP budget seam charged the SHARED ledger (P0) -----
+  local balance
+  balance=$(docker exec smoke-app node -e '
+    import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
+      const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
+      const c = new Client({ connectionString: process.env.DATABASE_URL });
+      await c.connect();
+      try {
+        const r = await c.query("SELECT prepaid_balance_credits FROM social_provider_balance WHERE provider=$1", ["scrapecreators"]);
+        console.log(r.rowCount>0 ? String(r.rows[0].prepaid_balance_credits) : "missing");
+      } finally { await c.end(); }
+    }).catch((err)=>{console.error(err);process.exit(1);});
+  ')
+  log "shared scrapecreators balance after the walk: $balance (seeded 1000)"
+  # POSITIVE assertion, not a denylist. The probe used to merge stderr into $balance
+  # (2>&1) and only reject the literals "missing"/"1000" — so a probe that CRASHED
+  # produced a stack trace, matched neither, and read as "the ledger was debited".
+  # The strongest P0 assertion in this gate was the one that could silently stop
+  # asserting. Require a real integer, and pin the EXACT debit: the walk fetches
+  # exactly the two mock pages, 1 credit each, so the seeded 1000 must land on 998.
+  # "any positive debit" let a page-1 retry loop (over-charging) or a missing page 2
+  # (under-fetching) both ship green.
+  if ! [[ "$balance" =~ ^[0-9]+$ ]]; then
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.3) the balance probe did not return a number (got: '${balance}') — cannot verify the shared-ledger debit"
+  fi
+  if (( balance != 998 )); then
+    kill -TERM "$mock_pid" 2>/dev/null || true
+    fail "(RDT-ON.3) the shared 'scrapecreators' balance is $balance, expected exactly 998 (seeded 1000 − 2 pages × 1 credit) — reddit spend did not charge the shared ledger correctly"
+  fi
+  log "(RDT-ON.3) PASS — reddit spend debited the SHARED 'scrapecreators' balance by exactly 2 credits (P0 seam + pagination cost live)"
+
+  kill -TERM "$mock_pid" 2>/dev/null || true
+  log "=== Reddit provider-ON smoke PASSED ==="
 }

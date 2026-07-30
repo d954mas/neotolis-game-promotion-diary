@@ -27,24 +27,31 @@
   import type {
     AdminInstagramBlock,
     AdminTiktokBlock,
+    AdminRedditBlock,
   } from "$lib/server/services/admin-quota-read.js";
 
-  // The IG + TikTok provider blocks are structurally identical (same spend/cap +
-  // balance + throttle shape, same collapse-when-unconfigured contract), so this
-  // one panel renders either. `heading` + `disabledHint` let each section title
-  // its not-configured placeholder for the right platform; both default to the
-  // generic "Provider spend" copy.
+  // The IG + TikTok + Reddit provider blocks are structurally identical (same
+  // spend/cap + balance + throttle shape, same collapse-when-unconfigured contract),
+  // so this one panel renders any of them. `heading` + `disabledHint` let each
+  // section title its not-configured placeholder for the right platform; both
+  // default to the generic "Provider spend" copy.
   let {
     block,
     heading = m.admin_quota_section_providers_title(),
     disabledHint = m.sources_new_instagram_disabled_hint(),
   }: {
-    block: AdminInstagramBlock | AdminTiktokBlock;
+    block: AdminInstagramBlock | AdminTiktokBlock | AdminRedditBlock;
     heading?: string;
     disabledHint?: string;
   } = $props();
 
-  const spendPct = $derived(block.isConfigured ? quotaPct(block.creditsUsed, block.dailyCap) : 0);
+  // The bar tracks the JOINT provider spend, because that is what dailyCap and
+  // throttleState gate on — Instagram, TikTok and Reddit share one ScrapeCreators
+  // envelope. Charting this platform's own share against the shared cap read "40/1000"
+  // while reservations were already being denied at 940/1000.
+  const spendPct = $derived(
+    block.isConfigured ? quotaPct(block.providerCreditsUsed, block.dailyCap) : 0,
+  );
   const spendZone = $derived(quotaZone(spendPct));
 </script>
 
@@ -60,7 +67,7 @@
     <div class="provider-spend__row provider-spend__row--bar">
       <span class="provider-spend__label">{m.admin_quota_provider_spend_label()}</span>
       <span class="provider-spend__num">
-        {block.creditsUsed.toLocaleString()}/{block.dailyCap.toLocaleString()}
+        {block.providerCreditsUsed.toLocaleString()}/{block.dailyCap.toLocaleString()}
       </span>
       <div class="quota-banner__bar quota-banner__bar--{spendZone}" aria-hidden="true">
         <div class="quota-banner__bar-fill" style="width: {spendPct}%"></div>
@@ -73,7 +80,7 @@
     </div>
     {#if block.prepaidBalance !== block.remainingBalance}
       <div class="provider-spend__row provider-spend__row--sub">
-        <span class="provider-spend__label">Prepaid balance</span>
+        <span class="provider-spend__label">{m.admin_quota_provider_prepaid_balance_label()}</span>
         <span class="provider-spend__num">{block.prepaidBalance.toLocaleString()}</span>
       </div>
     {/if}

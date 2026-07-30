@@ -104,11 +104,30 @@ async function processOnce(boss: PgBoss): Promise<number> {
   let forwarded = 0;
   for (const row of rows) {
     try {
-      await boss.send(
+      const { retrySingletonConflict, ...sendOptions } = row.options;
+      const jobId = await boss.send(
         row.queue,
         row.payload as Parameters<typeof boss.send>[1],
-        row.options as Parameters<typeof boss.send>[2],
+        { ...sendOptions, id: row.id } as Parameters<typeof boss.send>[2],
       );
+      if (jobId === null && retrySingletonConflict === true) {
+        const alreadyDelivered = await boss.getJobById(row.queue, row.id);
+        if (alreadyDelivered !== null) {
+          await db
+            .update(outbox)
+            .set({ forwardedAt: new Date(), lastError: null })
+            .where(sql`${outbox.id} = ${row.id}`);
+          forwarded += 1;
+          continue;
+        }
+        await db
+          .update(outbox)
+          .set({
+            lastError: "pg-boss singleton conflict; retry after active job completes",
+          })
+          .where(sql`${outbox.id} = ${row.id}`);
+        continue;
+      }
       await db
         .update(outbox)
         .set({ forwardedAt: new Date() })

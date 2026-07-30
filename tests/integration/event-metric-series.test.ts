@@ -10,16 +10,11 @@
 // reddit-snapshots.test.ts.
 
 import { describe, it, expect } from "vitest";
-import { sql } from "drizzle-orm";
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { youtubeVideoSnapshots } = await import("../../src/lib/server/db/schema/index.js");
 const { youtubeFetchEventMetricSeries } =
   await import("../../src/lib/sources/youtube/server/metric-series.js");
-const { redditFetchEventMetricSeries } =
-  await import("../../src/lib/sources/reddit/server/metric-series.js");
-const { upsertRedditPost, upsertRedditSubreddit } =
-  await import("../../src/lib/sources/reddit/server/upsert.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { seedUserDirectly } = await import("./helpers.js");
@@ -145,118 +140,6 @@ describe("event metric series (VIZ-01)", () => {
     // The mid-series hidden comment stays null (a GAP), not coerced to 0.
     const comments = series.find((s) => s.metricKey === "comment_count")!;
     expect(comments.points.map((p) => p.value)).toEqual([1, null, 7]);
-  });
-
-  it("reddit adapter fetchEventMetricSeries returns ASC score/num_comments series", async () => {
-    const postId = `t3_${uniq()}`;
-    const sub = `sub_${uniq()}`;
-    // reddit_post_snapshots.post_id FK → reddit_posts.post_id; seed the
-    // parent chain (subreddit → post) before the snapshots.
-    await upsertRedditSubreddit(db, {
-      name: sub,
-      subredditId: null,
-      subscribers: null,
-      accountsActive: null,
-      description: null,
-      publicDescription: null,
-    });
-    await upsertRedditPost(db, {
-      postId,
-      subreddit: sub,
-      author: "op",
-      authorFullname: "t2_op",
-      permalink: `/r/${sub}/comments/${postId}`,
-      title: "metric series post",
-      submittedAt: new Date("2026-05-01T00:00:00Z"),
-      metadata: {},
-    });
-
-    // 4 snapshots at distinct minute buckets (ascending score + comments),
-    // inserted with explicit back-dated minute-truncated polled_at so the
-    // (post_id, polled_at) PK admits all four rows.
-    const seed: ReadonlyArray<{ minutesAgo: number; score: number; comments: number }> = [
-      { minutesAgo: 40, score: 3, comments: 0 },
-      { minutesAgo: 30, score: 9, comments: 2 },
-      { minutesAgo: 20, score: 21, comments: 5 },
-      { minutesAgo: 10, score: 40, comments: 8 },
-    ];
-    for (const s of seed) {
-      await db.execute(sql`
-        INSERT INTO reddit_post_snapshots
-          (post_id, polled_at, status, score, num_comments, awards_total, upvote_ratio, removed_by_category)
-        VALUES (
-          ${postId},
-          date_trunc('minute', NOW() - (${s.minutesAgo} || ' minutes')::interval),
-          'ok', ${s.score}, ${s.comments}, 0, 0.95, NULL
-        )
-      `);
-    }
-
-    const series = await redditFetchEventMetricSeries("ignored-user", {
-      kind: "reddit_post",
-      externalId: postId,
-    });
-
-    // Two series total: score + num_comments.
-    expect(series.map((s) => s.metricKey)).toEqual(["score", "num_comments"]);
-    expect(series.map((s) => s.labelKey)).toEqual([
-      "chart_metric_score",
-      "chart_metric_num_comments",
-    ]);
-
-    const score = series.find((s) => s.metricKey === "score")!;
-    expect(score.points).toHaveLength(4);
-    expect(score.points.map((p) => p.value)).toEqual([3, 9, 21, 40]);
-    const isoTimes = score.points.map((p) => p.polledAt);
-    expect(isoTimes).toEqual([...isoTimes].sort());
-
-    const comments = series.find((s) => s.metricKey === "num_comments")!;
-    expect(comments.points.map((p) => p.value)).toEqual([0, 2, 5, 8]);
-  });
-
-  it("reddit adapter accepts the bare external id form (no t3_ prefix)", async () => {
-    const bareId = uniq();
-    const postId = `t3_${bareId}`;
-    const sub = `sub_${uniq()}`;
-    await upsertRedditSubreddit(db, {
-      name: sub,
-      subredditId: null,
-      subscribers: null,
-      accountsActive: null,
-      description: null,
-      publicDescription: null,
-    });
-    await upsertRedditPost(db, {
-      postId,
-      subreddit: sub,
-      author: "op",
-      authorFullname: "t2_op",
-      permalink: `/r/${sub}/comments/${postId}`,
-      title: "bare-id post",
-      submittedAt: new Date("2026-05-01T00:00:00Z"),
-      metadata: {},
-    });
-    await db.execute(sql`
-      INSERT INTO reddit_post_snapshots
-        (post_id, polled_at, status, score, num_comments, awards_total, upvote_ratio, removed_by_category)
-      VALUES (${postId}, date_trunc('minute', NOW()), 'ok', 7, 1, 0, 0.9, NULL)
-    `);
-
-    // externalId passed WITHOUT the t3_ prefix — the reader normalizes.
-    const series = await redditFetchEventMetricSeries("ignored-user", {
-      kind: "reddit_post",
-      externalId: bareId,
-    });
-    const score = series.find((s) => s.metricKey === "score")!;
-    expect(score.points.map((p) => p.value)).toEqual([7]);
-  });
-
-  it("reddit adapter self-filters: a youtube_video event returns []", async () => {
-    const out = await redditFetchEventMetricSeries("ignored-user", {
-      kind: "youtube_video",
-      externalId: "vid_whatever",
-    });
-    expect(out).toEqual([]);
   });
 });
 

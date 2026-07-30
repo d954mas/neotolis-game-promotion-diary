@@ -78,6 +78,25 @@ export default defineConfig({
           environment: "node",
           env: {
             METRICS_BEARER_TOKEN: "test-metrics-token-for-ci",
+            // PIN the vars whose DEFAULT is the thing under test. Vite loads the
+            // developer's .env into the test process, so a machine that has these set
+            // for local dev ran a different suite than CI: twitter-not-configured
+            // asserts "TWITTER_PROVIDER is unset (env default)" and the pacer tests
+            // assert the 5s floor, both of which a populated .env silently overrides.
+            // That produced a permanent 7-test local red — and a suite that is never
+            // green is a suite whose failures stop being read, which is exactly where
+            // a real regression hides. Pinning here (not in .env) keeps local == CI
+            // without asking anyone to gut their dev config.
+            TWITTER_PROVIDER: "",
+            TWITTERAPIIO_MIN_REQUEST_INTERVAL_MS: "5000",
+            // Reddit-off baseline (same reasoning as the Twitter pins): the
+            // not-configured / isolation / degrade suites assert the D-08 kill-switch
+            // DEFAULT, which a developer's Reddit-enabled .env silently overrides.
+            // The kill-switch is an independent AND-term, so pinning it alone keeps
+            // isRedditConfigured() false regardless of the shared ScrapeCreators key.
+            // Reddit-ON suites re-enable via `process.env.REDDIT_IMPORT_ENABLED =
+            // "true"` at file top (before env.ts loads), which wins over this pin.
+            REDDIT_IMPORT_ENABLED: "false",
           },
           setupFiles: ["./tests/setup.ts"],
           testTimeout: 30_000,

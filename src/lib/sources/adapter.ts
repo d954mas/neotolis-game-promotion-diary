@@ -301,7 +301,7 @@ export interface CanonicalizeResult {
   displayName?: string | null;
   /** URL-intrinsic identifiers the walker needs as provider query keys, merged
    *  onto data_sources.metadata at create time. Mirrors
-   *  NormalizeSourceResult.metadata (Reddit's metadata.username/subreddit
+   *  NormalizeSourceResult.metadata (Reddit's metadata.handle/slug
    *  injection) — the Instagram walker reads metadata.handle here to call the
    *  provider (the account_id alone is not a query param). These are
    *  URL-intrinsic provider keys, NOT renameable display values, so persisting
@@ -331,7 +331,7 @@ export interface CreateContext {
  *
  *  Use this for deterministic parsing/canonicalization that must happen
  *  before exact handle_url duplicate checks, such as Reddit's
- *  reddit.com/u/X -> https://www.reddit.com/user/X and metadata.username
+ *  reddit.com/u/X -> https://www.reddit.com/user/X and metadata.handle
  *  injection. This hook MUST NOT burn upstream API quota; use
  *  canonicalizeOnCreate for I/O-backed canonicalization such as resolving
  *  a YouTube video URL to its channel id. */
@@ -394,6 +394,12 @@ export type EventPreviewMetadata =
       // Adapters whose URL-parsed externalId already matches the cache key (e.g.
       // YouTube's videoId) leave this undefined and the caller keeps the parsed id.
       externalId?: string;
+      // The RESOLVED canonical permalink when the PASTED URL was an indirection the
+      // adapter had to resolve upstream (Reddit /s/ share links — the post id is not
+      // in the pasted URL, only an opaque redirect token). The caller adopts it as
+      // EnrichmentResult.canonicalUrl so the saved event stores a parseable post URL.
+      // Absent when the pasted canonical is already authoritative.
+      canonicalUrl?: string;
     }
   | { kind: "private" }
   | { kind: "unavailable" }
@@ -455,9 +461,15 @@ export interface MinimalBoss {
   send(
     name: string,
     payload: object,
-    options?: { singletonKey?: string; singletonSeconds?: number; priority?: number },
+    options?: {
+      id?: string;
+      singletonKey?: string;
+      singletonSeconds?: number;
+      priority?: number;
+    },
   ): Promise<string | null>;
-  createQueue(name: string): Promise<unknown>;
+  getJobById?(name: string, id: string): Promise<unknown | null>;
+  createQueue(name: string, options?: { policy?: string }): Promise<unknown>;
 }
 
 export interface RefreshQueueCapability {
@@ -550,7 +562,7 @@ export interface SyncStatsCapability {
     /** Optional per-adapter signal that the event's author matches one
      *  of the user's registered, owned sources. When set, createEvent
      *  UPDATEs events.author_is_me unless the caller passed an explicit
-     *  value. Reddit: t3.author === reddit_account.metadata.username.
+     *  value. Reddit: t3.author === reddit_account.metadata.handle.
      *  YouTube: inheritance happens via enrichFromUrl's findActiveSourceByHandleUrl,
      *  NOT via this field - YouTube returns undefined here. */
     authorIsMe?: boolean;
@@ -706,6 +718,17 @@ export interface SourceAdapter {
    *  stats-less card. Adapters whose external_id IS URL-derivable (YouTube
    *  videoId, Reddit t3 id) omit this — the parseAnyUrl path already covers them. */
   resolveCachedExternalId?(url: string): Promise<string | null>;
+
+  /** Resolve `author_is_me` for a pasted event from the adapter's OWN cache.
+   *  Declare this ONLY for kinds whose source can carry OTHER PEOPLE's content, so
+   *  ownership is a property of the POST, not of the source row (CHECKLIST §3):
+   *  Reddit matches the cached post's author against the tenant's own
+   *  `reddit_account` sources. Kinds where one source == one identity
+   *  (telegram/twitter/tiktok/instagram) inherit from the source row at create time
+   *  and omit this. Returns false when the cache has no row (a create without a
+   *  prior preview) — the walk corrects it on the next pass. An explicit
+   *  `input.authorIsMe` from the caller always wins over this. */
+  resolveCachedAuthorIsMe?(userId: string, externalId: string): Promise<boolean>;
 
   /** Batch lookup of live poll-state for events of this adapter's kinds.
    *  dto.ts's overlayPollStateOnEvents iterates allAdapters and merges

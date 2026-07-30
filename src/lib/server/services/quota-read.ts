@@ -12,10 +12,10 @@
 // (Reddit service-load gauge), so the no-unfiltered-tenant-query rule
 // stays satisfied.
 
-import { db } from "../db/client.js";
 import { allAdapters } from "$lib/sources/registry.js";
-import { redditAdapter, getRecentLoad } from "$lib/sources/reddit/server/index.js";
-import { checkRedditUserCap } from "$lib/sources/reddit/server/quota.js";
+import { isRedditConfigured } from "$lib/sources/reddit/server/provider/registry.js";
+import { getRedditProviderBlock } from "$lib/sources/reddit/server/observability.js";
+import { env } from "../config/env.js";
 import { getUserQuotaUsedToday, getUserQuotaLifetime, nextPacificMidnight } from "./quota.js";
 
 export interface QuotaPlatformView {
@@ -29,8 +29,13 @@ export interface QuotaPlatformView {
 export type RedditQuotaView =
   | {
       isOperatorConfigured: true;
-      sourceActions: { used: number; cap: number; windowMinutes: number };
-      postRefreshes: { used: number; cap: number; windowMinutes: number };
+      // Two INDEPENDENT per-kind daily buckets — mirrors enforcement. The per-user cap
+      // (enforceAdapterUserQuota / getUserQuotaUsedToday) keys on the SOURCE KIND, so
+      // reddit_account and reddit_subreddit each get their OWN LIMIT_SOCIAL_REQUESTS_PER_
+      // DAY allowance. Surfacing them as two rows (not a summed single row) keeps the
+      // banner honest: 30 account + 30 subreddit is 30/50 AND 30/50, never 60/50.
+      accountRequests: { used: number; cap: number };
+      subredditRequests: { used: number; cap: number };
       serviceLoad: { used: number; capacity: number };
     }
   | { isOperatorConfigured: false };
@@ -65,30 +70,38 @@ export async function loadQuotaPlatforms(userId: string): Promise<QuotaPlatformV
  * Reddit-specific block. The Reddit tab in QuotaStatusBanner renders a
  * 3-line view (source-actions / post-refreshes / service-load) instead
  * of the YouTube two-axis bars; when the operator hasn't configured
- * REDDIT_USER_AGENT we surface the "not configured" empty state.
+ * Reddit import (isRedditConfigured() false) we surface the "not
+ * configured" empty state.
  */
 export async function loadRedditQuota(userId: string): Promise<RedditQuotaView> {
-  if (!redditAdapter.observability.auth.isOperatorConfigured) {
-    return { isOperatorConfigured: false };
-  }
-  const [sourceActionsResult, postRefreshesResult, serviceLoad] = await Promise.all([
-    checkRedditUserCap(db, userId, "source-actions"),
-    checkRedditUserCap(db, userId, "post-refreshes"),
-    getRecentLoad(60),
+  // The rebuilt Reddit adapter (Phase 12) is a PAID ScrapeCreators provider behind
+  // the D-08 kill-switch, NOT the old strict-rate-limited free-`.json` path. When the
+  // operator hasn't opted in (isRedditConfigured() false — REDDIT_IMPORT_ENABLED unset
+  // is the default) the banner renders the not-configured empty state.
+  if (!isRedditConfigured()) return { isOperatorConfigured: false };
+
+  // Configured: Reddit shares the ScrapeCreators prepaid pool (with IG/TikTok) and is
+  // fair-shared per user via LIMIT_SOCIAL_REQUESTS_PER_DAY — the old two-axis 15-min
+  // sliding cap is gone. Enforcement keys the cap per SOURCE KIND (reddit_account and
+  // reddit_subreddit are separate keyspaces — Phase 10 two-keyspace lesson), so the two
+  // usages are INDEPENDENT and must NOT be summed: surface them as two per-kind rows,
+  // each against its own daily allowance, plus the operator's shared ScrapeCreators
+  // daily spend as the service-load line.
+  const [acctUsage, subUsage, block] = await Promise.all([
+    getUserQuotaUsedToday(userId, "reddit_account"),
+    getUserQuotaUsedToday(userId, "reddit_subreddit"),
+    getRedditProviderBlock(),
   ]);
+  const perUserCap = env.LIMIT_SOCIAL_REQUESTS_PER_DAY;
   return {
     isOperatorConfigured: true,
-    sourceActions: {
-      used: sourceActionsResult.used,
-      cap: sourceActionsResult.cap,
-      windowMinutes: sourceActionsResult.window_minutes,
-    },
-    postRefreshes: {
-      used: postRefreshesResult.used,
-      cap: postRefreshesResult.cap,
-      windowMinutes: postRefreshesResult.window_minutes,
-    },
-    serviceLoad,
+    accountRequests: { used: acctUsage.requests, cap: perUserCap },
+    subredditRequests: { used: subUsage.requests, cap: perUserCap },
+    // JOINT provider spend, not Reddit's share: `dailyCap` is the shared
+    // ScrapeCreators envelope (IG + TikTok + Reddit), so pairing it with Reddit-only
+    // credits told the user "40/1000" at the exact moment their refresh was being
+    // refused because the pool stood at 940/1000.
+    serviceLoad: { used: block.providerCreditsUsed, capacity: block.dailyCap },
   };
 }
 

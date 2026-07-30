@@ -102,22 +102,17 @@ export const ALLOWLIST_TABLES = new Set([
   // info). Same semantics as youtubeChannels — keyed on video_id, no
   // user_id, shared across all tenants who ever reference this video.
   "youtubeVideos",
-  // Phase 03.1 Reddit public-data tables (no user_id by design).
-  // Same public-data semantics as the YouTube cache: post score /
-  // upvote ratio / subreddit subscribers etc. are identical regardless
-  // of which tenant looked them up. NOTE: `adapterRefreshQueue` is
-  // intentionally NOT here — it lives in TENANT_TABLES because user
-  // lanes carry user_id; cross-tenant scans (service lanes) must
-  // opt out with an inline `eslint-disable-next-line ... -- …`
-  // justification per call-site.
+  // Phase 12 Reddit public-data tables (no user_id by design — ScrapeCreators
+  // rebuild). Same public-data semantics as the YouTube/IG/TikTok caches: post
+  // score / comment count / subreddit subscribers are identical regardless of
+  // which tenant looked them up. NOTE: `adapterRefreshQueue` is intentionally
+  // NOT here — it lives in TENANT_TABLES because user lanes carry user_id;
+  // cross-tenant scans (service lanes) must opt out with an inline
+  // `eslint-disable-next-line ... -- …` justification per call-site.
+  "redditAccounts", // public external data, no tenant scope (account subject entity)
+  "redditSubreddits", // public external data, no tenant scope (subreddit subject entity)
   "redditPosts", // public external data, no tenant scope
-  "redditUsersCache", // public external data, no tenant scope
-  "redditSubredditsCache", // public external data, no tenant scope
   "redditPostSnapshots", // public external data, no tenant scope (time-series)
-  "redditUserSnapshots", // public external data, no tenant scope (time-series; OWNED reddit_accounts only — see schema header)
-  "redditSubredditSnapshots", // public external data, no tenant scope (time-series; all cached subs)
-  "redditSubredditBaselines", // public external data, no tenant scope (per-sub aggregates)
-  "redditPacer", // singleton rate-limit-token row, no tenant scope
   // Phase 8 Instagram + social-provider public-data / operator-state tables
   // (no user_id by design — same public-data semantics as the YouTube cache:
   // a post's play/like/comment counts are identical regardless of which

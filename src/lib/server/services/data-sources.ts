@@ -48,6 +48,7 @@ import { ensureChannelState } from "./channel-state.js";
 import { isInstagramConfigured } from "$lib/sources/instagram/server/provider/registry.js";
 import { isTikTokConfigured } from "$lib/sources/tiktok/server/provider/registry.js";
 import { isTwitterConfigured } from "$lib/sources/twitter/server/provider/registry.js";
+import { isRedditConfigured } from "$lib/sources/reddit/server/provider/registry.js";
 
 // Initial-backfill window presets accepted by createSource for
 // kind=youtube_channel + autoImport. The worker handler reads
@@ -104,10 +105,16 @@ export const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
 // no walker will ever poll. Generalized from the old hardcoded instagram-only
 // `if` so TikTok (and X in Phase 11) plug in with ONE map entry — no re-edit of
 // the gate. Telegram/YouTube/Reddit are absent on purpose (free, always-on).
+// Reddit (Phase 12): the rebuilt adapter is a PAID ScrapeCreators provider behind
+// the D-08 kill-switch (isRedditConfigured checks REDDIT_IMPORT_ENABLED FIRST), so
+// BOTH reddit kinds gate here — unset ⇒ clean 422 kind_not_configured, unlike the
+// old free-`.json` path which registered them as always-available.
 const SOURCE_KINDS_NEEDING_PROVIDER: ReadonlyMap<SourceKind, () => boolean> = new Map([
   ["instagram_account", isInstagramConfigured],
   ["tiktok_account", isTikTokConfigured],
   ["twitter_account", isTwitterConfigured],
+  ["reddit_account", isRedditConfigured],
+  ["reddit_subreddit", isRedditConfigured],
 ]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata.
@@ -120,8 +127,8 @@ const SOURCE_KINDS_NEEDING_PROVIDER: ReadonlyMap<SourceKind, () => boolean> = ne
 // other strings are the disabled-chip rationale.
 export const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   youtube_channel: "available",
-  reddit_account: "available",
-  reddit_subreddit: "available",
+  reddit_account: "not configured by operator",
+  reddit_subreddit: "not configured by operator",
   twitter_account: "not configured by operator",
   telegram_channel: "available",
   discord_server: "coming soon",
@@ -459,7 +466,7 @@ export async function createSource(
   // provider (INSTAGRAM_PROVIDER / TIKTOK_PROVIDER + SCRAPECREATORS_API_KEY).
   // When unconfigured, surface a clean 422 `kind_not_configured` (NOT a 500,
   // NOT the schema-only `kind_not_yet_functional`) — mirrors the Reddit
-  // REDDIT_USER_AGENT-empty disabled-chip pattern. No APP_MODE branch: SaaS ==
+  // isRedditConfigured()-false disabled-chip pattern. No APP_MODE branch: SaaS ==
   // self-host, both read the same env. SOURCE_KINDS_NEEDING_PROVIDER is the
   // set-driven generalization of the old hardcoded instagram-only `if` (the X
   // kind in Phase 11 slots in with one more map entry, no re-edit here).

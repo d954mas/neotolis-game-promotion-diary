@@ -15,10 +15,7 @@ import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { youtubeChannels, telegramChannels } from "../db/schema/index.js";
 import { dataSourceChannelState } from "../db/schema/data-source-channel-state.js";
-import {
-  redditSubredditsCache,
-  redditUsersCache,
-} from "$lib/sources/reddit/server/schema/index.js";
+import { redditSubreddits, redditAccounts } from "$lib/sources/reddit/server/schema/index.js";
 import { events } from "../db/schema/events.js";
 import { auditLog } from "../db/schema/audit-log.js";
 import { getSourceById, listSources } from "./data-sources.js";
@@ -26,6 +23,7 @@ import { toDataSourceDto, type DataSourceDto } from "../dto.js";
 import { loadUserQuota, loadQuotaPlatforms } from "./quota-read.js";
 import type { QuotaPlatformView, RedditQuotaView } from "./quota-read.js";
 import { NotFoundError } from "./errors.js";
+import { QUEUES } from "../queues.js";
 
 // Per-user quota types now live in quota-read.ts (D-03, single source of
 // truth). Re-exported here so existing importers of these names from
@@ -33,6 +31,13 @@ import { NotFoundError } from "./errors.js";
 export type { QuotaPlatformView, RedditQuotaView } from "./quota-read.js";
 
 const REFRESH_CONTENT_COOLDOWN_MS = 5 * 60_000;
+const PULLING_SOURCE_KIND_BY_QUEUE = new Map<string, DataSourceDto["kind"]>([
+  [QUEUES.YOUTUBE_BACKFILL_CHANNEL, "youtube_channel"],
+  [QUEUES.REDDIT_BACKFILL_ACCOUNT, "reddit_account"],
+  [QUEUES.REDDIT_BACKFILL_ACCOUNT_LEGACY, "reddit_account"],
+  [QUEUES.REDDIT_BACKFILL_SUBREDDIT, "reddit_subreddit"],
+  [QUEUES.REDDIT_BACKFILL_SUBREDDIT_LEGACY, "reddit_subreddit"],
+]);
 
 export interface SourcesPageData {
   active: DataSourceDto[];
@@ -173,28 +178,30 @@ export async function enrichTelegramSourcesWithChannelTitle(dtos: DataSourceDto[
 }
 
 /**
- * Reddit sources don't have a channelId (they key on metadata.username
- * for reddit_account or metadata.subreddit for reddit_subreddit), so
- * `enrichWithChannelState` above misses them — they would show
- * "Never pulled" on /sources even after the worker has been polling
- * for days. Read last_metadata_refresh_at from the per-kind PUBLIC-
- * DATA caches and stamp it onto the DTO.
+ * Reddit sources carry the walk join key in metadata (metadata.handle for
+ * reddit_account, metadata.slug for reddit_subreddit — the lowercase, rename-proof
+ * username / subreddit slug the rebuilt adapter persists at create time). The
+ * "when did we last hear from Reddit about this subject" signal does NOT live on
+ * data_source_channel_state.last_polled_at (which the walker leaves null until a
+ * channel-scoped poll stamps it); it lives on the per-kind subject-entity tables.
+ * Read it from there and stamp it onto the DTO so /sources shows a real
+ * "updated N ago" instead of "Never pulled".
  *
- * reddit_subreddits_cache / reddit_users_cache are upserted by the
- * adapter's poll handlers (sub_poll, author_poll, post_single) on
- * every successful drain, so last_metadata_refresh_at is the same
- * "when did we last hear from Reddit about this subject" signal that
- * data_source_channel_state.last_polled_at gives YouTube.
+ * reddit_subreddits / reddit_accounts (the Phase 12 subject-entity tables) carry
+ * last_refreshed_at, stamped by the rebuilt adapter's write path on every
+ * successful walk (walk-core upsertRedditAccount / upsertRedditSubreddit). The
+ * metadata VALUE (handle / slug) IS the tables' primary key (username / slug), so
+ * it joins directly — no separate id lookup.
  */
 async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise<void> {
   const subreddits: string[] = [];
   const usernames: string[] = [];
   for (const s of dtos) {
-    const md = (s.metadata ?? {}) as { subreddit?: unknown; username?: unknown };
-    if (s.kind === "reddit_subreddit" && typeof md.subreddit === "string" && md.subreddit) {
-      subreddits.push(md.subreddit);
-    } else if (s.kind === "reddit_account" && typeof md.username === "string" && md.username) {
-      usernames.push(md.username);
+    const md = (s.metadata ?? {}) as { slug?: unknown; handle?: unknown };
+    if (s.kind === "reddit_subreddit" && typeof md.slug === "string" && md.slug) {
+      subreddits.push(md.slug);
+    } else if (s.kind === "reddit_account" && typeof md.handle === "string" && md.handle) {
+      usernames.push(md.handle);
     }
   }
   if (subreddits.length === 0 && usernames.length === 0) return;
@@ -203,33 +210,33 @@ async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise
   if (subreddits.length > 0) {
     const rows = await db
       .select({
-        name: redditSubredditsCache.name,
-        lastMetadataRefreshAt: redditSubredditsCache.lastMetadataRefreshAt,
+        slug: redditSubreddits.slug,
+        lastRefreshedAt: redditSubreddits.lastRefreshedAt,
       })
-      .from(redditSubredditsCache)
-      .where(inArray(redditSubredditsCache.name, subreddits));
-    for (const r of rows) subBySubreddit.set(r.name, r.lastMetadataRefreshAt);
+      .from(redditSubreddits)
+      .where(inArray(redditSubreddits.slug, subreddits));
+    for (const r of rows) subBySubreddit.set(r.slug, r.lastRefreshedAt);
   }
 
   const subByUsername = new Map<string, Date | null>();
   if (usernames.length > 0) {
     const rows = await db
       .select({
-        username: redditUsersCache.username,
-        lastMetadataRefreshAt: redditUsersCache.lastMetadataRefreshAt,
+        username: redditAccounts.username,
+        lastRefreshedAt: redditAccounts.lastRefreshedAt,
       })
-      .from(redditUsersCache)
-      .where(inArray(redditUsersCache.username, usernames));
-    for (const r of rows) subByUsername.set(r.username, r.lastMetadataRefreshAt);
+      .from(redditAccounts)
+      .where(inArray(redditAccounts.username, usernames));
+    for (const r of rows) subByUsername.set(r.username, r.lastRefreshedAt);
   }
 
   for (const s of dtos) {
     if (s.lastPolledAt !== null && s.lastPolledAt !== undefined) continue;
-    const md = (s.metadata ?? {}) as { subreddit?: unknown; username?: unknown };
-    if (s.kind === "reddit_subreddit" && typeof md.subreddit === "string") {
-      s.lastPolledAt = subBySubreddit.get(md.subreddit) ?? null;
-    } else if (s.kind === "reddit_account" && typeof md.username === "string") {
-      s.lastPolledAt = subByUsername.get(md.username) ?? null;
+    const md = (s.metadata ?? {}) as { slug?: unknown; handle?: unknown };
+    if (s.kind === "reddit_subreddit" && typeof md.slug === "string") {
+      s.lastPolledAt = subBySubreddit.get(md.slug) ?? null;
+    } else if (s.kind === "reddit_account" && typeof md.handle === "string") {
+      s.lastPolledAt = subByUsername.get(md.handle) ?? null;
     }
   }
 }
@@ -370,11 +377,12 @@ async function loadRefreshContentCooldown(
 }
 
 /**
- * Channel-scoped "pulling" state from the pg-boss queue. Worker payload
- * carries channelKey (not sourceId), so a walk on a channel paints
- * spinners on ALL subscribers to that channel together — the walk is
- * shared. `to_regclass` guards a fresh self-host install where the
- * pgboss schema hasn't been created yet.
+ * Channel-scoped "pulling" state from the pg-boss queues. Worker payloads
+ * carry channelKey (not sourceId), so a walk on a channel paints spinners
+ * on ALL subscribers to that channel together — the walk is shared.
+ * Queue-to-kind namespacing prevents equal keys on different platforms
+ * from painting each other's sources. `to_regclass` guards a fresh
+ * self-host install where the pgboss schema hasn't been created yet.
  */
 async function loadPullingChannels(
   dtos: DataSourceDto[],
@@ -390,19 +398,28 @@ async function loadPullingChannels(
     channelIds.map((c) => sql`${c}`),
     sql`, `,
   );
-  const active = await db.execute<{ channel_key: string }>(
+  const queueNameList = sql.join(
+    [...PULLING_SOURCE_KIND_BY_QUEUE.keys()].map((name) => sql`${name}`),
+    sql`, `,
+  );
+  const active = await db.execute<{ name: string; channel_key: string }>(
     sql`
-      SELECT DISTINCT data->>'channelKey' AS channel_key
+      SELECT DISTINCT name, data->>'channelKey' AS channel_key
       FROM pgboss.job
-      WHERE name = 'youtube.backfill.channel'
+      WHERE name IN (${queueNameList})
         AND state IN ('active', 'created', 'retry')
         AND data->>'channelKey' IN (${channelKeyList})
     `,
   );
-  const pullingChannelKeys = new Set(active.rows.map((r) => r.channel_key).filter(Boolean));
+  const pullingSourceKeys = new Set(
+    active.rows.flatMap((row) => {
+      const kind = PULLING_SOURCE_KIND_BY_QUEUE.get(row.name);
+      return kind === undefined || !row.channel_key ? [] : [`${kind}:${row.channel_key}`];
+    }),
+  );
   const pulling: Record<string, boolean> = {};
   for (const s of dtos) {
-    if (s.channelId && pullingChannelKeys.has(s.channelId)) pulling[s.id] = true;
+    if (s.channelId && pullingSourceKeys.has(`${s.kind}:${s.channelId}`)) pulling[s.id] = true;
   }
   return pulling;
 }

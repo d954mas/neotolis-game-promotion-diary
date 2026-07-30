@@ -33,6 +33,9 @@ export interface AdapterUiServer {
 // (the event.kind drives the card, not source.kind).
 const uiRegistry = new Map<SourceKind, AdapterUiServer>([
   ["youtube_channel", youtubeUiServer as unknown as AdapterUiServer],
+  // reddit_account and reddit_subreddit BOTH map to the same redditUiServer — the
+  // reddit_post card is identical regardless of whether the source was registered as
+  // an account or a subreddit (event.kind drives the card, not source.kind).
   ["reddit_account", redditUiServer as unknown as AdapterUiServer],
   ["reddit_subreddit", redditUiServer as unknown as AdapterUiServer],
   ["instagram_account", instagramUiServer as unknown as AdapterUiServer],

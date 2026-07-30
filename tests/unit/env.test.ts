@@ -152,74 +152,35 @@ describe("env additions — YouTube + admin allowlist", () => {
   });
 });
 
-describe("REDDIT_USER_AGENT validation (Phase 03.1 DV-RDT-7)", () => {
-  // Helper for expected-throw cases — must NOT use withEnv (which awaits import
-  // inside a try/finally and would swallow the synchronous-import error path
-  // through the fn callback). Pattern: stage process.env, vi.resetModules, then
-  // await expect(import(...)).rejects to surface the zod ZodError.
-  async function expectBootFailure(redditUserAgent: string, errorMatcher?: RegExp): Promise<void> {
-    const saved = process.env.REDDIT_USER_AGENT;
-    process.env.REDDIT_USER_AGENT = redditUserAgent;
-    vi.resetModules();
-    // env.ts scrubs KEK from process.env on a prior successful import; the
-    // re-import below needs a fresh KEK to reach the REDDIT_USER_AGENT check.
-    process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
-    try {
-      const importPromise = import("../../src/lib/server/config/env.js");
-      if (errorMatcher) {
-        await expect(importPromise).rejects.toThrow(errorMatcher);
-      } else {
-        await expect(importPromise).rejects.toThrow();
-      }
-    } finally {
-      if (saved === undefined) {
-        delete process.env.REDDIT_USER_AGENT;
-      } else {
-        process.env.REDDIT_USER_AGENT = saved;
-      }
-    }
-  }
-
-  it("empty REDDIT_USER_AGENT → boot succeeds (Reddit cleanly disabled)", async () => {
-    await withEnv({ REDDIT_USER_AGENT: undefined }, (env) => {
-      expect(env.REDDIT_USER_AGENT).toBe("");
+describe("env additions — Reddit gating (D-08 kill-switch)", () => {
+  it("REDDIT_IMPORT_ENABLED defaults to 'false' (the default-OFF kill-switch)", async () => {
+    await withEnv({ REDDIT_IMPORT_ENABLED: undefined }, (env) => {
+      expect(env.REDDIT_IMPORT_ENABLED).toBe("false");
     });
   });
 
-  it("explicit empty string REDDIT_USER_AGENT → boot succeeds", async () => {
-    await withEnv({ REDDIT_USER_AGENT: "" }, (env) => {
-      expect(env.REDDIT_USER_AGENT).toBe("");
+  it("REDDIT_IMPORT_ENABLED accepts the explicit opt-in 'true'", async () => {
+    await withEnv({ REDDIT_IMPORT_ENABLED: "true" }, (env) => {
+      expect(env.REDDIT_IMPORT_ENABLED).toBe("true");
     });
   });
 
-  it("compliant UA succeeds: node:com.neotolis.gpd:0.1.0 (by /u/operator)", async () => {
-    await withEnv({ REDDIT_USER_AGENT: "node:com.neotolis.gpd:0.1.0 (by /u/operator)" }, (env) => {
-      expect(env.REDDIT_USER_AGENT).toBe("node:com.neotolis.gpd:0.1.0 (by /u/operator)");
+  it("REDDIT_IMPORT_ENABLED is a STRICT enum — a non-'true'/'false' value is rejected (no coerce-boolean trap)", async () => {
+    // z.coerce.boolean("false") === true would silently AUTO-ENABLE Reddit; the strict
+    // z.enum(["true","false"]) rejects anything else at parse time instead.
+    await expect(withEnv({ REDDIT_IMPORT_ENABLED: "1" }, () => {})).rejects.toThrow();
+  });
+
+  it("REDDIT_PROVIDER defaults to '' (unset ⇒ isRedditConfigured false)", async () => {
+    await withEnv({ REDDIT_PROVIDER: undefined }, (env) => {
+      expect(env.REDDIT_PROVIDER).toBe("");
     });
   });
 
-  it("handle with hyphen + digits + underscore → boot succeeds", async () => {
-    await withEnv(
-      { REDDIT_USER_AGENT: "node:com.neotolis.gpd:0.1.0 (by /u/op-erator_99)" },
-      (env) => {
-        expect(env.REDDIT_USER_AGENT).toMatch(/op-erator_99/);
-      },
-    );
-  });
-
-  it("missing `by /u/` → boot fails", async () => {
-    await expectBootFailure("MyApp 1.0", /by \/u\//i);
-  });
-
-  it("missing <platform>:<id>:<version> shape → boot fails", async () => {
-    await expectBootFailure("MyApp 1.0 (by /u/operator)");
-  });
-
-  it("malformed (no parens around `by /u/...`) → boot fails", async () => {
-    await expectBootFailure("node:test:1 by /u/operator");
-  });
-
-  it("handle with space → boot fails", async () => {
-    await expectBootFailure("python:Test:1.0 (by /u/spaces in handle)");
+  it("REDDIT_PROVIDER accepts 'scrapecreators' and rejects an unknown provider", async () => {
+    await withEnv({ REDDIT_PROVIDER: "scrapecreators" }, (env) => {
+      expect(env.REDDIT_PROVIDER).toBe("scrapecreators");
+    });
+    await expect(withEnv({ REDDIT_PROVIDER: "apify" }, () => {})).rejects.toThrow();
   });
 });

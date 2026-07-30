@@ -34,12 +34,16 @@
 
 import { parseAnyUrl } from "$lib/sources/url.js";
 import { detectFutureKind } from "$lib/sources/future-kinds.js";
+import { redditParseShareUrl } from "$lib/sources/reddit/server/url.js";
 
 export type ParsedUrl =
   | { kind: "youtube_video"; videoId: string; canonicalUrl: string }
   | {
       kind: "reddit_post";
-      externalId: string;
+      // null ONLY for the /s/ SHARE-link form — the path carries an opaque redirect
+      // token, not the post id; the preview path resolves the real identity via the
+      // provider's detail endpoint and rewrites canonicalUrl to the full permalink.
+      externalId: string | null;
       canonicalUrl: string;
       metadata: Record<string, unknown>;
     }
@@ -117,17 +121,24 @@ export function parseIngestUrl(input: string): ParsedUrl {
     // on first fetch). metadata carries the subreddit hint
     // transitively.
     const externalId = routed.externalId;
-    const meta = (routed.metadata ?? {}) as { subreddit?: string | null };
+    const meta = (routed.metadata ?? {}) as { subreddit?: string | null; slug?: string | null };
     const subreddit = meta.subreddit ?? null;
+    // Keep the title SLUG in the canonical form when the paste carried one:
+    // the ScrapeCreators detail endpoint returns a DEGRADED post (created_utc /
+    // author null) for slug-less URLs, so stripping the slug here broke the
+    // paste preview with a false "post not found" (12-06 UAT).
+    const slug = typeof meta.slug === "string" && meta.slug !== "" ? meta.slug : null;
     const canonicalUrl =
       subreddit !== null
-        ? `https://www.reddit.com/r/${subreddit}/comments/${externalId}/`
+        ? slug !== null
+          ? `https://www.reddit.com/r/${subreddit}/comments/${externalId}/${slug}/`
+          : `https://www.reddit.com/r/${subreddit}/comments/${externalId}/`
         : `https://redd.it/${externalId}`;
     return {
       kind: "reddit_post",
       externalId,
       canonicalUrl,
-      metadata: { subreddit },
+      metadata: { subreddit, slug },
     };
   }
   if (routed.kind === "instagram_post") {
@@ -174,6 +185,22 @@ export function parseIngestUrl(input: string): ParsedUrl {
     // trust it (AGENTS.md: no handling for impossible cases).
     const meta = (routed.metadata ?? {}) as { permalink: string };
     return { kind: "twitter_post", canonicalUrl: meta.permalink };
+  }
+
+  // Reddit /s/ SHARE link — the mobile-app share form on the reddit.com host
+  // family. The path carries an OPAQUE redirect token, not the post id, so the
+  // adapter's pure parseUrl cannot resolve an externalId; recognition happens
+  // here (mirroring the TikTok vm./vt. short-link seam below) and the preview
+  // path resolves the token via the provider's detail endpoint, which follows
+  // the share redirect server-side.
+  const share = redditParseShareUrl(input);
+  if (share !== null) {
+    return {
+      kind: "reddit_post",
+      externalId: null,
+      canonicalUrl: share.canonicalUrl,
+      metadata: { subreddit: share.subreddit, slug: null },
+    };
   }
 
   // 2) Host-classification fallback for kinds without an adapter yet

@@ -1,373 +1,629 @@
-// Reddit per-source server barrel — the public-`.json` adapter (no
-// OAuth, single User-Agent env var).
+// Reddit per-source server barrel (the 4th ScrapeCreators consumer, D-01). Composes
+// the adapter core (./adapter.ts) with the infrastructure-touching methods
+// (registerQueues / scheduleCronTicks / backfillSource) and the create-time hooks
+// (canonicalizeOnCreate / onSourceCreated / fetchEventPreviewMetadata /
+// resolveCachedExternalId / refreshQueue / workQueue).
 //
-// Cross-source code imports ONLY from this file: it sees `redditAdapter`
-// (the SourceAdapter implementation) plus a couple of Reddit-only
-// observability helpers re-exported below. Internal modules — adapter,
-// http, schema, handlers, quota, observability, feed-enrichment — wire
-// together inside this folder.
+// Cross-source code (registry, worker entrypoints, scheduler) imports ONLY from here:
+// it sees `redditAdapter` (the SourceAdapter implementation). ONE object serves BOTH
+// source kinds (reddit_account + reddit_subreddit) — the registry Map points both
+// kinds at this object, and backfillSource dispatches on source.kind.
 //
-// Cron handlers (registered via `scheduleCronTicks`) do ZERO Reddit
-// HTTP themselves: they enqueue rows into `adapter_refresh_queue` and
-// let the 8-tick batch-worker drain them at the 8 req/min ceiling. Cron
-// queue handlers + the setInterval drain loop are bootstrapped from
-// src/worker/index.ts via this barrel's `registerQueues`.
+// Per-kind queue topology:
+//   reddit.backfill.account     (the author-search resumable walker, D-02)
+//   reddit.backfill.subreddit   (the native subreddit walker)
+//   reddit.poll.cron            (key=active daily 06:00 UTC / key=cold daily; NO warm — disabled)
+//   reddit.quota_reset          (midnight PT — daily-cap reset, never the shared prepaid balance)
+//   reddit.deletion_propagation (daily 05:00 UTC — the GDPR author purge, D-06/D-08)
 //
-// `adapter_refresh_queue` is Reddit's durable queue table. The shared
-// outbox is for pg-boss-backed side effects that need post-commit
-// forwarding; Reddit queue producers insert directly into their final
-// work table, usually inside the caller's transaction.
+// DELTAS vs Twitter:
+//   - SHARED ScrapeCreators prepaid pool (D-01, provider="scrapecreators") — NOT a
+//     private balance row. SOCIAL_PLATFORM="reddit" is the budget/provider keyspace.
+//   - TWO walkers (author-search + native subreddit) sharing one walk core;
+//     backfillSource branches on source.kind.
+//   - PURE canonicalizeOnCreate — NO provider round-trip (Reddit's key IS the
+//     immutable username/slug; lazy validation). A typo yields an empty first walk.
+//   - +the carry-over deletion-propagation daily purge schedule.
+//   - NO thumbnail proxy (Pitfall 5 — hotlink + onerror; image variant confirmed at
+//     12-06 UAT).
 
 import type {
-  AdapterAppContext,
   AdapterContext,
-  AdapterPollState,
   BackfillWindow,
-  SourceAdapter,
+  CanonicalizeInput,
+  CanonicalizeResult,
+  CreateContext,
   EventKind,
   EventPreviewMetadata,
   MinimalBoss,
   NormalizeSourceInput,
   NormalizeSourceResult,
   PollableSource,
+  SourceAdapter,
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
-import type { Hono } from "hono";
-import { and, eq, inArray, isNull, sql, desc } from "drizzle-orm";
-import {
-  redditPosts,
-  redditPostSnapshots,
-  redditSubredditsCache,
-  redditUsersCache,
-} from "./schema/index.js";
-import { QUEUES } from "$lib/server/queues.js";
-import { db, type DbOrTx, type Tx } from "$lib/server/db/client.js";
+import type { DbOrTx, Tx } from "$lib/server/db/client.js";
+import { env } from "$lib/server/config/env.js";
+import { QUEUES, REDDIT_WALK_QUEUE_OPTIONS } from "$lib/server/queues.js";
+import { db } from "$lib/server/db/client.js";
+import { outbox } from "$lib/server/db/schema/outbox.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
-import { logger } from "$lib/server/logger.js";
-import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
-import { writeAudit } from "$lib/server/audit.js";
-import { redditAdapterCore } from "./adapter.js";
-import { redditObservability } from "./observability.js";
-import { enrichRedditFeedDtos } from "./feed-enrichment.js";
-import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
-import { handleEnqueueServiceSourcesCron } from "./handlers/enqueue-service-sources-cron.js";
-import { handleEnqueueServicePostsCron } from "./handlers/enqueue-service-posts-cron.js";
-import { handleBaselinesCron } from "./handlers/baselines-cron.js";
-import { handleDeletionPropagationCron } from "./handlers/deletion-propagation-cron.js";
-import { handlePostSingle } from "./handlers/post-single.js";
+import { events } from "$lib/server/db/schema/events.js";
+import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
+import { backfillWindowToDate } from "$lib/server/services/data-sources.js";
 import {
-  redditWorkerTick,
-  REDDIT_SLOT_MAPPING,
-  FALLTHROUGH_ORDER,
-} from "./handlers/worker-tick.js";
-import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
-import { redditFetchEventMetricSeries } from "./metric-series.js";
-import { isRedditConfigured, assertRedditConfigured } from "./credentials.js";
+  enforceAdapterUserQuota,
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+} from "$lib/server/services/quota.js";
+import { getChannelState } from "$lib/server/services/channel-state.js";
+import { AppError, NotFoundError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { AppError } from "$lib/server/services/errors.js";
-import { createRedditMetadataRoutes } from "./route-metadata.js";
+import { and, eq, desc, isNull, sql } from "drizzle-orm";
+import { redditPosts } from "$lib/server/db/schema/index.js";
+import { redditAccountAdapterCore } from "./adapter.js";
+import {
+  redditIsShortPostUrl,
+  redditParsePostUrl,
+  redditParseShareUrl,
+  redditParseSourceUrl,
+} from "./url.js";
+import { buildRedditTitle } from "./normalize.js";
+import { getSocialThrottleState } from "./quota.js";
+import { getSocialProvider } from "./provider/registry.js";
+import type { RedditSocialProvider } from "./provider/scrapecreators-reddit.js";
+import { REDDIT_POST_DETAIL_DELETION_DETECTOR, writeSnapshot } from "./snapshots.js";
+import {
+  readRedditBackfillState,
+  resetRedditBackfillState,
+  redditWalkSingletonKey,
+  type RedditSourceKind,
+} from "./backfill-state.js";
+import { handleBackfillAccount } from "./handlers/backfill-account.js";
+import { handleBackfillSubreddit } from "./handlers/backfill-subreddit.js";
+import { handleRedditPollCron } from "./handlers/poll-cron.js";
+import { handleRedditQuotaReset } from "./handlers/quota-reset.js";
+import { handleDeletionPropagationCron } from "./handlers/deletion-propagation-cron.js";
+import { redditRefreshQueueTick, REDDIT_REFRESH_SLOTS } from "./handlers/refresh-queue-tick.js";
 
-interface RedditSourceMetadata {
-  username?: string;
-  subreddit?: string;
+const KIND = "reddit_account" as const;
+const EPOCH_ISO = "1970-01-01T00:00:00Z";
+
+// TWO platform keyspaces meet in this barrel — NOT interchangeable:
+//
+//   SOCIAL_PLATFORM ("reddit") — the SOCIAL-BUDGET keyspace. Keys the shared prepaid
+//     ScrapeCreators ledger (reserveSocialCredits / getSocialThrottleState args, the
+//     social.* operator audit metadata.platform, observability getRecentAudit). The
+//     provider arg of getSocialProvider/fetchPostByUrl is this same value.
+//
+//   QUOTA_PLATFORM (= the SOURCE KIND) — the USER-QUOTA keyspace. Keys the per-user
+//     fair-share cap counter (getUserQuotaUsedToday / enforceAdapterUserQuota filter
+//     audit_log on metadata.platform = <source kind>). The two WALKERS tag their
+//     backfill audit with their ACTUAL kind (reddit_account | reddit_subreddit) per
+//     row; the paste-preview path below uses KIND ("reddit_account") = adapter.kind
+//     (the banner reads getUserQuotaUsedToday(userId, adapter.kind)). Using "reddit"
+//     here would make the banner read 0 forever (Phase 10 two-keyspace lesson).
+const SOCIAL_PLATFORM = "reddit";
+const QUOTA_PLATFORM = KIND;
+
+function depthBoundIsoForWindow(window: BackfillWindow, targetSince: Date | null): string {
+  return targetSince?.toISOString() ?? backfillWindowToDate(window).toISOString();
 }
 
-/** Shared Reddit cap gate. Both axes go through the same cross-source
- *  orchestrator (enforceAdapterUserQuota); the action argument picks the
- *  sliding-window axis ("post-refresh" or "source-action").
- *
- *  CYCLE-BREAKER (load-bearing — verified by investigation):
- *    reddit/server/index.ts → services/quota.ts → sources/registry.ts → reddit/server/index.ts
- *  is a real circular import. Static `import { enforceAdapterUserQuota } …`
- *  at module-init time would resolve `redditAdapter` to `undefined` inside
- *  registry.ts's Map (ES Modules return a partial namespace for the
- *  second-leg import; the `redditAdapter` const isn't evaluated yet),
- *  and registry boot would TDZ-fault on Map insertion.
- *
- *  The `await import` form defers the resolution until the adapter is
- *  actually called — after registry.ts has finished initialization and
- *  `redditAdapter` has its real value. This is the targeted fix for
- *  Reddit's specific self-call pattern (it's the only adapter that asks
- *  the quota orchestrator about its OWN cap from inside its own barrel).
- *  YouTube doesn't have the cycle because it never self-calls.
- *
- *  Alternatives (dependency injection of enforceFn, lazy `allAdapters`
- *  getter) were considered and rejected: they spread boilerplate across
- *  3+ files to save one `await` here. Not worth it. */
-async function enforceRedditCap(args: {
-  userId: string;
-  ipAddress: string;
-  action: "post-refresh" | "source-action";
-}): Promise<void> {
-  const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
-  await enforceAdapterUserQuota(db, redditAdapter, args.userId, args.ipAddress, args.action, {
-    platform: "reddit_account",
-  });
-}
-
-async function handlePostSingleWithCapGate(args: {
-  postId: string;
-  userId: string;
-  ipAddress: string;
-}): Promise<Awaited<ReturnType<typeof handlePostSingle>>> {
-  return handlePostSingle({
-    postId: args.postId,
-    userId: args.userId,
-    paste: true,
-    beforeFetch: () =>
-      enforceRedditCap({
-        userId: args.userId,
-        ipAddress: args.ipAddress,
-        action: "post-refresh",
-      }),
-  });
-}
-
-const redditMetadataRoutes = createRedditMetadataRoutes({
-  fetchPostSingleWithCapGate: handlePostSingleWithCapGate,
-});
-
-async function normalizeSourceOnCreate(
-  input: NormalizeSourceInput,
-): Promise<NormalizeSourceResult> {
-  assertRedditConfigured({ kind: input.kind });
-
-  const parsed = redditParseSourceUrl(input.handleUrl);
-  if (parsed === null) {
-    throw new AppError(
-      `handleUrl does not match a Reddit ${input.kind === "reddit_account" ? "user profile" : "subreddit"} URL`,
-      "invalid_handle_url",
-      422,
-      { kind: input.kind, handleUrl: input.handleUrl },
-    );
-  }
-  if (parsed.kind !== input.kind) {
-    throw new AppError(
-      `handleUrl shape (${parsed.kind}) does not match declared kind (${input.kind})`,
-      "kind_url_inconsistent",
-      422,
-      { declaredKind: input.kind, parsedKind: parsed.kind, handleUrl: input.handleUrl },
-    );
-  }
-
-  return {
-    handleUrl: parsed.externalUrl,
-    channelId: input.channelId ?? null,
-    metadata: {
-      ...(input.metadata ?? {}),
-      ...(parsed.kind === "reddit_account"
-        ? { username: parsed.handle }
-        : { subreddit: parsed.handle }),
-    },
-  };
-}
-
-/** registerQueues — pg-boss createQueue + work() for the FOUR Reddit
- *  cron-only pg-boss queues. The Reddit batch-worker setInterval drain
- *  loop (8-tick SQL FOR UPDATE SKIP LOCKED on adapter_refresh_queue) is
- *  booted separately in src/worker/index.ts; it doesn't go through
- *  pg-boss.work because pg-boss's concurrency model doesn't preserve the
- *  deterministic round-robin we need to stay inside Reddit's 10 req/min
- *  hard ceiling under multi-replica deploys.
- *
- *  batchSize=1 on every cron handler — each handler is a once-per-tick
- *  DB scan + INSERT; concurrent runs would just contend on the same
- *  adapter_refresh_queue rows. */
 async function registerQueues(boss: MinimalBoss): Promise<void> {
-  await boss.createQueue(QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_SOURCES);
-  await boss.createQueue(QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_POSTS);
-  await boss.createQueue(QUEUES.REDDIT_CRON_BASELINES);
-  await boss.createQueue(QUEUES.REDDIT_CRON_DELETION_PROPAGATION);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT, REDDIT_WALK_QUEUE_OPTIONS);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_SUBREDDIT, REDDIT_WALK_QUEUE_OPTIONS);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT_LEGACY);
+  await boss.createQueue(QUEUES.REDDIT_BACKFILL_SUBREDDIT_LEGACY);
+  await boss.createQueue(QUEUES.REDDIT_POLL_CRON);
+  await boss.createQueue(QUEUES.REDDIT_QUOTA_RESET);
+  await boss.createQueue(QUEUES.REDDIT_DELETION_PROPAGATION);
 
-  await boss.work(QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_SOURCES, { batchSize: 1 }, async (jobs) => {
-    for (const _ of jobs) await handleEnqueueServiceSourcesCron();
+  await boss.work(QUEUES.REDDIT_BACKFILL_ACCOUNT, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) await handleBackfillAccount(job as never);
   });
-  await boss.work(QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_POSTS, { batchSize: 1 }, async (jobs) => {
-    for (const _ of jobs) await handleEnqueueServicePostsCron();
+  await boss.work(QUEUES.REDDIT_BACKFILL_SUBREDDIT, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) await handleBackfillSubreddit(job as never);
   });
-  await boss.work(QUEUES.REDDIT_CRON_BASELINES, { batchSize: 1 }, async (jobs) => {
-    for (const _ of jobs) await handleBaselinesCron();
+  await boss.work(QUEUES.REDDIT_BACKFILL_ACCOUNT_LEGACY, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await bridgeLegacyWalkJob(
+        boss,
+        QUEUES.REDDIT_BACKFILL_ACCOUNT,
+        job as { id: string; data: Record<string, unknown> },
+      );
+    }
   });
-  await boss.work(QUEUES.REDDIT_CRON_DELETION_PROPAGATION, { batchSize: 1 }, async (jobs) => {
-    for (const _ of jobs) await handleDeletionPropagationCron();
+  await boss.work(QUEUES.REDDIT_BACKFILL_SUBREDDIT_LEGACY, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await bridgeLegacyWalkJob(
+        boss,
+        QUEUES.REDDIT_BACKFILL_SUBREDDIT,
+        job as { id: string; data: Record<string, unknown> },
+      );
+    }
+  });
+  await boss.work(QUEUES.REDDIT_POLL_CRON, { batchSize: 2 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleRedditPollCron(
+        job as {
+          id?: string;
+          data: { tier: "active" | "cold" | "warm" } & Record<string, unknown>;
+        },
+        boss,
+      );
+    }
+  });
+  await boss.work(QUEUES.REDDIT_QUOTA_RESET, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) await handleRedditQuotaReset(job as { id?: string; data: object });
+  });
+  await boss.work(QUEUES.REDDIT_DELETION_PROPAGATION, { batchSize: 1 }, async (_jobs) => {
+    await handleDeletionPropagationCron();
   });
 }
 
-/** scheduleCronTicks — register the FOUR daily Reddit cron schedules.
- *  All UTC; Reddit's per-minute rate-limit budget is timezone-agnostic.
- *
- *    enqueue-service-sources  — 00/06/12/18 UTC (4×/day)
- *    enqueue-service-posts    — 03/09/15/21 UTC (4×/day, staggered)
- *    baselines                — 04:00 UTC daily
- *    deletion-propagation     — 05:00 UTC daily
- *
- *  Staggering against the service-sources cron lets the worker drain
- *  the queue between waves so user-driven refresh-now clicks stay responsive. */
+async function bridgeLegacyWalkJob(
+  boss: MinimalBoss,
+  queue: string,
+  job: { id: string; data: Record<string, unknown> },
+): Promise<void> {
+  const kind = job.data.kind;
+  const channelKey = job.data.channelKey;
+  if (
+    (kind !== "reddit_account" && kind !== "reddit_subreddit") ||
+    typeof channelKey !== "string" ||
+    channelKey === ""
+  ) {
+    return;
+  }
+  const singletonKey = redditWalkSingletonKey(kind, channelKey);
+  const sentId = await boss.send(queue, job.data, { id: job.id, singletonKey });
+  const alreadyForwarded =
+    boss.getJobById === undefined ? null : await boss.getJobById(queue, job.id);
+  if (sentId !== null || alreadyForwarded !== null) return;
+
+  await db
+    .insert(outbox)
+    .values({
+      id: job.id,
+      queue,
+      payload: job.data,
+      options: { singletonKey, retrySingletonConflict: true },
+    })
+    .onConflictDoNothing();
+}
+
 async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
+  // Active tier — daily 06:00 UTC (one feed credit amortized over the newest posts).
+  await boss.schedule(QUEUES.REDDIT_POLL_CRON, "0 6 * * *", { tier: "active" }, { key: "active" });
+  // Cold tier — daily 5am Pacific.
   await boss.schedule(
-    QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_SOURCES,
-    "0 0,6,12,18 * * *",
-    {},
-    { tz: "UTC" },
+    QUEUES.REDDIT_POLL_CRON,
+    "0 5 * * *",
+    { tier: "cold" },
+    { key: "cold", tz: "America/Los_Angeles" },
   );
-  await boss.schedule(
-    QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_POSTS,
-    "0 3,9,15,21 * * *",
-    {},
-    { tz: "UTC" },
-  );
-  await boss.schedule(QUEUES.REDDIT_CRON_BASELINES, "0 4 * * *", {}, { tz: "UTC" });
-  await boss.schedule(QUEUES.REDDIT_CRON_DELETION_PROPAGATION, "0 5 * * *", {}, { tz: "UTC" });
+  // NO warm per-post schedule (review fix): ScrapeCreators has no lookup-by-id, so
+  // the warm catch could only search the subreddit's page 1 — a post that fell off
+  // the daily walk is almost never there, and each attempt burned a credit for a
+  // not_found. poll-cron keeps a defensive tier=warm no-op branch for any stale
+  // pg-boss schedule a pre-disable deploy persisted.
+  // Daily-cap reset — midnight Pacific (never the shared prepaid balance).
+  await boss.schedule(QUEUES.REDDIT_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
+  // ★ Deletion-propagation author purge — daily 05:00 UTC (D-06/D-08 GDPR control).
+  await boss.schedule(QUEUES.REDDIT_DELETION_PROPAGATION, "0 5 * * *", {}, { key: "purge" });
 }
 
-/** backfillSource — user-driven "Pull new content" / cron-driven
- *  initial-fetch. Enqueues an author_poll (reddit_account) or sub_poll
- *  (reddit_subreddit) row into adapter_refresh_queue.
+/**
+ * backfillSource — user-driven "Pull new content" / cron initial-fetch. Branches on
+ * source.kind: reddit_subreddit → the native subreddit walker; else → the
+ * author-search walker. The trigger user pays the per-user cap (origin==="user");
+ * subscribers free-ride on the channel-wide fan-out.
  *
- *  Returns the inserted row's id (as a string for the cross-source
- *  contract — the queue is local to Reddit) and a queue label that
- *  matches the lane. The 8-tick worker drains the row asynchronously.
+ * The depth bound is the SOURCE'S OWN backfillTargetSince (the route threads it into
+ * metadata) — never the epoch sentinel. On a never-walked channel the walk-core deep
+ * branch walks to the bound, so an epoch bound would pay for the whole archive and
+ * then throw the surplus away at the fan-out's per-subscriber target filter (review
+ * fix: an autoImport=false source's first manual pull over-fetched paid pages).
  *
- *  origin → lane mapping:
- *    'user' → user_source  (user_id NOT NULL, counted by the user cap)
- *    'cron' → service_source (user_id NULL, exempt from the user cap)
- *
- *  Priority is symbolic here. user_source and service_source are
- *  separate lanes and the worker tick claims rows lane-by-lane via
- *  REDDIT_SLOT_MAPPING — within a single lane all backfill rows carry
- *  the same priority, so ordering effectively reduces to enqueued_at
- *  FIFO. The numeric difference (0 cron / 1 user) is preserved only as
- *  a hint for any future cross-lane query that might inspect it. */
+ * Flow is `initial` — not `incremental` — when this pull is effectively the source's
+ * first walk request: the channel was never polled (autoImport=false skipped
+ * onSourceCreated), or the channel is already backfill-complete but this source wants
+ * strictly deeper history than the walked frontier. walk-core re-opens a complete
+ * channel's deep branch ONLY for an `initial` flow with a deeper target, so an
+ * `incremental` label there silently drops the subscriber's history request.
+ */
 async function backfillSource(
   source: PollableSource,
   ctx: AdapterContext,
 ): Promise<{ jobId: string | null; queue: string }> {
-  // Worker-config gate. The 8-tick batch-worker only boots when
-  // isRedditConfigured() is true; without this guard, enqueued rows
-  // would sit pending forever on an instance with empty REDDIT_USER_AGENT.
-  assertRedditConfigured({ sourceId: source.id });
-  const md = (source.metadata ?? {}) as RedditSourceMetadata;
-  const isAccount = typeof md.username === "string" && md.username.length > 0;
-  const isSub = typeof md.subreddit === "string" && md.subreddit.length > 0;
-  if (!isAccount && !isSub) {
-    logger.warn(
-      { sourceId: source.id },
-      "redditAdapter.backfillSource: metadata missing username/subreddit; skipping enqueue",
-    );
-    return { jobId: null, queue: adapterRefreshQueueLabel("reddit_account", "noop") };
+  // PollableSource carries no `kind`, so discriminate on the metadata canonicalize
+  // persisted: a subreddit source has metadata.slug, an account source has
+  // metadata.handle.
+  const md = (source.metadata ?? {}) as {
+    handle?: string;
+    slug?: string;
+    backfillTargetSince?: string;
+  };
+  const isSubreddit = typeof md.slug === "string" && md.slug !== "";
+  const kind = isSubreddit ? "reddit_subreddit" : "reddit_account";
+  const channelKey = md.handle ?? md.slug ?? source.id;
+  const queue = isSubreddit ? QUEUES.REDDIT_BACKFILL_SUBREDDIT : QUEUES.REDDIT_BACKFILL_ACCOUNT;
+
+  const parsedTarget =
+    typeof md.backfillTargetSince === "string" ? new Date(md.backfillTargetSince) : null;
+  const targetSince =
+    parsedTarget !== null && !Number.isNaN(parsedTarget.getTime()) ? parsedTarget : null;
+
+  let flow: "initial" | "incremental" | "auto_passive" =
+    ctx.origin === "user" ? "incremental" : "auto_passive";
+  if (ctx.origin === "user") {
+    const channelState = await getChannelState(kind, channelKey, ctx.tx);
+    const neverWalked = channelState === undefined || channelState.lastPolledAt === null;
+    // The `target < frontier` half alone never settles when the frontier CANNOT reach
+    // the target (feed bottom above it, or the maxPosts cap): every routine pull would
+    // relabel as `initial` and re-pay a deep re-walk that imports nothing. The
+    // servedDeepTargetIso memory (walk-core records it on every completed deep pass)
+    // settles such targets: only a target strictly deeper than every already-served
+    // one earns the `initial` relabel — at most once per (source, target).
+    const servedDeep = readRedditBackfillState(channelState).servedDeepTargetIso;
+    const wantsDeeperThanCompleteWalk =
+      channelState?.backfillComplete === true &&
+      channelState.backfillOldestAt !== null &&
+      targetSince !== null &&
+      targetSince.getTime() < channelState.backfillOldestAt.getTime() &&
+      (servedDeep === null || targetSince.getTime() < new Date(servedDeep).getTime());
+    if (neverWalked || wantsDeeperThanCompleteWalk) flow = "initial";
   }
-  const isUser = ctx.origin === "user";
-  const queueName = isUser ? "user_source" : "service_source";
-  const type = isAccount ? "author_poll" : "sub_poll";
-  const payload = isAccount ? { handle: md.username! } : { sub: md.subreddit! };
-  const dbCtx = ctx.tx ?? db;
-  const result = await dbCtx
-    .insert(adapterRefreshQueue)
-    .values({
-      adapterKind: "reddit_account",
-      queueName,
-      type,
-      payload,
-      userId: isUser ? ctx.userId : null,
-      priority: isUser ? 1 : 0,
-    })
-    .returning({ id: adapterRefreshQueue.id });
+
+  const payload = {
+    kind,
+    channelKey,
+    triggerUserId: ctx.origin === "user" ? source.userId : undefined,
+    depthBoundIso: targetSince?.toISOString() ?? EPOCH_ISO,
+    flow,
+  };
+  const jobId = await db.transaction((tx) =>
+    enqueueViaOutbox(tx, queue, payload, {
+      singletonKey: redditWalkSingletonKey(kind, channelKey),
+      priority: ctx.origin === "user" ? 1 : 0,
+      retrySingletonConflict: true,
+    }),
+  );
+  return { jobId, queue };
+}
+
+/**
+ * normalizeSourceOnCreate — PURE local URL canonicalization + metadata injection that
+ * runs BEFORE createSource's cheap exact-duplicate / quota pre-checks (adapter.ts
+ * NormalizeSourceInput contract). Two jobs canonicalizeOnCreate — which runs AFTER the
+ * pre-checks — structurally cannot do:
+ *   1. www-normalize the pasted URL (reddit.com/u/X → https://www.reddit.com/user/X) so
+ *      the exact handle_url duplicate pre-check compares apples to apples with the stored
+ *      canonical URL. Without it a re-add's RAW handle_url misses the pre-check, then
+ *      canonicalizeOnCreate resolves a non-null channelId and the re-add trips the generic
+ *      channel-id 409 (assertNoChannelConflict) instead of the per-kind 422 duplicate_source
+ *      the caller (UI toast + the reddit-specific message) expects.
+ *   2. inject metadata.handle (account) / metadata.slug (subreddit) — the URL-intrinsic,
+ *      rename-proof walk join key the read-model (enrichRedditSourcesWithLastPolled) and
+ *      backfillSource read. No upstream I/O: Reddit's key IS the immutable slug (lazy
+ *      validation — a typo yields an empty first walk). Throws AppError 422 on an
+ *      unparseable URL so a phantom source is never created.
+ */
+async function normalizeSourceOnCreate(
+  input: NormalizeSourceInput,
+): Promise<NormalizeSourceResult> {
+  const parsed = redditParseSourceUrl(input.handleUrl);
+  if (parsed === null) {
+    throw new AppError(
+      "Paste a Reddit profile or subreddit URL (e.g. https://www.reddit.com/user/<name> or /r/<sub>).",
+      "reddit_source_unresolvable",
+      422,
+      { handle_url: input.handleUrl },
+    );
+  }
+  // Reject a kind/URL mismatch at the EARLIEST boundary (before duplicate/quota
+  // prechecks). A `reddit_account` request with a `/r/<sub>` URL (or vice-versa) would
+  // otherwise persist metadata.slug on an account-kind row: onSourceCreated branches on
+  // source.kind → the AUTHOR queue, while backfillSource discriminates on metadata.slug
+  // → the SUBREDDIT queue, so the initial walk and every later refresh dispatch to
+  // DIFFERENT queues on inconsistent state. 422 here keeps kind and URL in lockstep.
+  if (parsed.kind !== input.kind) {
+    throw new AppError(
+      `That URL is a ${parsed.kind === "reddit_subreddit" ? "subreddit" : "user profile"} but the source kind is ${input.kind}. Paste the matching URL.`,
+      "reddit_kind_url_mismatch",
+      422,
+      { requested_kind: input.kind, url_kind: parsed.kind, handle_url: input.handleUrl },
+    );
+  }
+  const metadata =
+    parsed.kind === "reddit_subreddit" ? { slug: parsed.handle } : { handle: parsed.handle };
   return {
-    jobId: result[0] ? String(result[0].id) : null,
-    queue: adapterRefreshQueueLabel("reddit_account", queueName),
+    handleUrl: parsed.externalUrl,
+    channelId: input.channelId ?? null,
+    metadata: { ...(input.metadata ?? {}), ...metadata },
   };
 }
 
-/** onSourceCreated — initial backfill enqueue on registerSource.
- *  Runs inside createSource's transaction; the queue row must commit or
- *  roll back with the new source.
- *
- *  Only fires when autoImport=true — passive registration (just
- *  tracking, no auto-pull) skips the enqueue.
- *
- *  `backfillWindow` is part of the contract but not consumed here: Reddit's
- *  walker already gates each subscriber's fan-out against
- *  `source.backfillTargetSince` (which createSource derives from the same
- *  window), so re-reading the window here would be redundant. Accepted for
- *  contract conformance and forward-compat with future per-window tuning. */
+/**
+ * canonicalizeOnCreate — PURE (no provider round-trip). Reddit's key IS the immutable,
+ * rename-proof username/slug (Reddit forbids rename; the value is part of the canonical
+ * URL — the safe denormalization), and ScrapeCreators exposes no user-profile endpoint,
+ * so we resolve the source id from the pasted URL alone (lazy validation — a typo
+ * yields an empty first walk, matching the diary tolerance). Throws AppError 422 on an
+ * unparseable URL so a phantom source is never created.
+ */
+async function canonicalizeOnCreate(
+  input: CanonicalizeInput,
+  _ctx: CreateContext,
+): Promise<CanonicalizeResult> {
+  const parsed = redditParseSourceUrl(input.handleUrl);
+  if (parsed === null) {
+    throw new AppError(
+      "Paste a Reddit profile or subreddit URL (e.g. https://www.reddit.com/user/<name> or /r/<sub>).",
+      "reddit_source_unresolvable",
+      422,
+      { handle_url: input.handleUrl },
+    );
+  }
+  const metadata =
+    parsed.kind === "reddit_subreddit" ? { slug: parsed.handle } : { handle: parsed.handle };
+  return {
+    canonicalHandleUrl: parsed.externalUrl,
+    resolvedExternalId: parsed.handle, // lowercase username / slug = the channelKey
+    displayName: parsed.handle,
+    metadata,
+  };
+}
+
+/**
+ * onSourceCreated — enqueue the initial backfill on createSource (inside the
+ * createSource transaction via the shared outbox). Only fires when autoImport. Branches
+ * on source.kind so the right walker runs.
+ */
 async function onSourceCreated(
   source: SourceCreatedHookSource,
   opts: { backfillWindow: BackfillWindow; tx: Tx },
 ): Promise<void> {
   if (!source.autoImport) return;
-  await backfillSource(
+  // This hook only ever fires for reddit sources; narrow SourceKind → RedditSourceKind
+  // (the queue branch already discriminates on it) so redditWalkSingletonKey type-checks.
+  const kind: RedditSourceKind =
+    source.kind === "reddit_subreddit" ? "reddit_subreddit" : "reddit_account";
+  const md = (source.metadata ?? {}) as { handle?: string; slug?: string };
+  const channelKey = source.channelId ?? md.handle ?? md.slug ?? source.id;
+  const queue =
+    kind === "reddit_subreddit" ? QUEUES.REDDIT_BACKFILL_SUBREDDIT : QUEUES.REDDIT_BACKFILL_ACCOUNT;
+  await enqueueViaOutbox(
+    opts.tx,
+    queue,
     {
-      id: source.id,
-      userId: source.userId,
-      metadata: source.metadata,
+      kind,
+      channelKey,
+      triggerUserId: source.userId,
+      depthBoundIso: depthBoundIsoForWindow(opts.backfillWindow, source.backfillTargetSince),
+      flow: "initial",
     },
+    // Channel-scoped singleton (NOT per-source `source-${id}`): two tenants who add the
+    // SAME channel must dedupe to ONE initial walk, not double-spend on concurrent walks
+    // of the same feed. Shared across initial/manual/cron (redditWalkSingletonKey).
+    // pg-boss only DEFERS the conflicting intent; what actually makes this ONE paid walk
+    // is walk-core's coalescePendingIntents, which settles the deferred intent by
+    // re-running the fan-out over the pages this walk already fetched.
     {
-      userId: source.userId,
-      // Onboarding is user-driven (they just pasted/registered the
-      // source) so the row lands on user_source lane and counts
-      // toward the per-user cap. Matches the YouTube auto-backfill
-      // intent: explicit opt-in burns user pool.
-      origin: "user",
-      tx: opts.tx,
+      singletonKey: redditWalkSingletonKey(kind, channelKey),
+      retrySingletonConflict: true,
     },
   );
 }
 
 /**
- * fetchEventPreviewMetadata — adapter wrapper for the /events/new
- * "Get info" button + the generic POST /api/events/preview-url
- * cross-source endpoint. Fetches /api/info.json?id=t3_X via
- * handlePostSingle (which UPSERTs caches + writes a snapshot row +
- * records a cap-counter row when userId is non-null) and returns the
- * post title + author + permalink in the cross-source
- * EventPreviewMetadata shape.
- *
- * NOT preview-only — /api/info is the same fetch the paste flow uses,
- * so we share the side effects (cache populated, snapshot recorded)
- * instead of doing a read-only fetch and then re-fetching on Submit.
- * handlePostSingle's 60s dedup ensures preview + Submit on the same
- * post produces ONE Reddit request and ONE cap-counter increment.
- *
- * Cap enforcement: ctx.userId is threaded into handlePostSingle's
- * userId param. Both the Reddit-specific route
- * (/api/reddit/fetch-metadata) and the generic preview-url route
- * (/api/events/preview-url) flow through here, so both paths land the
- * user_post `done` row that feeds the 25/5min post-refresh cap and
- * fire the `beforeFetch` gate that throws 429 on cap exhaustion. Pre-
- * fix: the generic preview endpoint called this with userId=null,
- * burning a Reddit unit without writing the counter — a silent bypass.
- *
- * Empty REDDIT_USER_AGENT → unreachable (mirrors YouTube's empty-keys
- * oEmbed behavior at the preview surface).
+ * resetWalkerStateOnWidening — fired by cross-source updateSource when the user widens
+ * backfillTargetSince past the recorded frontier on a COMPLETE Reddit source (e.g. "7
+ * days" → "everything"). Without it, the adapter omits the hook, updateSource's
+ * `adapter.resetWalkerStateOnWidening !== undefined` guard is false, and the widen is a
+ * silent no-op — the exhausted walker never re-opens, so the deeper history never loads
+ * (the very case data-sources.ts:855 documents Reddit handling). Clears the resumable
+ * sub-state + enqueues a forceDeep historical walk (BUDGET-02: the trigger user pays the
+ * per-user cap; subscribers free-ride). Runs inside the updateSource tx.
+ */
+async function resetWalkerStateOnWidening(
+  source: SourceCreatedHookSource,
+  ctx: {
+    previousTarget: Date | null;
+    newTarget: Date;
+    triggerUserId: string;
+    ipAddress: string;
+    tx: Tx;
+  },
+): Promise<void> {
+  if (source.kind !== "reddit_account" && source.kind !== "reddit_subreddit") return;
+  // Capture the narrowed kind: TS loses property narrowing on `source.kind` across the
+  // awaits below, and resetRedditBackfillState is strictly typed to RedditSourceKind.
+  const kind = source.kind;
+  const md = (source.metadata ?? {}) as { handle?: string; slug?: string };
+  const channelKey = source.channelId ?? md.handle ?? md.slug ?? null;
+  if (channelKey === null || channelKey === "") return;
+
+  // Defend-in-depth: only act on a genuine widen (updateSource already gates on this).
+  if (ctx.previousTarget !== null && ctx.newTarget.getTime() >= ctx.previousTarget.getTime()) {
+    return;
+  }
+  // BOTH reads ride ctx.tx: this hook runs inside updateSource's transaction, and a
+  // module-level `db` read here checks out a SECOND pool connection per request while
+  // the first is held — concurrent widens could occupy the whole pool and deadlock.
+  const state = await getChannelState(kind, channelKey, ctx.tx);
+  if (!state) return;
+  if (state.backfillComplete !== true) return;
+  if (state.backfillOldestAt === null) return;
+  // Nothing deeper to fetch: the new target is not below the walked frontier.
+  if (ctx.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
+
+  // Per-user fair-share cap — a PATCH widen burns the same budget as a refresh-content
+  // click, so gate it here too (QUOTA_PLATFORM for Reddit IS the source kind — the
+  // per-kind keyspace; using "reddit" would read 0 forever, Phase 10 two-keyspace lesson).
+  const cap = redditAccountAdapterCore.observability.userQuotaCap;
+  if (cap?.requestsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(ctx.triggerUserId, kind, ctx.tx);
+    const resetAt = nextPacificMidnight();
+    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+    if (used.requests >= cap.requestsPerDay) {
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        { cap: cap.requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+      );
+    }
+  }
+
+  // Clear the resumable sub-state so the forceDeep walk re-enters page 1 toward the new,
+  // deeper target (forceDeep overrides the "exhausted" branch in the walk core).
+  await resetRedditBackfillState(kind, channelKey, ctx.tx);
+
+  const queue =
+    kind === "reddit_subreddit" ? QUEUES.REDDIT_BACKFILL_SUBREDDIT : QUEUES.REDDIT_BACKFILL_ACCOUNT;
+  await enqueueViaOutbox(
+    ctx.tx,
+    queue,
+    {
+      kind,
+      channelKey,
+      triggerUserId: ctx.triggerUserId,
+      depthBoundIso: ctx.newTarget.toISOString(),
+      flow: "historical",
+      forceDeep: true,
+    },
+    {
+      singletonKey: redditWalkSingletonKey(source.kind, channelKey),
+      retrySingletonConflict: true,
+    },
+  );
+}
+
+/**
+ * enqueueRefreshNow — the per-event Refresh-Now path. PER-POST: inserts ONE row into
+ * the shared adapter_refresh_queue (queue_name "user_post"); the Reddit lane worker
+ * fetches exactly that post + writeSnapshot. INSERT via the passed tx — no boss.send
+ * outside the mutating transaction. The per-user cap is enforced upstream.
+ */
+async function enqueueRefreshNow(input: {
+  eventId: string;
+  userId: string;
+  externalId: string;
+  eventKind: EventKind;
+  tx?: DbOrTx;
+}): Promise<{ queue: string; jobId: string | null }> {
+  const { adapterRefreshQueue } = await import("$lib/server/db/schema/index.js");
+  const { adapterRefreshQueueLabel } = await import("$lib/server/services/adapter-lane-worker.js");
+  const dbCtx = input.tx ?? db;
+  const [event] = await dbCtx
+    .select({ url: events.url })
+    .from(events)
+    .where(
+      and(eq(events.id, input.eventId), eq(events.userId, input.userId), isNull(events.deletedAt)),
+    )
+    .limit(1);
+  if (event === undefined) throw new NotFoundError();
+  const parsed = event.url === null ? null : redditParsePostUrl(event.url);
+  // An event still carrying a raw /s/ share URL (a manual save whose preview never
+  // resolved) has no cached post identity to refresh — same dead-end as redd.it.
+  const unresolvedShare =
+    parsed === null && event.url !== null && redditParseShareUrl(event.url) !== null;
+  if ((event.url !== null && redditIsShortPostUrl(event.url)) || unresolvedShare) {
+    throw new AppError(
+      "Reddit URL has no subreddit feed to refresh",
+      "reddit_short_link_unsupported",
+      422,
+    );
+  }
+  const [inserted] = await dbCtx
+    .insert(adapterRefreshQueue)
+    .values({
+      adapterKind: KIND,
+      queueName: "user_post",
+      type: "post_stats",
+      payload: { event_id: input.eventId, post_id: input.externalId },
+      userId: input.userId,
+      priority: -10,
+      status: "pending",
+    })
+    .returning({ id: adapterRefreshQueue.id });
+  return {
+    queue: adapterRefreshQueueLabel(KIND, "user_post"),
+    jobId: inserted ? String(inserted.id) : null,
+  };
+}
+
+/**
+ * fetchEventPreviewMetadata — the Add Event "Fetch" button. ONE by-URL provider request
+ * (1 credit), cap-gated, then UPSERTs the reddit_posts cache + a snapshot so the saved
+ * event renders fully in /feed. Cap + budget order mirrors TikTok/Twitter:
+ *   1. enforceAdapterUserQuota (QUOTA_PLATFORM) — the per-user social cap.
+ *   2. reserveSocialCredits (origin="user") inside provider.fetchPostByUrl — the
+ *      operator prepaid budget gate (SOCIAL_PLATFORM, shared ScrapeCreators balance).
  */
 async function fetchEventPreviewMetadata(
   canonicalUrl: string,
   ctx: { userId: string; ipAddress: string },
 ): Promise<EventPreviewMetadata> {
-  if (!isRedditConfigured()) {
-    return { kind: "unreachable", cause: "reddit_not_configured" };
-  }
+  const provider = getSocialProvider(SOCIAL_PLATFORM) as RedditSocialProvider | null;
+  if (provider === null) return { kind: "unreachable", cause: "reddit_not_configured" };
+
   const parsed = redditParsePostUrl(canonicalUrl);
-  if (parsed === null) {
+  // /s/ SHARE link: the path carries an opaque redirect token, not the post id —
+  // identity resolves only through the paid detail fetch below, which follows the
+  // share redirect server-side (12-06 UAT probe).
+  const share = parsed === null ? redditParseShareUrl(canonicalUrl) : null;
+  if (parsed === null && share === null) {
     return { kind: "unreachable", cause: "url_not_reddit_post" };
   }
+
+  // RECOGNITION-ONLY short link (review fix): `redd.it/<id>` carries no subreddit, and
+  // ScrapeCreators exposes neither lookup-by-id nor a redirect follower — the provider
+  // could only ever return null here. Say so BEFORE the cap gate: the pre-fix order
+  // spent a per-user quota slot (enforceAdapterUserQuota writes the counter audit row)
+  // on a request that never left the process, and reported the dead-end as the generic
+  // "unavailable" (indistinguishable from a deleted post). The URL still parses, so the
+  // user can save the event as a stats-less manual card — or re-paste the full
+  // /r/<sub>/comments/<id> permalink to get live data.
+  if (parsed !== null && redditIsShortPostUrl(canonicalUrl)) {
+    return { kind: "unreachable", cause: "reddit_short_link_unsupported" };
+  }
+
+  await enforceAdapterUserQuota(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh", {
+    platform: QUOTA_PLATFORM,
+  });
+
+  // A paid HTTP request that was ISSUED spent its credit even when it then failed or
+  // resolved no post — it must reach the per-user cap audit (review fix; mirrors
+  // walk-core). Issued-error discriminator: an HTTP-status AdapterError carries a
+  // numeric context.status; a reserve-null denial carries none (nothing was spent).
+  // Every path below this point DID issue the request (the one no-fetch case, the
+  // redd.it short link, already returned above).
+  let post;
   try {
-    const result = await handlePostSingleWithCapGate({
-      postId: parsed.externalId,
-      userId: ctx.userId,
-      ipAddress: ctx.ipAddress,
+    post = await provider.fetchPostByUrl(SOCIAL_PLATFORM, canonicalUrl, {
+      origin: "user",
+      userAccounting: {
+        requestsPerDay: env.LIMIT_SOCIAL_REQUESTS_PER_DAY,
+        auditEntry: {
+          userId: ctx.userId,
+          action: "event.poll_refreshed",
+          ipAddress: ctx.ipAddress,
+          metadata: {
+            // A share paste's real id is unknown pre-fetch — record what was asked
+            // for (the share URL) so the cap row stays attributable.
+            external_id: parsed !== null ? `t3_${parsed.externalId}` : canonicalUrl,
+            kind: "reddit_post",
+            platform: QUOTA_PLATFORM,
+            flow: "stats_refresh",
+            requests_used: 1,
+            events_inserted: 0,
+          },
+        },
+      },
     });
-    return {
-      kind: "ok",
-      title: result.title,
-      authorName: result.author ?? "[deleted]",
-      authorUrl:
-        result.author !== null ? `https://www.reddit.com/user/${result.author}` : result.permalink,
-      occurredAt: result.submittedAt,
-      // Reddit doesn't expose thumbnails uniformly across post types;
-      // self-text posts have none, link posts have a Reddit-hosted
-      // preview that needs auth to render. Skip.
-    };
   } catch (err) {
     if (err instanceof AppError) throw err;
     if (err instanceof AdapterError) {
@@ -380,261 +636,108 @@ async function fetchEventPreviewMetadata(
     }
     return { kind: "unreachable", cause: String((err as Error)?.message ?? err) };
   }
+  if (post === null) {
+    return { kind: "unavailable" };
+  }
+
+  // A share paste's REAL identity arrived only now — adopt the provider's resolved
+  // canonical permalink as the event URL (the client form replaces the URL field with
+  // EnrichmentResult.canonicalUrl, so the SAVED event stores a parseable slugged post
+  // URL and every later parse / refresh / re-fetch works on it). A resolved post with
+  // no permalink cannot anchor an event URL → honest unavailable (the paid attempt is
+  // already on the cap counter, mirroring the not-found path).
+  const resolvedCanonical = share === null ? canonicalUrl : post.permalink;
+  if (resolvedCanonical === null) {
+    return { kind: "unavailable" };
+  }
+
+  await writeSnapshot({
+    postId: post.id,
+    // The community identity as the RESPONSE reports it (`u_<name>` for a profile
+    // post). The feed card reads its top line from this column, and a redd.it / bare
+    // `/comments/<id>` paste has no slug anywhere in the URL to fall back on — before
+    // this the preview left it null until some later walk happened to cover the post.
+    subredditSlug: post.subredditSlug ?? null,
+    // Persist the real Reddit FORM (image/gallery/self/link) the provider derived, so
+    // the feed card renders its media variant immediately (was hard-coded null → text).
+    mediaType: post.mediaType ?? null,
+    linkDomain: post.linkDomain ?? null,
+    title: post.caption,
+    permalink: resolvedCanonical,
+    thumbnailUrl: post.thumbnailUrl,
+    publishedAt: post.publishedAt,
+    author: post.ownerUsername,
+    authorFullname: post.ownerId,
+    metrics: { likes: post.metrics.likes, comments: post.metrics.comments },
+    raw:
+      post.ownerDeleted === true || post.removedByCategory != null
+        ? {
+            score: null,
+            upvoteRatio: null,
+            numComments: null,
+            numCrossposts: null,
+            removedByCategory: post.removedByCategory ?? null,
+            authorDeleted: post.ownerDeleted === true,
+          }
+        : null,
+    deletionDetector: REDDIT_POST_DETAIL_DELETION_DETECTOR,
+    status: "ok",
+  });
+
+  const ownerUrl =
+    post.ownerUsername !== null ? `https://www.reddit.com/user/${post.ownerUsername}` : "";
+  return {
+    kind: "ok",
+    title: buildRedditTitle(post.caption) || `Reddit post · ${post.id}`,
+    authorName: post.ownerUsername ?? "",
+    authorUrl: ownerUrl,
+    occurredAt: post.publishedAt,
+    thumbnailUrl: post.thumbnailUrl ?? undefined,
+    externalId: post.id,
+    // Only a share paste rewrites the canonical — a direct permalink paste keeps the
+    // user's parsed canonical authoritative (slug preserved as pasted).
+    ...(share !== null ? { canonicalUrl: resolvedCanonical } : {}),
+  };
 }
 
 /**
- * fetchSyncStats — synchronous stats fetch on /api/events POST so /feed
- * shows score/comments immediately. Mirrors YouTube's syncStats.fetch:
- * the cross-source createEvent calls this AFTER the events INSERT, errors
- * are logged-and-swallowed by the caller.
- *
- * Side effects (all owned by handlePostSingle — this wrapper just
- * shapes the return type to the cross-source contract):
- *   - UPSERTs reddit_posts / reddit_users_cache / reddit_subreddits_cache
- *   - Writes ONE reddit_post_snapshots row (minute-truncated polled_at)
- *   - Writes ONE adapter_refresh_queue row with status='done' on the
- *     user_post lane for cap-counter visibility (the 25/5min post-refresh
- *     cap reads from this lane).
- *   - 60s dedup — preview+submit on the same post collapses to ONE
- *     Reddit fetch + ONE cap-counter tick
- *
- * Returns {viewCount, likeCount, commentCount} where Reddit semantics
- * map: viewCount=score, likeCount=0 (Reddit has no separate likes —
- * score IS net upvotes), commentCount=num_comments. The cross-source
- * shape is preserved for UI parity; per-kind FeedCard enrichment
- * (feed-enrichment.ts) re-reads reddit_post_snapshots for the richer
- * Reddit-specific view (upvote_ratio, awards, removed_by_category).
- *
- * Returns null on disabled adapter or fetch failure — caller treats as
- * "stats unavailable, will be picked up by next cron tick".
+ * resolveCachedExternalId — re-derive a reddit_post event's t3 id from the URL +
+ * OUR reddit_posts cache, NEVER the request body (#70 untrusted-body boundary). The
+ * Reddit post id is URL-INTRINSIC (the `/comments/<id>/` slug IS the base36 id), so
+ * the parse itself is the authoritative re-derivation; the cache lookup confirms it.
  */
-async function fetchSyncStats(
-  externalId: string,
-  ctx: { userId: string; ipAddress?: string },
-): Promise<{
-  viewCount: number;
-  likeCount: number;
-  commentCount: number;
-  authorIsMe?: boolean;
-} | null> {
-  if (!isRedditConfigured()) return null;
-  try {
-    const result = await handlePostSingleWithCapGate({
-      postId: externalId,
-      userId: ctx.userId,
-      ipAddress: ctx.ipAddress ?? "0.0.0.0",
-    });
-    // author-is-me inheritance: match t3.author against the user's
-    // owned reddit_account sources. If found, signal author_is_me=true
-    // back to createEvent so the events row is created with proper
-    // attribution. Reddit usernames are case-insensitive, while the API
-    // can return registered casing that differs from the pasted source.
-    let authorIsMe: boolean | undefined = undefined;
-    if (result.author !== null) {
-      authorIsMe = await isOwnedRedditAuthor(ctx.userId, result.author);
-    }
-
-    const isFreshFetch = result.fetched === true;
-
-    // Cross-source audit parity. YouTube's syncStats.fetch writes an
-    // event.poll_refreshed audit row with flow=stats_refresh so the
-    // /admin dashboards' SUM-by-audit-log surface (getUserQuotaUsedToday)
-    // sees the request. Reddit's cap-counter lives on adapter_refresh_queue
-    // (already incremented inside handlePostSingle), so this audit row
-    // is for read-side parity only — it does NOT participate in
-    // enforceAdapterUserQuota. Without it, getUserQuotaUsedToday(userId,
-    // "reddit_account") would return 0 always.
-    // platform is ADAPTER-scoped (not source-scoped) — the Reddit adapter
-    // serves both reddit_account and reddit_subreddit SourceKinds via
-    // the same code path; cross-source dashboards lump them under the
-    // adapter's primary source kind. If a future report needs a
-    // per-SourceKind breakdown, it should JOIN events.source_id →
-    // data_sources.kind instead of reading this audit metadata.
-    await writeAudit({
-      userId: ctx.userId,
-      action: "event.poll_refreshed",
-      ipAddress: ctx.ipAddress ?? "0.0.0.0",
-      metadata: {
-        external_id: externalId,
-        kind: "reddit_post",
-        platform: "reddit_account",
-        flow: "stats_refresh",
-        requests_used: isFreshFetch ? 1 : 0,
-        events_inserted: 0,
-      },
-    });
-
-    return {
-      viewCount: result.score ?? 0,
-      likeCount: 0,
-      commentCount: result.numComments ?? 0,
-      authorIsMe,
-    };
-  } catch (err) {
-    logger.warn(
-      { externalId, userId: ctx.userId, err: String((err as Error)?.message ?? err) },
-      "redditAdapter.syncStats.fetch failed; stats unavailable until next cron tick",
-    );
-    return null;
-  }
-}
-
-/**
- * resetWalkerStateOnWidening — cross-source hook fired by updateSource
- * when the user widens `backfillTargetSince` past the prior value. For
- * Reddit the walker state lives on the public cross-tenant cache row
- * (reddit_subreddits_cache / reddit_users_cache); resetting it means:
- *   1. Clear backfill_after_cursor + flip backfill_complete=false so
- *      sub_poll / author_poll re-enter "deep walk" mode on the next tick.
- *   2. Enqueue a user_source row to kick the walker off immediately —
- *      same lane the user's original click would have used, same cap
- *      bookkeeping. After this initial click runs through one page,
- *      sub_poll's continuation enqueue takes over on the service lane.
- *
- * Cap: counts toward the user's source-action cap via enforceAdapterUserQuota
- * — a PATCH widen burns the same kind of budget as a refresh-content click.
- * Other subscribers of the same subreddit / user free-ride on the resulting
- * fan-out (events show up in their feeds too, filtered to their own
- * backfillTargetSince via the inner-loop window check in sub-poll.ts).
- *
- * Skips when: source.metadata doesn't carry the lookup key (defensive —
- * createSource pipeline always sets it), OR the cache row is missing
- * (handler will create the row on first walk anyway), OR walker already
- * marked NOT-complete (next refresh will continue the deep walk on its
- * own without needing a reset).
- */
-async function resetWalkerStateOnWidening(
-  source: SourceCreatedHookSource,
-  ctx: {
-    previousTarget: Date | null;
-    newTarget: Date;
-    triggerUserId: string;
-    ipAddress: string;
-    tx: Tx;
-  },
-): Promise<void> {
-  // Worker-config gate — same rationale as backfillSource.
-  assertRedditConfigured({ sourceId: source.id });
-  const meta = (source.metadata ?? {}) as { subreddit?: string; username?: string };
-  let resetCount: number;
-  let queuePayload: { sub?: string; handle?: string };
-  let pollType: "sub_poll" | "author_poll";
-
-  if (source.kind === "reddit_subreddit" && typeof meta.subreddit === "string") {
-    const result = await ctx.tx
-      .update(redditSubredditsCache)
-      .set({ backfillAfterCursor: null, backfillComplete: false })
-      .where(
-        and(
-          eq(redditSubredditsCache.name, meta.subreddit),
-          eq(redditSubredditsCache.backfillComplete, true),
-        ),
-      )
-      .returning({ name: redditSubredditsCache.name });
-    resetCount = result.length;
-    queuePayload = { sub: meta.subreddit };
-    pollType = "sub_poll";
-  } else if (source.kind === "reddit_account" && typeof meta.username === "string") {
-    const result = await ctx.tx
-      .update(redditUsersCache)
-      .set({ backfillAfterCursor: null, backfillComplete: false })
-      .where(
-        and(
-          eq(redditUsersCache.username, meta.username),
-          eq(redditUsersCache.backfillComplete, true),
-        ),
-      )
-      .returning({ username: redditUsersCache.username });
-    resetCount = result.length;
-    queuePayload = { handle: meta.username };
-    pollType = "author_poll";
-  } else {
-    // No metadata key to look up — never-walked source (first walk hasn't
-    // landed yet) or non-Reddit kind. updateSource only routes to the
-    // adapter for `source.kind` matching the adapter registry entry so
-    // the else-branch effectively never fires for Reddit; defense-in-depth.
-    return;
-  }
-
-  if (resetCount === 0) {
-    // The cache row was either missing OR backfill_complete was already
-    // false — in either case the next worker tick already does the right
-    // thing (deep walk runs against the existing-or-fresh cursor). No
-    // continuation enqueue needed; the user's natural next refresh OR
-    // the daily service_source cron picks it up.
-    logger.debug(
-      { kind: source.kind, meta, triggerUserId: ctx.triggerUserId },
-      "reddit.resetWalkerStateOnWidening: cache row not in complete state; no-op",
-    );
-    return;
-  }
-
-  // Per-user fair-share cap check — mirrors the source-action gate that
-  // POST /api/sources/:id/refresh-content runs before enqueue. Without
-  // this, a user already exhausted on the Reddit source-action sliding
-  // window could trigger a fresh deep walk through PATCH widening, which
-  // is the exact bypass already closed for the YouTube widen path. Runs
-  // BEFORE the enqueue so the 429 surface stays consistent with other
-  // refresh-content flows.
-  await enforceRedditCap({
-    userId: ctx.triggerUserId,
-    ipAddress: ctx.ipAddress,
-    action: "source-action",
-  });
-
-  // Enqueue an immediate user_source kick. user_id=triggerUserId so the
-  // PATCH counts the same as a refresh-content click against the user's
-  // source-action cap (and surfaces as such in observability audit).
-  await ctx.tx.insert(adapterRefreshQueue).values({
-    adapterKind: "reddit_account",
-    queueName: "user_source",
-    type: pollType,
-    payload: queuePayload,
-    userId: ctx.triggerUserId,
-    priority: 1,
-  });
-}
-
-/** Shape consumed by /events/[id] page UI. Cross-source `+page.server.ts`
- *  imports `loadRedditEventDetailPreview` from this barrel rather than
- *  reaching into `reddit_posts` directly — keeps the per-source DB schema
- *  encapsulated behind the adapter. NULL means the worker / paste flow
- *  hasn't populated the row yet; the UI falls back to event.title alone. */
-export interface RedditEventDetailPreview {
-  author: string | null;
-  subreddit: string;
-  permalink: string;
-  title: string;
-  metadata: unknown;
-}
-
-/** Read the `reddit_posts` cache row for the event-detail page preview
- *  (link_url, body_excerpt, is_self, flair carried in `metadata`). Accepts
- *  either bare ("abc123") or t3-form ("t3_abc123") external id and
- *  normalises to the t3 form the cache PK uses. */
-export async function loadRedditEventDetailPreview(
-  externalId: string,
-): Promise<RedditEventDetailPreview | null> {
-  const tFormId = externalId.startsWith("t3_") ? externalId : `t3_${externalId}`;
-  const [r] = await db
-    .select({
-      author: redditPosts.author,
-      subreddit: redditPosts.subreddit,
-      permalink: redditPosts.permalink,
-      title: redditPosts.title,
-      metadata: redditPosts.metadata,
-    })
+async function resolveCachedExternalId(url: string): Promise<string | null> {
+  const parsed = redditParsePostUrl(url);
+  if (parsed === null) return null;
+  const t3 = `t3_${parsed.externalId}`;
+  const [row] = await db
+    .select({ postId: redditPosts.postId })
     .from(redditPosts)
-    .where(eq(redditPosts.postId, tFormId))
+    .where(eq(redditPosts.postId, t3))
+    .orderBy(desc(redditPosts.updatedAt))
     .limit(1);
-  return r ?? null;
+  return row?.postId ?? t3;
 }
 
-/** Lookup: does the user have an owned, non-soft-deleted reddit_account
- *  source whose metadata.username matches the post author? Tenant-scoped
- *  by construction (filters by userId). */
-async function isOwnedRedditAuthor(userId: string, author: string): Promise<boolean> {
-  const rows = await db
+/**
+ * resolveCachedAuthorIsMe — per-post ownership for a PASTED reddit_post.
+ *
+ * A Reddit source can carry other people's content (a subreddit feed always does), so
+ * ownership is a property of the POST's author, never of the source row — the same rule
+ * the walk applies via resolveOwnedUsernames (CHECKLIST §3). Without this the create
+ * path had no author match at all: a dev pasting their OWN post, with u/<handle>
+ * registered as an owned account, still got it filed as somebody else's until a walk
+ * happened to re-cover that post. Reads the author from OUR cache (written by the
+ * preview), never from the request body.
+ */
+async function resolveCachedAuthorIsMe(userId: string, externalId: string): Promise<boolean> {
+  const [post] = await db
+    .select({ author: redditPosts.author })
+    .from(redditPosts)
+    .where(eq(redditPosts.postId, externalId))
+    .limit(1);
+  if (!post?.author) return false;
+  const [owned] = await db
     .select({ id: dataSources.id })
     .from(dataSources)
     .where(
@@ -643,118 +746,20 @@ async function isOwnedRedditAuthor(userId: string, author: string): Promise<bool
         eq(dataSources.kind, "reddit_account"),
         eq(dataSources.isOwnedByMe, true),
         isNull(dataSources.deletedAt),
-        sql`lower(${dataSources.metadata}->>'username') = lower(${author})`,
+        sql`LOWER(${dataSources.channelId}) = ${post.author.toLowerCase()}`,
       ),
     )
     .limit(1);
-  return rows.length > 0;
+  return owned !== undefined;
 }
 
 /**
- * redditAdapter — composes the polling core (./adapter.ts) with the
- * infrastructure-touching methods (registerQueues / scheduleCronTicks /
- * backfillSource / onSourceCreated) and the cross-source enrichment
- * hook (enrichFeedDtos). The TypeScript `SourceAdapter & typeof core` annotation
- * fails the build if any required contract method is missing from the
- * spread — completeness check by construction.
- *
- * SAME instance handles BOTH reddit_account and reddit_subreddit source
- * kinds — registry.ts wires both registry entries to this object. The
- * adapter dispatches internally on source.metadata (username vs
- * subreddit) inside backfillSource. The declared `kind`
- * field reads "reddit_account" but cross-source code reads it only for
- * diagnostic logs; functional routing goes through registry lookups.
+ * validateEventInput — reddit_post URL-invariant for the merged-state PATCH gate
+ * (mirrors youtube/telegram validateEventInput). The CREATE path enforces url-required
+ * via its Zod schema; without this the PATCH merged-state validator (events-mutation.ts)
+ * would let a client null the url on a reddit_post OR retag a non-Reddit event as
+ * reddit_post — the razed adapter carried this check and the Phase-12 rewrite dropped it.
  */
-/**
- * registerRoutes — mounts /api/reddit/fetch-metadata on the shared Hono
- * app. Cross-source createApp() iterates allAdapters and calls
- * registerRoutes once at boot; adding a new source's preview endpoint
- * means implementing this method on the new adapter (mirror
- * src/lib/sources/youtube/server/index.ts registerRoutes).
- */
-function registerRoutes(app: Hono<AdapterAppContext>): void {
-  app.route("/api", redditMetadataRoutes);
-}
-
-/**
- * fetchPollStateMap — batch lookup of {publishedAt, lastPolledAt, lastPollStatus}
- * keyed by externalId, consumed by the cross-source `loadVideoDataForEvents` overlay
- * in `dto.ts`. PollingBadge + RefreshNowButton wake up once these three fields are
- * non-null on the EventDto.
- *
- * Inputs may come in either Reddit id form — bare `abc123` or t3 `t3_abc123` —
- * because events.externalId is written in either form depending on which ingest
- * path created the row. `reddit_posts.post_id` is the t3 form; we normalize to it
- * for the SELECT and then return BOTH forms in the result Map so the caller's
- * lookup hits regardless of which form the events row carries.
- *
- * Reddit's per-post tables are PUBLIC-DATA (no user_id). The userId argument is
- * accepted for the contract but unused — upstream `loadVideoDataForEvents`
- * already filters by tenant before this is called.
- */
-async function fetchPollStateMap(
-  _userId: string,
-  externalIds: readonly string[],
-): Promise<Map<string, AdapterPollState>> {
-  const map = new Map<string, AdapterPollState>();
-  if (externalIds.length === 0) return map;
-
-  // Normalize both directions: caller may pass bare id or t3 form; DB stores t3.
-  const tFormIds = new Set<string>();
-  for (const id of externalIds) {
-    tFormIds.add(id.startsWith("t3_") ? id : `t3_${id}`);
-  }
-  const lookup = [...tFormIds];
-
-  // `last_snapshot_at` on reddit_posts is an EXACT (non-truncated) wall-clock
-  // timestamp stamped by upsertRedditPost on every UPSERT (i.e. every successful
-  // poll). `reddit_post_snapshots.polled_at` is minute-truncated for in-bucket
-  // idempotency, so it's NOT usable for the "did the poll finish after the
-  // user's refresh click?" comparison that PollingBadge.refreshQueued runs.
-  // Using last_snapshot_at here lets the badge correctly flip from
-  // "Refresh queued" → "Updated just now" within seconds of the worker tick.
-  const postRows = await db
-    .select({
-      postId: redditPosts.postId,
-      submittedAt: redditPosts.submittedAt,
-      lastSnapshotAt: redditPosts.lastSnapshotAt,
-    })
-    .from(redditPosts)
-    .where(inArray(redditPosts.postId, lookup));
-
-  // Latest snapshot row still scanned for `status` — that field doesn't live
-  // on reddit_posts (it's per-snapshot lifecycle: ok / removed / archived /
-  // not_found). ORDER BY post_id, polled_at DESC + manual DISTINCT ON picks
-  // the freshest row per post.
-  const snapRows = await db
-    .select({
-      postId: redditPostSnapshots.postId,
-      status: redditPostSnapshots.status,
-    })
-    .from(redditPostSnapshots)
-    .where(inArray(redditPostSnapshots.postId, lookup))
-    .orderBy(redditPostSnapshots.postId, desc(redditPostSnapshots.polledAt));
-
-  const latestStatus = new Map<string, string>();
-  for (const r of snapRows) {
-    if (latestStatus.has(r.postId)) continue;
-    latestStatus.set(r.postId, r.status);
-  }
-
-  for (const p of postRows) {
-    const state: AdapterPollState = {
-      publishedAt: p.submittedAt,
-      lastPolledAt: p.lastSnapshotAt,
-      lastPollStatus: latestStatus.get(p.postId) ?? null,
-    };
-    map.set(p.postId, state);
-    // Also publish under the bare-id key so callers that key on the form
-    // stored on events.externalId hit regardless of which form was used.
-    if (p.postId.startsWith("t3_")) map.set(p.postId.slice(3), state);
-  }
-  return map;
-}
-
 function validateEventInput(input: { kind: string; url?: string | null }): void {
   if (input.kind !== "reddit_post") return;
   if (!input.url) {
@@ -762,121 +767,65 @@ function validateEventInput(input: { kind: string; url?: string | null }): void 
       reason: "reddit_post_requires_url",
     });
   }
-  const parsed = redditParsePostUrl(input.url);
-  if (parsed === null || parsed.kind !== "reddit_post") {
+  // /s/ share links are accepted RECOGNITION-ONLY (a manual save whose preview never
+  // resolved keeps its stats-less card; a later PATCH must not 422 on the stored URL).
+  if (redditParsePostUrl(input.url) === null && redditParseShareUrl(input.url) === null) {
     throw new AppError("url is not a recognized Reddit post URL", "kind_url_inconsistent", 422, {
       reason: "url_not_reddit_post",
     });
   }
 }
 
-/**
- * enqueueRefreshNow — adapter-driven Refresh-Now enqueue. The
- * cross-source `requestRefreshPoll` service runs validation / cap
- * / cooldown gates, then asks the adapter to actually enqueue the
- * refresh. Reddit: INSERT a user_post row into adapter_refresh_queue
- * (the 8-tick worker drains it within ~7.5s of enqueue at the latest
- * effective ceiling). YouTube's equivalent uses the same shared table on
- * the user_video lane.
- *
- * Dedup: refresh-poll.ts has already eager-written
- * events.metadata.last_user_refresh_at and atomic-checked the cooldown
- * gate, so two-clicks-in-same-minute is already filtered out upstream.
- * We do NOT also dedup against pending queue rows here — the user
- * clicked Refresh-Now consciously and expects a fresh stats fetch,
- * which dedup against an already-pending row would silently suppress.
- */
-async function enqueueRefreshNow(input: {
-  eventId: string;
-  userId: string;
-  externalId: string;
-  eventKind: EventKind;
-  tx?: DbOrTx;
-}): Promise<{ queue: string; jobId: string | null }> {
-  // Worker-config gate — same rationale as backfillSource.
-  assertRedditConfigured({ eventId: input.eventId });
-  // externalId stored on events is the bare Reddit id (e.g. "abc123");
-  // handlePostSingle accepts either form and t3-normalizes internally.
-  //
-  // priority is signed smallint; adapter_refresh_queue workers sort
-  // ORDER BY priority ASC (lower = ahead). Cron/paste rows use 0/1;
-  // refresh-now is the user-waiting path, so -10 puts it ahead of
-  // background work. YouTube uses the same convention on its SQL queue.
-  const dbCtx = input.tx ?? db;
-  const [row] = await dbCtx
-    .insert(adapterRefreshQueue)
-    .values({
-      adapterKind: "reddit_account",
-      queueName: "user_post",
-      type: "post_single",
-      payload: { post_id: input.externalId, flow: "refresh-now" },
-      userId: input.userId,
-      priority: -10,
-      status: "pending",
-    })
-    .returning({ id: adapterRefreshQueue.id });
-  return {
-    queue: adapterRefreshQueueLabel("reddit_account", "user_post"),
-    jobId: row ? String(row.id) : null,
-  };
-}
+// NO registerRoutes: no same-origin thumbnail proxy (Pitfall 5 — hotlink + onerror;
+// the image/gallery card variant is confirmed at 12-06 UAT). Do NOT pre-build it.
 
-export const redditAdapter: SourceAdapter & typeof redditAdapterCore = {
-  ...redditAdapterCore,
-  observability: redditObservability,
+export const redditAdapter: SourceAdapter & typeof redditAccountAdapterCore = {
+  ...redditAccountAdapterCore,
   registerQueues,
   scheduleCronTicks,
   backfillSource,
   normalizeSourceOnCreate,
+  canonicalizeOnCreate,
   onSourceCreated,
   resetWalkerStateOnWidening,
-  enrichFeedDtos: enrichRedditFeedDtos,
   fetchEventPreviewMetadata,
-  syncStats: {
-    fetch: fetchSyncStats,
-  },
-  registerRoutes,
+  resolveCachedExternalId,
+  resolveCachedAuthorIsMe,
+  validateEventInput,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "reddit_post",
+    canRun: async () => {
+      // Block when the provider is unconfigured: the lane worker's isEnabled gates OFF
+      // when getSocialProvider is null, so an enqueued row would NEVER run — an orphan
+      // pending row + a forever-spinning Refresh button.
+      if (getSocialProvider(SOCIAL_PLATFORM) === null) {
+        return { action: "skip", reason: "reddit not configured" };
+      }
+      const throttle = await getSocialThrottleState(SOCIAL_PLATFORM, "scrapecreators");
+      return throttle === "ninetyfive"
+        ? { action: "skip", reason: "reddit budget at 95%" }
+        : { action: "run" };
+    },
     enqueue: enqueueRefreshNow,
   },
   workQueue: {
     scheduledWorkers: [
       {
         name: "reddit.refresh",
-        intervalMs: 7500,
-        readyMessage: "reddit batch-worker ready: 8-tick round-robin loop",
-        disabledMessage: "reddit batch-worker disabled",
+        intervalMs: 1000,
+        replicaPolicy: "parallel",
+        readyMessage: "reddit refresh queue worker ready",
+        disabledMessage: "reddit refresh queue worker disabled (provider unconfigured)",
         laneQueue: {
           strategy: "fixed-slot-round-robin",
-          adapterKind: "reddit_account",
-          slots: REDDIT_SLOT_MAPPING,
-          fallthrough: FALLTHROUGH_ORDER,
+          adapterKind: KIND,
+          slots: REDDIT_REFRESH_SLOTS,
+          fallthrough: REDDIT_REFRESH_SLOTS,
+          batchScope: "global",
         },
-        replicaPolicy: "parallel",
-        isEnabled: isRedditConfigured,
-        tick: redditWorkerTick,
+        isEnabled: () => getSocialProvider(SOCIAL_PLATFORM) !== null,
+        tick: redditRefreshQueueTick,
       },
     ],
   },
-  validateEventInput,
-  fetchPollStateMap,
-  fetchEventMetricSeries: redditFetchEventMetricSeries,
 };
-
-// Re-export the Reddit-only observability helpers so /admin's Reddit
-// Ops panel SSR loader and /sources's Reddit tab import from this
-// barrel rather than reaching into observability.ts directly.
-export {
-  getRecentLoad,
-  getQueueDepth,
-  getDailyByType,
-  REDDIT_QUEUE_NAMES,
-  REDDIT_QUEUE_TYPES,
-} from "./observability.js";
-export type {
-  RedditQueueName,
-  RedditQueueType,
-  RedditQueueDepthRow,
-  RedditDailyByType,
-} from "./observability.js";

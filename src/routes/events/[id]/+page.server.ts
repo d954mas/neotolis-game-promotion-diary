@@ -14,10 +14,6 @@ import { NotFoundError } from "$lib/server/services/errors.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { getEventMetricSeriesForRow } from "$lib/server/services/event-metric-series.js";
 import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
-import {
-  loadRedditEventDetailPreview,
-  type RedditEventDetailPreview,
-} from "$lib/sources/reddit/server/index.js";
 
 /**
  * /events/[id] loader — full detail surface.
@@ -67,18 +63,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       gameIds.length > 0 ? (games.find((g) => g.id === gameIds[0]) ?? null) : null;
     const dto = toEventDto(row, gameIds, pollData);
 
-    // Reddit-specific detail-page preview. The adapter owns the DB
-    // query against `reddit_posts`; this loader stays at routes-call-
-    // adapters granularity (no direct schema imports here).
-    let redditPost: RedditEventDetailPreview | null = null;
-    if (row.kind === "reddit_post" && row.externalId !== null) {
-      redditPost = await loadRedditEventDetailPreview(row.externalId);
-    }
-
     // Adapter-driven feed enrichment. Mirrors /feed loader's overlay so
-    // Reddit's score / num_comments / subscribers / baseline land on the
-    // event DTO before the page render — same data path the FeedCard
-    // uses, no per-route adapter import.
+    // Reddit's likes / comments / thumbnail land on the event DTO (via
+    // redditEnrichFeedDtos → redditEnrichment) before the page render — the
+    // rebuilt adapter (Plan 12-04) exposes NO separate detail-preview; the
+    // event-detail surface reads redditEnrichment from this loop, same data
+    // path the FeedCard uses, no per-route adapter import.
     for (const adapter of allAdapters) {
       if (adapter.enrichFeedDtos === undefined) continue;
       await adapter.enrichFeedDtos(locals.user.id, [dto]);
@@ -121,7 +111,6 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
           )
         : null,
       sources: sourceDtos,
-      redditPost,
       metricSeries,
     };
   } catch (err) {

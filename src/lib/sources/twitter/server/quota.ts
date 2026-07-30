@@ -9,14 +9,13 @@
 // so a Twitter spend draws down the twitterapi.io balance while an IG/TikTok spend
 // draws down the (separate) ScrapeCreators balance.
 //
-// The twitter adapter modules import these from HERE so the twitter tree reads its
-// budget helpers from inside its own folder, while the single implementation still
-// lives in instagram/server/quota.ts (the canonical home — moving it would be a
-// no-op churn the no-fork rule forbids).
+// The implementation lives in the neutral server layer because the funded ledger is
+// a cross-cutting concern shared by multiple feature modules.
 export {
   reserveSocialCredits,
   getSocialThrottleState,
   getSocialSpendToday,
+  getSocialProviderSpendToday,
   resetSocialDailyCap,
   markSocialThrottleTransition,
   markSocialBudgetExhausted,
@@ -24,4 +23,4 @@ export {
   type SocialThrottleState,
   type SocialQuotaPool,
   type SocialCreditPermit,
-} from "$lib/sources/instagram/server/quota.js";
+} from "$lib/server/services/social-provider-quota.js";

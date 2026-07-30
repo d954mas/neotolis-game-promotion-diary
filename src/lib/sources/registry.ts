@@ -28,6 +28,9 @@ import { twitterAdapter } from "./twitter/server/index.js";
 // between them is symbolic but stable.
 const registry = new Map<SourceKind, SourceAdapter>([
   ["youtube_channel", youtubeAdapter],
+  // reddit_account + reddit_subreddit BOTH map to the ONE redditAdapter (both kinds
+  // share one adapter — backfillSource dispatches on source.kind). It appears ONCE in
+  // the dedup-aware allAdapters array below.
   ["reddit_account", redditAdapter],
   ["reddit_subreddit", redditAdapter],
   ["instagram_account", instagramAdapter],

@@ -1,51 +1,65 @@
-// Reddit per-source adapter CORE — the public-`.json` model.
+// reddit adapter core (clone of twitter/server/adapter.ts, retargeted).
 //
-// `redditAdapterCore` is the polling slice composed
-// into the full `redditAdapter` in ./index.ts (mirrors YouTube's
-// adapter.ts → index.ts barrel pattern).
+// The Core surface: the pure URL-parsing / observability / read methods any caller
+// (the barrel, tests, the cross-source readers) uses directly. The
+// infrastructure-touching methods (registerQueues / scheduleCronTicks /
+// backfillSource) and create-time hooks (canonicalizeOnCreate / onSourceCreated /
+// refreshQueue / fetchEventPreviewMetadata / resolveCachedExternalId) are COMPOSED in
+// ./index.ts into the full `redditAdapter`. Cross-source code always imports
+// `redditAdapter` from the barrel.
 //
-// Reddit doesn't expose synchronous pollContent / pollStats methods.
-// Polling is queue-driven: backfillSource (./index.ts) and the
-// type-specific worker handlers (sub-poll / author-poll / post-batch
-// / post-single) own the enqueue + drain lifecycle. Earlier
-// iterations carried YouTube-shaped pollContent / pollStats placeholder
-// stubs here for legacy parity; they were never reached by any
-// Reddit code path (verified by grep) and have been removed.
+// ONE adapter object serves BOTH source kinds (reddit_account + reddit_subreddit) via
+// the registry Map — their backfill / refresh / cap semantics are identical (only the
+// ScrapeCreators feed mode + the URL shape differ, dispatched inside backfillSource).
+// So `kind` here is the nominal "reddit_account"; the registry maps both kinds to this
+// same object.
 //
-// parseUrl / parseSourceUrl stay on the core so the cross-source
-// `parseAnyUrl` iterator and the /sources/new auto-detect can dispatch
-// without instantiating the full barrel.
+// PURE canonicalize (see index.ts): Reddit exposes no user-profile endpoint and the
+// username/slug IS the immutable, rename-proof key, so there is NO
+// resolveHandleToAccountId provider round-trip (unlike Twitter). The core carries only
+// the URL parsers + observability + the three readers.
 
-import type { AdapterObservability, ParsedSourceUrl, ParsedUrl } from "$lib/sources/adapter.js";
-import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
 import { redditObservability } from "./observability.js";
+import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
+import { redditEnrichFeedDtos } from "./feed-enrichment.js";
+import { redditFetchEventMetricSeries } from "./metric-series.js";
+import { redditFetchPollStateMap } from "./poll-state.js";
+import type {
+  AdapterObservability,
+  AdapterPollState,
+  EventKind,
+  EventMetricSeries,
+  ParsedSourceUrl,
+  ParsedUrl,
+} from "$lib/sources/adapter.js";
+import type { EventDto } from "$lib/server/dto.js";
 
-interface RedditAdapterCore {
+interface RedditAccountAdapterCore {
   readonly kind: "reddit_account";
   parseUrl(url: string): ParsedUrl | null;
   parseSourceUrl(input: string): ParsedSourceUrl | null;
   readonly observability: AdapterObservability;
+  enrichFeedDtos(userId: string, dtos: EventDto[]): Promise<void>;
+  fetchEventMetricSeries(
+    userId: string,
+    event: { kind: EventKind; externalId: string | null },
+  ): Promise<EventMetricSeries[]>;
+  fetchPollStateMap(
+    userId: string,
+    externalIds: readonly string[],
+  ): Promise<Map<string, AdapterPollState>>;
 }
 
-/** Reddit adapter polling core — URL parsers + observability surface.
- *
- *  Same adapter instance handles BOTH reddit_account and reddit_subreddit
- *  source kinds; registry.ts wires both keys to one redditAdapter object.
- *  Disambiguation happens in the barrel methods (backfillSource,
- *  onSourceCreated) based on source.metadata (username vs subreddit). */
-export const redditAdapterCore: RedditAdapterCore = {
-  // Declared kind matches the "primary" Reddit source kind; the registry
-  // wires reddit_subreddit to the same instance. Cross-source code only
-  // reads this field for diagnostic logs.
-  kind: "reddit_account",
-
-  parseUrl(input: string): ParsedUrl | null {
-    return redditParsePostUrl(input);
+export const redditAccountAdapterCore: RedditAccountAdapterCore = {
+  kind: "reddit_account" as const,
+  parseUrl(url: string): ParsedUrl | null {
+    return redditParsePostUrl(url);
   },
-
   parseSourceUrl(input: string): ParsedSourceUrl | null {
     return redditParseSourceUrl(input);
   },
-
   observability: redditObservability,
+  enrichFeedDtos: redditEnrichFeedDtos,
+  fetchEventMetricSeries: redditFetchEventMetricSeries,
+  fetchPollStateMap: redditFetchPollStateMap,
 };

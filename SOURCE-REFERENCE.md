@@ -127,11 +127,11 @@ The reservoir is a fast-path approximation; the persistent counter table (`src/l
 
 In `src/lib/sources/reddit/server/adapter.ts`, export `redditChannelAdapter: DataSourceAdapter`. Implement the contract methods (`src/lib/sources/adapter.ts` is the contract source of truth):
 - `kind: "reddit_account"`
-- `pollContent(source, since)` — list latest `/user/<account>/submitted` with `?after=` for incremental
-- `pollStats(events, source, picked)` — batch `/by_id/t3_xxx,t3_yyy`
+- `pollContent(source, since)` — page the provider feed with a cursor for incremental. Reddit as built has NO user-posts endpoint, so the account path is a broad `search?query=author:<handle>` that must filter off-subject posts client-side; the subreddit path uses the native subreddit endpoint (see `provider/scrapecreators-reddit.ts`).
+- `pollStats(events, source, picked)` — re-fetch per post. There is no batch-by-id endpoint on a paid scraper; budget accordingly.
 - `pollStatsByVideoId(externalIds, quotaUser, picked)` — service-driven path (rename for non-video kinds is fine; the contract method name is legacy from Phase 03.0)
 - `parseUrl(url)` — host check FIRST (`reddit.com` / `redd.it` / `old.reddit.com`); extract subreddit + post-id from `/r/<sub>/comments/<id>/...` (Pattern 4.4)
-- `observability` — `auth.kind === "operator-oauth-app-only"`; `quota.getDailyStats` reads a Reddit-specific quota counter
+- `observability` — `auth.kind === "scrape"` (an operator-held paid-scraper key, NOT OAuth — Reddit's self-service OAuth closed Nov 2025); `quota.getDailyStats` projects the SHARED ScrapeCreators prepaid pool, not a Reddit-private counter
 - `canRefreshPoll?(eventKind)` — optional dispatch hint for `POST /api/sources/:id/refresh-content`
 
 The methods that need pg-boss / scheduler infrastructure (`registerQueues`, `scheduleCronTicks`, `backfillSource`) MUST follow the bypass-the-barrel safety pattern: throwing stubs in `adapter.ts`, real implementations in `./index.ts` (Pattern 4.6).
@@ -160,19 +160,17 @@ Mirror the YouTube test files under `tests/unit/sources/reddit/` (HTTP wrapper, 
 
 The CI gates (`lint-typecheck` / `unit-integration` / `smoke`) cover the new adapter the moment it's registered.
 
-### §3.X Reddit (Phase 03.1) — public-`.json` deviation from the YouTube pattern
+### §3.X Reddit (Phase 12) — paid ScrapeCreators adapter, provider-gated + default-OFF
 
-Reddit's source plugin diverges from the YouTube canonical layout in five load-bearing ways. Every divergence is per CONTEXT.md DV-RDT-7 (Nov 2025 Reddit RBP closed self-service OAuth → public-`.json`-only).
+Reddit's original Phase 03.1 plugin was a free, anonymous public-`.json` scrape. That transport was **razed in Phase 12**: Reddit's `.json` endpoints 403 every datacenter IP (whole proxy pools fenced) and Reddit closed self-service OAuth in Nov 2025. The adapter was rebuilt on **ScrapeCreators** — the same paid, prepaid-credit provider that serves Instagram + TikTok — so Reddit now MIRRORS those adapters instead of diverging from them.
 
-1. **Transport**: no OAuth bearer. Native fetch to `https://www.reddit.com/r/X/new.json` etc., User-Agent header from `REDDIT_USER_AGENT` env (regex-validated `by /u/<handle>`). NO `oauth.reddit.com` host, NO `chargedFetch` key-rotation reservoir.
-2. **Rate-limit budget**: hard 10 req/min ceiling (vs OAuth's 60). Adapter enforces 8 req/min effective ceiling (-2 safety margin) via a **single batch-worker** (NOT pg-boss subscriber) — `setInterval(tick, 7500)` in `src/worker/index.ts` claims 1 entry per tick from the next-priority queue.
-3. **Queue model**: ONE SQL-backed table `reddit_refresh_queue` with 4 priority lanes (`service_source`, `service_post`, `user_source`, `user_post`) — NOT 7 pg-boss queues like YouTube. Worker round-robins through 8 slots/min (mapping: 1 service_source, 1 service_post, 3 user_source, 3 user_post). Fallthrough: empty slot → next non-empty queue in priority order.
-4. **Cron pattern**: 4 cron tasks (pg-boss schedules at 00/06/12/18 UTC for sources; 03/09/15/21 UTC for posts; @04 baselines; @05 deletion-propagation) ONLY enqueue rows into `reddit_refresh_queue`. They do NOT make Reddit HTTP calls.
-5. **Per-user quota**: two-axis sliding window — 1 source-action / 5min + 25 post-refreshes / 5min. Implemented via `AdapterUserQuotaCap.sourceActionsPerWindow + postRefreshesPerWindow + windowMinutes` (interface widened in plan 03.1-01).
+1. **Provider gate**: `REDDIT_PROVIDER` selects the implementation (empty => "not configured"; `scrapecreators` is the only buildable value). Mirrors `INSTAGRAM_PROVIDER` / `TIKTOK_PROVIDER` exactly.
+2. **Default-OFF kill-switch**: `REDDIT_IMPORT_ENABLED` — a string-literal-safe boolean where ONLY the literal `"true"` enables import. Even with the provider + key present, Reddit stays OFF until the operator explicitly opts in; the legally-hot platform never auto-enables (D-08).
+3. **Shared budget**: reuses the shared `SCRAPECREATORS_API_KEY` + the `SOCIAL_*` credit envelope (daily cap + monotonic prepaid balance). NO Reddit-specific key, NO Reddit-specific budget vars — Instagram + TikTok + Reddit draw the ONE shared prepaid balance.
+4. **Two source kinds**: `reddit_account` (a user's submitted-post history by handle — the PRIMARY path) and `reddit_subreddit` (a subreddit's recent posts — SECONDARY). Both walk the provider's author / subreddit endpoints.
+5. **Refresh topology**: daily active/cold subject walks refresh posts without a per-post lookup, and users can request a manual refresh. Reddit has no warm metric-refresh lane because ScrapeCreators exposes no lookup-by-id endpoint; a page-1 miss would still spend a credit. A deletion-propagation pass purges author identity after a grace window.
 
-See `.planning/phases/03.1-reddit-adapter/03.1-CONTEXT.md` for the 22 D-RDT-* decisions that produced this divergence + DV-RDT-7 for the Nov 2025 policy context.
-
-§3.4 reservoir reference is unchanged for YouTube (rate-limiter-flexible in-process); Reddit uses the SQL queue + 8-tick worker pattern instead. Both are valid implementations of "Adapter owns its rate limit" per Phase 03.0.1 D-09.
+See `src/lib/sources/instagram/` for the reference ScrapeCreators adapter this mirrors, and `src/lib/sources/reddit/` for the rebuilt tree. The old `reddit_refresh_queue` / `reddit_pacer` / 8-tick batch-worker model and the old User-Agent / proxy-URL / base-URL-override env vars were all removed with the razed transport.
 
 ## 4. Common Patterns
 
@@ -197,21 +195,25 @@ export async function chargedFetch(url, picked, units, ctx) {
 
 Reconcile reservoirs on worker boot from the persistent counter table (`src/lib/sources/<kind>/server/quota.ts`). The reservoir is ORIGIN-SCOPED (cron vs user) so a user-driven Refresh-now flood cannot eat into the cron reserve and vice versa. See `src/lib/sources/youtube/server/http.ts` for the full canonical implementation.
 
-### 4.2 OAuth refresh (Phase 6 future-shape — Reddit / Twitter)
+### 4.2 Credential selection (future per-user shape)
 
-The OAuth-refresh path is internal to the credentials wrapper:
+No adapter uses OAuth today. Reddit's self-service OAuth closed in Nov 2025 and its
+adapter was rebuilt on an operator-held paid-scraper key (Phase 12); Twitter, Instagram
+and TikTok are operator-key too. If a future platform needs per-user credentials, keep
+the choice inside a credentials wrapper so there is ONE edit point:
 
 ```typescript
-// src/lib/sources/reddit/server/credentials.ts
-export async function pickCredentials(ctx: AdapterContext): Promise<RedditCredentials> {
-  // 1) Operator app-only bearer (refreshed by a sidecar cron job)
-  // 2) Phase 6: if ctx.userId is set AND the user has a per-user OAuth row, use that
-  //    Until Phase 6, ctx.userId is informational only.
-  return loadOperatorBearer();
+// src/lib/sources/<kind>/server/credentials.ts
+export async function pickCredentials(ctx: AdapterContext): Promise<Credentials> {
+  // 1) Operator key / bearer
+  // 2) Future: if ctx.userId is set AND the user has a per-user OAuth row, use that.
+  //    Until then, ctx.userId is informational only.
+  return loadOperatorKey();
 }
 ```
 
-YouTube's `pickCredentials` (`src/lib/sources/youtube/server/credentials.ts`) is the v0.1 reference: operator-only, ctx.userId informational, single edit point for Phase 6 per-user override (D-05).
+YouTube's `pickCredentials` (`src/lib/sources/youtube/server/credentials.ts`) is the
+live reference: operator-only, ctx.userId informational, single edit point (D-05).
 
 ### 4.3 Snapshot UPSERT (idempotent)
 
@@ -673,7 +675,7 @@ Derived helper sets — `POLLABLE_EVENT_KINDS`, `CHARTABLE_EVENT_KINDS`, `MANUAL
 
 **The Add Event manual picker is now a config-driven, enforced surface.** It used to carry a hardcoded `KIND_FLOW` list, which is exactly how Instagram was first missed — the chip simply wasn't there, with no compile or test signal. Adding a kind now means making ONE decision in `EVENT_KIND_DISPLAY`: set its `manualCreatable` flag. Because the config is `satisfies Record<EventKind, EventKindDisplay>`, a new kind that omits the flag is a COMPILE ERROR. The picker reads `MANUAL_EVENT_KINDS` — an explicit ordered list (chip order is a UX choice the boolean can't express) whose membership `tests/unit/kind-display.test.ts` asserts equals exactly the `manualCreatable: true` set, so the order list can never drift from the flags. The not-yet-functional kinds (twitter_post / telegram_post / discord_drop) carry `manualCreatable: false` — they have no adapter, no paste flow, and are filtered out of the `/feed` KIND axis, so letting a user create them would be a footgun (un-filterable events).
 
-**`manualCreatable: true` ≠ live paste-preview.** The flag only governs whether the kind's chip is *selectable* and whether a manually-typed/pasted event of that kind can be created. RECOGNIZING a pasted link (auto-detect kind + canonical URL from the Fetch button) goes through `parseAnyUrl` → `parseIngestUrl` → `enrichFromUrl`; for a kind to actually *preview* (auto-fill title / thumbnail / date from the live post) the matching adapter must additionally implement `fetchEventPreviewMetadata` (YouTube oEmbed, Reddit `/api/info.json`). Instagram is the in-between case shipped in Phase 08: the link is RECOGNIZED (kind=`instagram_post` + shortcode externalId + canonical permalink) with NO network call — there is no single-post IG metadata API — so the user types the Title manually. When an IG single-post endpoint lands, implementing the IG adapter's `fetchEventPreviewMetadata` is the only change needed to upgrade recognition → full preview.
+**`manualCreatable: true` ≠ live paste-preview.** The flag only governs whether the kind's chip is *selectable* and whether a manually-typed/pasted event of that kind can be created. RECOGNIZING a pasted link (auto-detect kind + canonical URL from the Fetch button) goes through `parseAnyUrl` → `parseIngestUrl` → `enrichFromUrl`; for a kind to actually *preview* (auto-fill title / thumbnail / date from the live post) the matching adapter must additionally implement `fetchEventPreviewMetadata` (YouTube oEmbed; Reddit resolves the post from its subreddit's newest ScrapeCreators feed page — no single-post endpoint exists). Instagram is the in-between case shipped in Phase 08: the link is RECOGNIZED (kind=`instagram_post` + shortcode externalId + canonical permalink) with NO network call — there is no single-post IG metadata API — so the user types the Title manually. When an IG single-post endpoint lands, implementing the IG adapter's `fetchEventPreviewMetadata` is the only change needed to upgrade recognition → full preview.
 
 **Deliberate exclusion** (still NOT config-driven, by design): the kind dropdown on the edit form (`events/[id]/edit`) carries its own allowlist — editing an existing event is a different surface from creating one, so it stays separate for now.
 
@@ -690,7 +692,7 @@ An auto-import adapter that wants channel-level / account-level analytics later 
 | Adapter | Entity table | PK (rename-proof id) | Holds |
 | ------- | ------------ | -------------------- | ----- |
 | YouTube | `youtube_channels` | `channel_id` (UC…) | channel title, uploads playlist id, handle aliases |
-| Reddit | `reddit_subreddits_cache` | `name` (lowercase slug) | subscribers, description, submission metadata |
+| Reddit | `reddit_subreddits` + `reddit_accounts` (two subject kinds) | `slug` / `username` (lowercase, rename-proof) | title, subscriber count / karma + followers, icon URL |
 | Instagram | `instagram_accounts` | `account_id` (stable IG user id, = `instagram_posts.account_id`) | full name, @handle username, avatar, follower count, handle aliases |
 | Telegram | `telegram_channels` | `channel_key` (numeric id from each post's base64 `data-view` payload `{"c":…}`) | title, @username slug, avatar, subscriber count, description, handle aliases |
 
@@ -698,14 +700,14 @@ The entity row's `title` / `name` is the upstream-scraped value — OUR truth fo
 
 **(b) Full per-post + per-post-snapshot historical storage.** Public-data, retained FOREVER (no GC, even when the last referencing event / source is deleted — the row IS the historical record). Each per-post row carries the rename-proof subject id as a column (`youtube_videos.channel_id`, `reddit_posts.subreddit`, `telegram_posts.channel_key`) so per-subject analytics can `GROUP BY` it. The snapshot table (`*_video_snapshots` / `*_post_snapshots`) is the immutable time-series the baselines aggregate over.
 
-**(c) Per-subject baselines (future / optional).** A separate public-data aggregate table keyed by the subject key, computed by a nightly cron, surfaced in `/feed` enrichment as percentile context ("your post in r/X underperforms median — 16% of typical score"). Build only when the read-path needs it. The canonical pattern is `reddit_subreddit_baselines`: median / p75 over a rolling window via `PERCENTILE_CONT`, a `sample_size >= N` gate so a thin sample never publishes misleading numbers, JOIN `*_posts` against `*_post_snapshots` at the ~24h-after-publish mark. **No Telegram baselines table / cron / channel page exists yet** — `telegram_channels` is the entity foundation those will read. Note: the Telegram backfill depth cap (`TELEGRAM_BACKFILL_MAX_POSTS`, currently 100) will be revisited when percentiles land, since a meaningful per-channel baseline may want a deeper historical sample than the steady-state feed needs.
+**(c) Per-subject baselines (future / optional).** A separate public-data aggregate table keyed by the subject key, computed by a nightly cron, surfaced in `/feed` enrichment as percentile context ("your post in r/X underperforms median — 16% of typical score"). Build only when the read-path needs it. The canonical pattern WAS `reddit_subreddit_baselines` (razed with the old Reddit adapter in Phase 12; the pattern remains the reference): median / p75 over a rolling window via `PERCENTILE_CONT`, a `sample_size >= N` gate so a thin sample never publishes misleading numbers, JOIN `*_posts` against `*_post_snapshots` at the ~24h-after-publish mark. **No Telegram baselines table / cron / channel page exists yet** — `telegram_channels` is the entity foundation those will read. Note: the Telegram backfill depth cap (`TELEGRAM_BACKFILL_MAX_POSTS`, currently 100) will be revisited when percentiles land, since a meaningful per-channel baseline may want a deeper historical sample than the steady-state feed needs.
 
 **Current adapter coverage:**
 
 | Adapter | (a) entity | (b) post + snapshot history | (c) baselines |
 | ------- | ---------- | --------------------------- | ------------- |
 | YouTube | ✅ `youtube_channels` | ✅ | — (not built; analytics live on the per-game chart) |
-| Reddit | ✅ `reddit_subreddits_cache` | ✅ | ✅ `reddit_subreddit_baselines` (the canonical reference) |
+| Reddit | ✅ `reddit_subreddits` + `reddit_accounts` (Phase 12 rebuild) | ✅ `reddit_posts` + snapshots | — (the old `reddit_subreddit_baselines` was razed with the free-`.json` adapter; designed-for, not rebuilt) |
 | Instagram | ✅ `instagram_accounts` | ✅ `instagram_posts` + snapshots | — (designed-for; not built) |
 | Telegram | ✅ `telegram_channels` (Phase 9) | ✅ `telegram_posts` + snapshots | — (designed-for; not built) |
 

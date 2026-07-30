@@ -31,18 +31,19 @@
     resetsInMs: number;
   }
 
-  /** Reddit-specific quota block (Phase 03.1 plan 08, D-RDT-QUOTA-UI).
-   *  Shape differs from QuotaPlatform's two-axis (requests/events per
-   *  day) because Reddit's cap is a two-axis SLIDING-window
-   *  (source-actions + post-refreshes per 5 min) plus a service-load
-   *  gauge (used / 6 user slots per minute). When the operator hasn't
-   *  configured REDDIT_USER_AGENT, only `isOperatorConfigured: false`
-   *  is set and the banner shows the empty state per D-RDT-AUTH-EMPTY. */
+  /** Reddit-specific quota block (Phase 12, D-RDT-QUOTA-UI).
+   *  Two INDEPENDENT per-kind daily buckets (reddit_account + reddit_subreddit each get
+   *  their OWN LIMIT_SOCIAL_REQUESTS_PER_DAY — the per-user cap keys on the source kind)
+   *  plus a service-load gauge (shared ScrapeCreators daily spend). The two rows are NOT
+   *  summed — that mirrors enforcement (30 account + 30 subreddit is 30/50 AND 30/50,
+   *  never 60/50). When the operator hasn't configured Reddit import (isRedditConfigured()
+   *  false — REDDIT_IMPORT_ENABLED unset), only `isOperatorConfigured: false` is set and
+   *  the banner shows the empty state per D-RDT-AUTH-EMPTY. */
   type RedditQuota =
     | {
         isOperatorConfigured: true;
-        sourceActions: { used: number; cap: number; windowMinutes: number };
-        postRefreshes: { used: number; cap: number; windowMinutes: number };
+        accountRequests: { used: number; cap: number };
+        subredditRequests: { used: number; cap: number };
         serviceLoad: { used: number; capacity: number };
       }
     | { isOperatorConfigured: false };
@@ -149,40 +150,32 @@
          tab in the technical sense — the banner stacks sections
          vertically; "Reddit tab" in the plan refers to the
          conceptual segregation from YouTube's per-day axis.
-         Empty state when operator hasn't configured REDDIT_USER_AGENT
-         (D-RDT-AUTH-EMPTY). -->
+         Empty state when operator hasn't configured Reddit import
+         (isRedditConfigured() false) (D-RDT-AUTH-EMPTY). -->
     <section class="quota-banner__platform">
       <h3 class="quota-banner__platform-name">{m.quota_banner_reddit_tab_title()}</h3>
       {#if !redditQuota.isOperatorConfigured}
         <p class="quota-banner__not-configured">{m.quota_banner_reddit_not_configured()}</p>
       {:else}
-        {@const sa = redditQuota.sourceActions}
-        {@const pr = redditQuota.postRefreshes}
+        {@const ar = redditQuota.accountRequests}
+        {@const sr = redditQuota.subredditRequests}
         {@const sl = redditQuota.serviceLoad}
-        {@const saZone = zone(pct(sa.used, sa.cap))}
-        {@const prZone = zone(pct(pr.used, pr.cap))}
+        {@const arZone = zone(pct(ar.used, ar.cap))}
+        {@const srZone = zone(pct(sr.used, sr.cap))}
         <div class="quota-banner__axis">
           <span class="quota-banner__axis-value">
-            {m.quota_banner_reddit_source_actions({
-              used: sa.used,
-              cap: sa.cap,
-              window: sa.windowMinutes,
-            })}
+            {m.quota_banner_reddit_account_requests({ used: ar.used, cap: ar.cap })}
           </span>
-          <div class="quota-banner__bar quota-banner__bar--{saZone}" aria-hidden="true">
-            <div class="quota-banner__bar-fill" style="width: {pct(sa.used, sa.cap)}%"></div>
+          <div class="quota-banner__bar quota-banner__bar--{arZone}" aria-hidden="true">
+            <div class="quota-banner__bar-fill" style="width: {pct(ar.used, ar.cap)}%"></div>
           </div>
         </div>
         <div class="quota-banner__axis">
           <span class="quota-banner__axis-value">
-            {m.quota_banner_reddit_post_refreshes({
-              used: pr.used,
-              cap: pr.cap,
-              window: pr.windowMinutes,
-            })}
+            {m.quota_banner_reddit_subreddit_requests({ used: sr.used, cap: sr.cap })}
           </span>
-          <div class="quota-banner__bar quota-banner__bar--{prZone}" aria-hidden="true">
-            <div class="quota-banner__bar-fill" style="width: {pct(pr.used, pr.cap)}%"></div>
+          <div class="quota-banner__bar quota-banner__bar--{srZone}" aria-hidden="true">
+            <div class="quota-banner__bar-fill" style="width: {pct(sr.used, sr.cap)}%"></div>
           </div>
         </div>
         <div class="quota-banner__axis">

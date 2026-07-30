@@ -18,7 +18,12 @@ mkdirSync(OUT_DIR, { recursive: true });
 async function fetchJson(page, url) {
   return page.evaluate(async (u) => {
     const r = await fetch(u, { credentials: "include" });
-    return { status: r.status, body: await r.json() };
+    const text = await r.text();
+    try {
+      return { status: r.status, body: JSON.parse(text) };
+    } catch {
+      return { status: r.status, body: null, nonJson: text.slice(0, 200) };
+    }
   }, url);
 }
 
@@ -54,6 +59,36 @@ async function lokiCount(page, expr, rangeSeconds = 86400) {
   const { status, body } = await fetchJson(page, url);
   if (status !== 200) return { error: status };
   return Number(body.data?.result?.[0]?.value?.[1] ?? 0);
+}
+
+// Per-service log volume over time — feeds the "Log Volume by Service" panel.
+// Returns each service's peak count_over_time bucket so we can spot spikes.
+async function lokiVolumeByService(page, services, rangeSeconds = 86400, step = 300) {
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - rangeSeconds;
+  const expr = `sum by (service) (count_over_time({service=~"${services.join("|")}"}[${step}s]))`;
+  const url = `${GRAFANA_URL}/api/datasources/proxy/uid/loki/loki/api/v1/query_range?query=${encodeURIComponent(expr)}&start=${start}000000000&end=${now}000000000&step=${step}`;
+  const { status, body, nonJson } = await fetchJson(page, url);
+  if (status !== 200 || !body) return { error: status, nonJson };
+  const series = body.data?.result ?? [];
+  return series
+    .map((s) => {
+      const values = s.values ?? [];
+      const total = values.reduce((acc, v) => acc + Number(v[1]), 0);
+      let peak = { count: 0, ts: 0 };
+      for (const [ts, val] of values) {
+        const n = Number(val);
+        if (n > peak.count) peak = { count: n, ts };
+      }
+      return {
+        service: s.metric?.service ?? "?",
+        total,
+        peakCount: peak.count,
+        peakAt: peak.ts ? new Date(peak.ts * 1000).toISOString() : null,
+        perStepAvg: values.length ? Math.round(total / values.length) : 0,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
 }
 
 function extractValue(result) {
@@ -152,6 +187,20 @@ async function main() {
     `${serviceSelector} |= "level" | json | level >= 50 | __error__=""`,
   );
   console.log(`  error logs (24h): ${report.loki.errorLogs24h} lines`);
+
+  // --- Log volume by service (spike detection) ---
+  console.log("\n=== Log Volume by Service (24h) ===");
+  const services = report.loki.labels.service?.length ? report.loki.labels.service : [".+"];
+  report.loki.volumeByService = await lokiVolumeByService(page, services, 86400, 300);
+  if (Array.isArray(report.loki.volumeByService)) {
+    for (const s of report.loki.volumeByService) {
+      console.log(
+        `  ${s.service.padEnd(10)} total=${s.total}  avg/5m=${s.perStepAvg}  peak=${s.peakCount} @ ${s.peakAt}`,
+      );
+    }
+  } else {
+    console.log(`  error: ${JSON.stringify(report.loki.volumeByService)}`);
+  }
 
   // ERR_HTTP_HEADERS_SENT is printed raw by @hono/node-server (bypasses Pino),
   // so the level>=50 query never sees it — grep the raw line instead.

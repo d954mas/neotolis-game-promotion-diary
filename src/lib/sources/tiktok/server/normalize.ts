@@ -25,6 +25,7 @@
 // (`statistics.share_count`) — the metric Instagram never had.
 
 import { z } from "zod";
+import { mapPostsResilient } from "$lib/sources/feed-normalize.js";
 import type {
   FeedOwner,
   NormalizedPost,
@@ -185,6 +186,17 @@ function pickFeedOwner(author: Aweme["author"]): FeedOwner | null {
   };
 }
 
+/** The feed owner rides on each aweme's author object; read it off the FIRST
+ *  aweme that PARSES (not the first RAW item), so a dropped malformed lead item
+ *  doesn't blank the owner — mirrors reddit's pickFeedOwner(posts[0]). */
+function firstParsedAuthor(rawPosts: readonly unknown[]): Aweme["author"] {
+  for (const raw of rawPosts) {
+    const parsed = AWEME.safeParse(raw);
+    if (parsed.success) return parsed.data.author;
+  }
+  return undefined;
+}
+
 // ---- VIDEOS feed response (/v3/tiktok/profile/videos — 10-SPIKE.md Call 1) ----
 // FLAT nesting: aweme_list / max_cursor / has_more are TOP-LEVEL. max_cursor is
 // a NUMBER (coerce to string for the port). has_more is 1 for more pages — BUT
@@ -192,8 +204,12 @@ function pickFeedOwner(author: Aweme["author"]): FeedOwner | null {
 // spike's sample), while single-page small accounts return BOOLEAN false (live
 // failure 2026-06-12, @d954mas_make_games — ZodError "expected number, received
 // boolean"). Accept both; the truthiness collapses in normalizeVideosResponse.
+// aweme_list is z.unknown()[] — NOT z.array(AWEME) — so ONE malformed video cannot
+// throw at the envelope parse and nuke the whole paid page. Each aweme is strict-parsed
+// (AWEME.parse) independently in normalizeVideosResponse via mapPostsResilient, which
+// drops a stray bad row but throws on a majority-drop shape change.
 const VIDEOS_RESPONSE = z.object({
-  aweme_list: z.array(AWEME),
+  aweme_list: z.array(z.unknown()),
   max_cursor: z.number().nullable().optional(),
   has_more: z.union([z.number(), z.boolean()]).nullable().optional(),
 });
@@ -201,11 +217,19 @@ const VIDEOS_RESPONSE = z.object({
 /** Validate + map a videos-feed response → uniform ProviderPage. The cursor
  *  coercion (number → string) and the end-signal (`has_more !== 1`) die here —
  *  callers see only `nextCursor` / `endOfFeed`. The feed owner is read off the
- *  FIRST item's author (every item carries the same author for a profile feed). */
+ *  first PARSED item's author (every item carries the same author for a profile
+ *  feed; the first raw item may have been dropped as malformed). */
 export function normalizeVideosResponse(json: unknown): ProviderPage {
   const parsed = VIDEOS_RESPONSE.parse(json);
   return {
-    posts: parsed.aweme_list.map((aweme) => normalizeAweme(aweme)),
+    // Resilient per-aweme mapping: a stray malformed video is dropped, but a
+    // majority-drop (provider shape change) throws AdapterError(transient) instead
+    // of yielding a partial page that would read as a false end-of-feed.
+    posts: mapPostsResilient(
+      parsed.aweme_list,
+      (raw) => normalizeAweme(AWEME.parse(raw)),
+      "tiktok videos",
+    ),
     // 10-SPIKE.md deviation 1: max_cursor is a NUMBER → coerce to the port's
     // string cursor. A FALSY 0 (or null/absent) is end-of-feed, NOT a resumable
     // position: live cursors are epoch-millis scale (e.g. 1779902811265), so 0 is
@@ -217,7 +241,9 @@ export function normalizeVideosResponse(json: unknown): ProviderPage {
     // else (0 / false / absent) is end-of-feed.
     endOfFeed: parsed.has_more !== 1 && parsed.has_more !== true,
     creditsUsed: 1,
-    owner: pickFeedOwner(parsed.aweme_list[0]?.author),
+    // Owner off the first PARSED aweme's author (aweme_list[] is now z.unknown()[]);
+    // a dropped malformed lead item must not blank the owner.
+    owner: pickFeedOwner(firstParsedAuthor(parsed.aweme_list)),
   };
 }
 

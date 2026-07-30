@@ -12,7 +12,7 @@
 // The claimGate (prepaid-balance RUN vs daily-cap DEFER), the concurrent
 // Promise.allSettled dispatch, the per-row resolve/fetch/never-throw flow, and the
 // drained-tick observability all live in the shared factory. This file binds the
-// TikTok seams (getSocialProvider / getSocialSpendToday from the TikTok tree so the
+// TikTok seams (getSocialProvider / getSocialProviderSpendToday from the TikTok tree so the
 // per-tree vi.mock works), the tiktok_posts permalink lookup, the tenant-scoped
 // user_post event resolve, and the TikTok snapshot write.
 //
@@ -34,7 +34,7 @@ import {
 import type { AdapterLaneWorkerRow } from "$lib/server/services/adapter-lane-worker.js";
 import { env } from "$lib/server/config/env.js";
 import { getSocialProvider } from "../provider/registry.js";
-import { getSocialSpendToday } from "../quota.js";
+import { getSocialProviderSpendToday } from "../quota.js";
 import { writeSnapshot } from "../snapshots.js";
 import { tiktokParseUrl } from "../url.js";
 
@@ -76,7 +76,10 @@ async function resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | nu
 // (tiktokParseUrl yields the same /@handle/video/<id> permalink the endpoint needs).
 // On a successful fetch writeSnapshot UPSERTs the tiktok_posts row, self-healing the
 // cache so subsequent refreshes hit the fast path.
-async function resolvePermalink(awemeId: string): Promise<string | null> {
+async function resolvePermalink(
+  awemeId: string,
+  row: AdapterLaneWorkerRow,
+): Promise<string | null> {
   const [postRow] = await db
     .select({ permalink: tiktokPosts.permalink })
     .from(tiktokPosts)
@@ -88,12 +91,13 @@ async function resolvePermalink(awemeId: string): Promise<string | null> {
   // aweme id (the URL slug IS the id, so external_id == aweme id). PUBLIC-DATA: the
   // permalink is intrinsic to the URL, identical across every tenant who saved it, so
   // no userId scope (any tenant's row yields the same canonical permalink).
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- the permalink is URL-intrinsic public data (TikTok's aweme id IS the /@handle/video/<id> slug); any tenant's tiktok_post event for this id parses to the SAME canonical permalink, so the cache-miss recovery is tenant-agnostic by construction.
+  if (row.userId === null) return null;
   const [eventRow] = await db
     .select({ url: events.url })
     .from(events)
     .where(
       and(
+        eq(events.userId, row.userId),
         eq(events.externalId, awemeId),
         eq(events.kind, "tiktok_post"),
         isNotNull(events.url),
@@ -112,7 +116,7 @@ const tiktokRefreshLane = createSocialRefreshLane({
   provider: "scrapecreators",
   maxBatchSize: env.SOCIAL_REFRESH_LANE_CONCURRENCY,
   getSocialProvider,
-  getSocialSpendToday,
+  getSocialProviderSpendToday,
   resolvePermalink,
   resolveUserPostId,
   writeSnapshot: ({ postId: awemeId, permalink, post, status }) =>

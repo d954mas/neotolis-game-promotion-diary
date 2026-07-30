@@ -36,13 +36,6 @@ import { auditLog } from "../db/schema/audit-log.js";
 import type { AuditAction } from "../audit/actions.js";
 import { todayPacific } from "./quota.js";
 import { getAdapter } from "$lib/sources/registry.js";
-import { env } from "$lib/server/config/env.js";
-import {
-  getQueueDepth as getRedditQueueDepth,
-  getDailyByType as getRedditDailyByType,
-  type RedditQueueDepthRow,
-  type RedditDailyByType,
-} from "$lib/sources/reddit/server/index.js";
 import {
   getYoutubeQueueDepth,
   getYoutubeDailyByType,
@@ -51,11 +44,12 @@ import {
 } from "$lib/sources/youtube/server/observability.js";
 import { getInstagramProviderBlock } from "$lib/sources/instagram/server/observability.js";
 import { getTikTokProviderBlock } from "$lib/sources/tiktok/server/observability.js";
+import { getRedditProviderBlock } from "$lib/sources/reddit/server/observability.js";
 
 // Re-export types so the /admin Svelte components (which can only
-// type-import from this server-service module, not from reddit/server
-// directly) can reference the same shapes the loader returns.
-export type { RedditQueueDepthRow, RedditDailyByType, YoutubeQueueDepthRow, YoutubeDailyByType };
+// type-import from this server-service module) can reference the same shapes
+// the loader returns.
+export type { YoutubeQueueDepthRow, YoutubeDailyByType };
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
@@ -98,17 +92,27 @@ const SERVICE_LEVEL_AUDIT_ACTIONS: readonly AuditAction[] = [
 const ADMIN_AUDIT_TAIL_LIMIT = 50;
 
 /**
- * Reddit Ops block surfaced on the /admin page alongside the YouTube
- * quota table + service audit list. When the operator hasn't configured
- * REDDIT_USER_AGENT, the block collapses to `{ isConfigured: false }`
- * — the page renders a "Reddit ingest disabled" placeholder instead of
- * the live tables.
+ * Reddit (ScrapeCreators) provider block surfaced on /admin/quota — the twin of
+ * AdminInstagramBlock/AdminTiktokBlock (same shape, same collapse-when-unconfigured
+ * contract). The rebuilt Reddit adapter (Phase 12) is a PAID ScrapeCreators provider
+ * behind the D-08 kill-switch, sharing the provider-wide prepaid balance with
+ * Instagram + TikTok (D-01), so remainingBalance / prepaidBalance read the SAME
+ * ceiling; the per-platform creditsUsed / requestsToday are Reddit's own daily spend.
+ * When the operator hasn't opted in (isRedditConfigured() false — REDDIT_IMPORT_ENABLED
+ * unset), the block collapses to `{ isConfigured: false }` and the page renders the
+ * "Reddit import not configured by operator" placeholder.
  */
 export type AdminRedditBlock =
   | {
       isConfigured: true;
-      queueDepth: RedditQueueDepthRow[];
-      daily: RedditDailyByType;
+      requestsToday: number;
+      creditsUsed: number;
+      /** JOINT spend across every platform on this provider — what dailyCap gates on. */
+      providerCreditsUsed: number;
+      dailyCap: number;
+      remainingBalance: number;
+      prepaidBalance: number;
+      throttleState: "ok" | "eighty" | "ninetyfive";
     }
   | { isConfigured: false };
 
@@ -123,7 +127,7 @@ export interface AdminYoutubeBlock {
  * configured a provider (INSTAGRAM_PROVIDER / SCRAPECREATORS_API_KEY empty), the
  * block collapses to `{ isConfigured: false }` — the page renders the
  * "Instagram import not configured by operator" placeholder instead of empty
- * spend tables (mirrors the AdminRedditBlock REDDIT_USER_AGENT-empty collapse,
+ * spend tables (mirrors the AdminRedditBlock isRedditConfigured()-false collapse,
  * SOC-05).
  *
  * Configured shape:
@@ -140,6 +144,8 @@ export type AdminInstagramBlock =
       isConfigured: true;
       requestsToday: number;
       creditsUsed: number;
+      /** JOINT spend across every platform on this provider — what dailyCap gates on. */
+      providerCreditsUsed: number;
       dailyCap: number;
       remainingBalance: number;
       prepaidBalance: number;
@@ -161,6 +167,8 @@ export type AdminTiktokBlock =
       isConfigured: true;
       requestsToday: number;
       creditsUsed: number;
+      /** JOINT spend across every platform on this provider — what dailyCap gates on. */
+      providerCreditsUsed: number;
       dailyCap: number;
       remainingBalance: number;
       prepaidBalance: number;
@@ -218,17 +226,25 @@ export async function loadAdminQuotaPage(): Promise<{
     .orderBy(desc(auditLog.createdAt))
     .limit(ADMIN_AUDIT_TAIL_LIMIT);
 
-  // Reddit Ops block — skip the two SQL round-trips when the operator
-  // hasn't configured REDDIT_USER_AGENT. The block collapses cleanly:
-  // the UI renders a single "Reddit ingest disabled" placeholder
-  // instead of stale empty tables that look like outages.
-  let reddit: AdminRedditBlock;
-  if (env.REDDIT_USER_AGENT === "") {
-    reddit = { isConfigured: false };
-  } else {
-    const [queueDepth, daily] = await Promise.all([getRedditQueueDepth(), getRedditDailyByType()]);
-    reddit = { isConfigured: true, queueDepth, daily };
-  }
+  // Reddit provider block — the twin of the Instagram/TikTok blocks (Phase 12
+  // rebuilt adapter is a ScrapeCreators provider, NOT the old free-`.json` queue
+  // model). getRedditProviderBlock reads isRedditConfigured() at call time (the D-08
+  // kill-switch: REDDIT_IMPORT_ENABLED must be "true"); when off the block collapses
+  // to { isConfigured: false } so the page renders the placeholder instead of a
+  // zeroed spend table that looks like an outage.
+  const rd = await getRedditProviderBlock(now);
+  const reddit: AdminRedditBlock = rd.isConfigured
+    ? {
+        isConfigured: true,
+        requestsToday: rd.requestsToday,
+        creditsUsed: rd.creditsUsed,
+        providerCreditsUsed: rd.providerCreditsUsed,
+        dailyCap: rd.dailyCap,
+        remainingBalance: rd.remainingBalance,
+        prepaidBalance: rd.prepaidBalance,
+        throttleState: rd.throttleState,
+      }
+    : { isConfigured: false };
 
   // YouTube ops block. Read from the shared adapter_refresh_queue with
   // adapter_kind='youtube_channel' — same shape the Reddit panel uses,
@@ -250,6 +266,7 @@ export async function loadAdminQuotaPage(): Promise<{
         isConfigured: true,
         requestsToday: ig.requestsToday,
         creditsUsed: ig.creditsUsed,
+        providerCreditsUsed: ig.providerCreditsUsed,
         dailyCap: ig.dailyCap,
         remainingBalance: ig.remainingBalance,
         prepaidBalance: ig.prepaidBalance,
@@ -268,6 +285,7 @@ export async function loadAdminQuotaPage(): Promise<{
         isConfigured: true,
         requestsToday: tt.requestsToday,
         creditsUsed: tt.creditsUsed,
+        providerCreditsUsed: tt.providerCreditsUsed,
         dailyCap: tt.dailyCap,
         remainingBalance: tt.remainingBalance,
         prepaidBalance: tt.prepaidBalance,

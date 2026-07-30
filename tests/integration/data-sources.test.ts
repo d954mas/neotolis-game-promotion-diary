@@ -17,11 +17,23 @@ import { toDataSourceDto } from "../../src/lib/server/dto.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
-import { redditUsersCache } from "../../src/lib/sources/reddit/server/schema/index.js";
+import { redditAccounts } from "../../src/lib/sources/reddit/server/schema/index.js";
 import { dataSourceChannelState } from "../../src/lib/server/db/schema/data-source-channel-state.js";
 import * as Audit from "../../src/lib/server/audit.js";
 import { NotFoundError, AppError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
+
+// The rebuilt Phase-12 Reddit adapter is PROVIDER-GATED (D-08 kill-switch):
+// createSource(reddit_*) returns 422 kind_not_configured unless the operator has
+// opted in via REDDIT_IMPORT_ENABLED. This suite exercises the CONFIGURED
+// source-create path (adapter functional), so force isRedditConfigured()→true; the
+// not-configured degrade (422 + no row + no credit) is asserted in
+// reddit-not-configured.test.ts. vi.mock is hoisted above the static createSource
+// import, so data-sources.ts reads the mocked probe.
+vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, isRedditConfigured: () => true };
+});
 
 // Service-layer integration for the data_sources registry. HTTP-route concerns
 // (status codes, route shape) live in the HTTP-boundary suite below; this
@@ -120,14 +132,83 @@ describe("register data sources via POST /api/sources", () => {
       "127.0.0.1",
     );
     const lastMetadataRefreshAt = new Date("2026-05-18T10:00:00.000Z");
-    await db.insert(redditUsersCache).values({
+    await db.insert(redditAccounts).values({
       username: "detailpolled",
-      lastMetadataRefreshAt,
+      lastRefreshedAt: lastMetadataRefreshAt,
     });
 
     const detail = await loadSourceDetailPage(userA.id, created.id);
 
     expect(detail.source.lastPolledAt?.toISOString()).toBe(lastMetadataRefreshAt.toISOString());
+  });
+
+  it("source detail read-model marks active Reddit account and subreddit walks as pulling", async () => {
+    const { PgBoss } = await import("pg-boss");
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { QUEUES, REDDIT_WALK_QUEUE_OPTIONS } = await import("../../src/lib/server/queues.js");
+    const handle = `pulling_${Math.random().toString(36).slice(2, 10)}`;
+    const slug = `pulling_sub_${Math.random().toString(36).slice(2, 10)}`;
+    const userA = await seedUserDirectly({ email: `${handle}@test.local` });
+    const accountSource = await createSource(
+      userA.id,
+      {
+        kind: "reddit_account",
+        handleUrl: `https://reddit.com/user/${handle}`,
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+    const subredditSource = await createSource(
+      userA.id,
+      {
+        kind: "reddit_subreddit",
+        handleUrl: `https://reddit.com/r/${slug}`,
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+    const boss = new PgBoss({ connectionString: env.DATABASE_URL });
+    boss.on("error", () => undefined);
+    let accountJobId: string | null = null;
+    let subredditJobId: string | null = null;
+
+    await boss.start();
+    try {
+      await boss.createQueue(QUEUES.REDDIT_BACKFILL_ACCOUNT, REDDIT_WALK_QUEUE_OPTIONS);
+      await boss.createQueue(QUEUES.REDDIT_BACKFILL_SUBREDDIT, REDDIT_WALK_QUEUE_OPTIONS);
+      accountJobId = await boss.send(QUEUES.REDDIT_BACKFILL_ACCOUNT, {
+        kind: "reddit_account",
+        channelKey: handle,
+        triggerUserId: userA.id,
+        depthBoundIso: "1970-01-01T00:00:00.000Z",
+        flow: "incremental",
+      });
+      subredditJobId = await boss.send(QUEUES.REDDIT_BACKFILL_SUBREDDIT, {
+        kind: "reddit_subreddit",
+        channelKey: slug,
+        triggerUserId: userA.id,
+        depthBoundIso: "1970-01-01T00:00:00.000Z",
+        flow: "incremental",
+      });
+      expect(accountJobId).not.toBeNull();
+      expect(subredditJobId).not.toBeNull();
+
+      const accountDetail = await loadSourceDetailPage(userA.id, accountSource.id);
+      const subredditDetail = await loadSourceDetailPage(userA.id, subredditSource.id);
+
+      expect(accountDetail.pulling).toBe(true);
+      expect(subredditDetail.pulling).toBe(true);
+    } finally {
+      if (accountJobId !== null) {
+        await boss.deleteJob(QUEUES.REDDIT_BACKFILL_ACCOUNT, accountJobId).catch(() => undefined);
+      }
+      if (subredditJobId !== null) {
+        await boss
+          .deleteJob(QUEUES.REDDIT_BACKFILL_SUBREDDIT, subredditJobId)
+          .catch(() => undefined);
+      }
+      await boss.stop({ graceful: false });
+    }
   });
 
   it("source detail read-model enriches telegram_channel lastPolledAt from channel-state", async () => {

@@ -163,18 +163,17 @@ describe("account export / soft-delete / restore", () => {
     const redditPostId = `t3_${uniq()}`;
     await db.insert(redditPosts).values({
       postId: redditPostId,
-      subreddit: "gamedev",
+      subredditSlug: "gamedev",
       permalink: `/r/gamedev/comments/${uniq()}`,
       title: "R",
-      submittedAt: new Date(),
+      publishedAt: new Date(),
     });
     // Insert the reddit_post event row DIRECTLY (not via createEvent): the
     // createEvent path runs a synchronous reddit syncStats.fetch
-    // (events-mutation.ts) that hits the live Reddit .json endpoint and 403s
-    // off-CI — a non-hermetic network call this export test must not make.
-    // The export scopes reddit snapshots by the user's reddit_post event
-    // external_ids, so a bare event row with the matching externalId is all
-    // this test needs.
+    // (events-mutation.ts) that hits the provider — a non-hermetic network call
+    // this export test must not make. The export scopes reddit snapshots by the
+    // user's reddit_post event external_ids, so a bare event row with the
+    // matching externalId is all this test needs.
     await db.insert(events).values({
       userId: userA.id,
       kind: "reddit_post",
@@ -185,7 +184,8 @@ describe("account export / soft-delete / restore", () => {
     await db.insert(redditPostSnapshots).values({
       postId: redditPostId,
       polledAt: new Date(),
-      status: "ok",
+      likeCount: 42,
+      commentCount: 3,
       score: 42,
       numComments: 3,
     });
@@ -522,10 +522,10 @@ describe("account export / soft-delete / restore", () => {
     const redditPostId = `t3_${uniq()}`;
     await db.insert(redditPosts).values({
       postId: redditPostId,
-      subreddit: "gamedev",
+      subredditSlug: "gamedev",
       permalink: `/r/gamedev/comments/${uniq()}`,
       title: "Rc",
-      submittedAt: new Date(),
+      publishedAt: new Date(),
     });
     // Direct event insert (see the shape test above): avoid createEvent's live
     // reddit syncStats.fetch so this export test stays hermetic.
@@ -539,7 +539,8 @@ describe("account export / soft-delete / restore", () => {
     await db.insert(redditPostSnapshots).values({
       postId: redditPostId,
       polledAt: new Date(),
-      status: "ok",
+      likeCount: 314,
+      commentCount: 9,
       score: 314,
       numComments: 9,
     });

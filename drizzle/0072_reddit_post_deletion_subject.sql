@@ -1,0 +1,1 @@
+ALTER TABLE "reddit_posts" ADD COLUMN "deletion_detected_by" text;

@@ -1,0 +1,471 @@
+/**
+ * Browser test for RedditFeedCard (Phase 12 Plan 06, PLAT-04 surface — D-06).
+ *
+ * Asserts the load-bearing Reddit-card contracts (an ADAPTIVE self/link/image/gallery
+ * card forked from TwitterFeedCard, trimmed to the D-09 likes+comments metric set):
+ *   - Metrics-by-presence (D-09): a post renders likes + comments ONLY; NO views chip
+ *     and NO shares chip (Reddit exposes neither, 12-SPIKE Q4). A null metric is
+ *     omitted (never a 0-or-dash).
+ *   - ADAPTIVE layout (D-06), keyed on the post FORM (media_type): an IMAGE / GALLERY
+ *     post RESERVES the media slot (shows the cover when present, else the KindIcon
+ *     placeholder); a SELF/LINK post renders the text card — NO thumbnail block at all.
+ *   - The gallery variant carries a "Carousel" media-type overlay even with NO cover URL
+ *     (ScrapeCreators omits a gallery cover); a single image / self / link post has no pill.
+ *   - onerror fallback: a failing hotlinked i.redd.it cover on a MEDIA post keeps the
+ *     slot with the KindIcon placeholder (no broken <img>, media identity + pill survive)
+ *     — the latched adaptive fallback (live-CDN renderability owed at the Task 3 UAT).
+ *
+ * Mounts the real Svelte component in Chromium (vitest browser project) so the {#if}
+ * presence branches + the BaseFeedCard onThumbnailError wiring are exercised against
+ * the actual compiled output, not a mock.
+ *
+ * Requirements: PLAT-04.
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mount, unmount, flushSync } from "svelte";
+import RedditFeedCard from "../../src/lib/sources/reddit/ui/RedditFeedCard.svelte";
+import type { CardEventLite } from "../../src/lib/components/feed/parts/derive-card-data.js";
+
+let host: HTMLElement;
+
+type RdStats = {
+  likeCount: number | null;
+  commentCount: number | null;
+  polledAt: Date;
+};
+
+function makeEvent(opts: {
+  stats: RdStats | null;
+  thumbnailUrl: string | null;
+  mediaType: string | null;
+  subredditSlug?: string | null;
+  deletionDetectedAt?: string | null;
+  linkDomain?: string | null;
+  authorHandle?: string | null;
+  metadata?: Record<string, unknown>;
+}): CardEventLite {
+  return {
+    id: "ev_rd_1",
+    kind: "reddit_post",
+    gameIds: [] as string[],
+    sourceId: "src_rd_1",
+    externalId: "t3_abc123",
+    metadata: opts.metadata ?? { subreddit: "gamedev" },
+    occurredAt: new Date("2026-06-03T08:00:00Z"),
+    authorIsMe: false,
+    authorHandle: opts.authorHandle ?? null,
+    title: "A test reddit post title",
+    notes: null,
+    url: null,
+    publishedAt: new Date("2026-06-03T08:00:00Z"),
+    lastPolledAt: new Date("2026-06-04T08:00:00Z"),
+    lastPollStatus: null,
+    redditEnrichment: {
+      stats: opts.stats,
+      thumbnailUrl: opts.thumbnailUrl,
+      mediaType: opts.mediaType,
+      // `??` would turn an EXPLICIT null (subreddit-unknown fixtures) back into the
+      // default — only an omitted field gets the default.
+      subredditSlug: opts.subredditSlug === undefined ? "gamedev" : opts.subredditSlug,
+      deletionDetectedAt: opts.deletionDetectedAt ?? null,
+      linkDomain: opts.linkDomain ?? null,
+    },
+  };
+}
+
+// REALISTIC fixture: canonicalizeOnCreate stores the BARE slug/handle and Reddit
+// never populates channelTitle. The previous fixture pre-prefixed both, which is a
+// shape the adapter never produces — it hid the missing-sigil bug entirely.
+const source = {
+  id: "src_rd_1",
+  displayName: "gamedev",
+  handleUrl: "https://www.reddit.com/r/gamedev",
+  kind: "reddit_subreddit",
+};
+
+const accountSource = {
+  id: "src_rd_2",
+  displayName: "d954mas",
+  handleUrl: "https://www.reddit.com/user/d954mas",
+  kind: "reddit_account",
+};
+
+function mountCard(
+  event: CardEventLite,
+  sourceProp: {
+    id: string;
+    displayName: string | null;
+    handleUrl: string;
+    kind?: string;
+  } | null = source,
+): { card: HTMLElement; component: ReturnType<typeof mount> } {
+  const component = mount(RedditFeedCard, {
+    target: host,
+    props: { event, source: sourceProp, games: [], view: "feed" },
+  });
+  flushSync();
+  const card = host.querySelector('[data-testid="feed-card"]') as HTMLElement | null;
+  if (!card) throw new Error("RedditFeedCard root not found");
+  return { card, component };
+}
+
+beforeEach(() => {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+});
+
+afterEach(() => {
+  if (host.parentNode) host.parentNode.removeChild(host);
+});
+
+describe("RedditFeedCard adaptive rendering (Phase 12 Plan 06 — PLAT-04)", () => {
+  it("[12-06] a SELF (text) post — null thumbnail — renders the text card: NO thumbnail block, likes + comments chips, NO views/shares", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { likeCount: 11, commentCount: 4, polledAt: new Date() },
+        thumbnailUrl: null,
+        mediaType: "self",
+      }),
+    );
+    // ADAPTIVE D-06: a self/link post collapses the thumbnail slot entirely.
+    expect(card.querySelector(".card-thumb")).toBeNull();
+    const nums = Array.from(card.querySelectorAll(".card-stats .num")).map((n) =>
+      (n.textContent ?? "").trim(),
+    );
+    // Exactly TWO chips (likes + comments) — no views, no shares.
+    expect(nums).toHaveLength(2);
+    expect(nums).toContain("11");
+    expect(nums).toContain("4");
+    expect(card.querySelector('.card-stats .stat[data-metric="views"]')).toBeNull();
+    expect(card.querySelector('.card-stats .stat[data-metric="shares"]')).toBeNull();
+    expect(card.querySelector('.card-stats .stat[data-metric="likes"]')).not.toBeNull();
+    expect(card.querySelector('.card-stats .stat[data-metric="comments"]')).not.toBeNull();
+    unmount(component);
+  });
+
+  it("[12-06] a LINK post — null thumbnail — also renders the text card (no image block)", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { likeCount: 5, commentCount: 0, polledAt: new Date() },
+        thumbnailUrl: null,
+        mediaType: "link",
+      }),
+    );
+    expect(card.querySelector(".card-thumb")).toBeNull();
+    // commentCount 0 is a REAL value (not null) → the comments chip renders "0".
+    const commentsChip = card.querySelector('.card-stats .stat[data-metric="comments"]');
+    expect(commentsChip).not.toBeNull();
+    expect(commentsChip!.querySelector(".num")?.textContent?.trim()).toBe("0");
+    unmount(component);
+  });
+
+  // D-06 acceptance: the adaptive LINK card reads "title + domain" — the outbound
+  // destination host (intrinsic immutable post content) rendered as the muted byline.
+  it("[12-06] a LINK post with a domain renders it as the muted byline (title + domain)", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "link",
+        linkDomain: "youtube.com",
+      }),
+    );
+    const byline = card.querySelector(".card-byline");
+    expect(byline, "a link post must surface its destination domain").not.toBeNull();
+    expect((byline?.textContent ?? "").trim()).toBe("youtube.com");
+    // Domain is muted TEXT, not a link — no new href surface on the card.
+    expect(byline!.querySelector("a")).toBeNull();
+    unmount(component);
+  });
+
+  it("[12-06] an account-sourced LINK post shows the community on TOP and the domain in the byline", () => {
+    // Fixed "where → who → destination" order (12-06 UAT): the community is the top
+    // .src line even when the event came from an ACCOUNT source.
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "link",
+        subredditSlug: "IndieDev",
+        linkDomain: "store.steampowered.com",
+      }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/IndieDev");
+    expect((card.querySelector(".card-byline")?.textContent ?? "").trim()).toBe(
+      "store.steampowered.com",
+    );
+    unmount(component);
+  });
+
+  it("[12-06-s] the AUTHOR byline: a foreign post surfaces u/<author> from the event snapshot", () => {
+    // A subreddit feed / foreign paste carries OTHER people's posts — without the
+    // author part the card showed only r/<sub> and the author was invisible.
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        authorHandle: "CoriolandotheHermit",
+      }),
+    );
+    expect((card.querySelector(".card-byline")?.textContent ?? "").trim()).toBe(
+      "u/CoriolandotheHermit",
+    );
+    unmount(component);
+  });
+
+  it("[12-06-s] the fixed order holds on an account source too: community on top, author · domain below", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "link",
+        subredditSlug: "IndieDev",
+        linkDomain: "store.steampowered.com",
+        authorHandle: "someone_else",
+      }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/IndieDev");
+    expect((card.querySelector(".card-byline")?.textContent ?? "").trim()).toBe(
+      "u/someone_else · store.steampowered.com",
+    );
+    unmount(component);
+
+    // The dev's OWN post from their account source keeps the same order: the
+    // community on top, their handle below (no more src=u/… swap).
+    const { card: ownCard, component: ownComponent } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: "IndieDev",
+        authorHandle: "D954mas",
+      }),
+      accountSource,
+    );
+    expect((ownCard.querySelector(".src")?.textContent ?? "").trim()).toBe("r/IndieDev");
+    expect((ownCard.querySelector(".card-byline")?.textContent ?? "").trim()).toBe("u/D954mas");
+    unmount(ownComponent);
+  });
+
+  it("[12-06-s] a PROFILE post (u_<name> pseudo-subreddit) renders u/<name> on top and never repeats it as the author", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: "u_d954mas",
+        authorHandle: "D954mas",
+      }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("u/d954mas");
+    // The author IS the top line — case-insensitive dedup keeps the byline empty.
+    expect(card.querySelector(".card-byline")).toBeNull();
+    unmount(component);
+  });
+
+  it("[12-06] the domain byline is FORM-gated: a non-link post never renders it, a domain-less link post renders none", () => {
+    const { card: selfCard, component: selfComponent } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        linkDomain: "should-not-render.example",
+      }),
+    );
+    expect(selfCard.querySelector(".card-byline")).toBeNull();
+    unmount(selfComponent);
+
+    const { card: bareCard, component: bareComponent } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "link", linkDomain: null }),
+    );
+    expect(bareCard.querySelector(".card-byline")).toBeNull();
+    unmount(bareComponent);
+  });
+
+  it("[12-06] an IMAGE post — thumbnailUrl present — renders the hotlinked i.redd.it cover + likes/comments chips", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { likeCount: 87, commentCount: 12, polledAt: new Date() },
+        thumbnailUrl: "https://i.redd.it/screenshot.jpg",
+        mediaType: "image",
+      }),
+    );
+    const img = card.querySelector(".card-thumb img") as HTMLImageElement | null;
+    expect(img, "an image post should render a thumbnail <img>").not.toBeNull();
+    // The raw i.redd.it URL is hotlinked directly (NO proxy — 12-SPIKE Pitfall 5).
+    expect(img!.getAttribute("src")).toContain("i.redd.it");
+    const nums = Array.from(card.querySelectorAll(".card-stats .num")).map((n) =>
+      (n.textContent ?? "").trim(),
+    );
+    expect(nums).toContain("87");
+    expect(nums).toContain("12");
+    // A single image gets NO media-type pill (a plain image needs no marker).
+    expect(card.querySelector(".card-thumb .media-type-pill")).toBeNull();
+    unmount(component);
+  });
+
+  it("[12-06] a GALLERY post carries a 'Carousel' media-type overlay over the cover", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { likeCount: 40, commentCount: 3, polledAt: new Date() },
+        thumbnailUrl: "https://i.redd.it/gallery-cover.jpg",
+        mediaType: "gallery",
+      }),
+    );
+    const pill = card.querySelector(".card-thumb .media-type-pill") as HTMLElement | null;
+    expect(pill, "a gallery post should render a Carousel pill").not.toBeNull();
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Carousel");
+    unmount(component);
+  });
+
+  it("[review-P2] an image thumbnail onerror KEEPS the media slot (placeholder + no broken image), not a text collapse", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { likeCount: 1, commentCount: 1, polledAt: new Date() },
+        // A blocked/expired i.redd.it cover → fires <img> onerror.
+        thumbnailUrl: "https://i.redd.it/EXPIRED-DOES-NOT-EXIST.jpg",
+        mediaType: "image",
+      }),
+    );
+    const img = card.querySelector(".card-thumb img") as HTMLImageElement | null;
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toContain("i.redd.it");
+    img!.dispatchEvent(new Event("error"));
+    flushSync();
+    // After error: the onerror latch nulls the cover, but an IMAGE post is a MEDIA post,
+    // so the slot STAYS (forceThumbSlot) and shows the KindIcon placeholder — the media
+    // identity survives instead of collapsing to a text card. No broken <img> anywhere.
+    expect(card.querySelector(".card-thumb img")).toBeNull();
+    const thumb = card.querySelector(".card-thumb");
+    expect(thumb, "the media slot stays after a failed hotlink").not.toBeNull();
+    expect(thumb!.classList.contains("empty")).toBe(true);
+    expect(card.querySelector("img")).toBeNull();
+    unmount(component);
+  });
+
+  it("[review-P2] a GALLERY with NO cover URL still reserves the slot + Carousel pill (real ScrapeCreators shape)", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: { likeCount: 12, commentCount: 2, polledAt: new Date() },
+        thumbnailUrl: null, // ScrapeCreators omits a gallery cover — the real shape
+        mediaType: "gallery",
+      }),
+    );
+    const thumb = card.querySelector(".card-thumb");
+    expect(thumb, "a gallery reserves the media slot even without a cover").not.toBeNull();
+    expect(card.querySelector(".card-thumb img")).toBeNull(); // no cover → KindIcon placeholder
+    const pill = card.querySelector(".card-thumb .media-type-pill") as HTMLElement | null;
+    expect(pill, "the Carousel pill survives without a cover").not.toBeNull();
+    expect(pill!.querySelector(".media-type-pill-label")?.textContent?.trim()).toBe("Carousel");
+    unmount(component);
+  });
+
+  it("[12-06] presence-based chips: a null metric is HIDDEN, never rendered as 0", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        // likeCount present, commentCount null → only the likes chip renders.
+        stats: { likeCount: 350, commentCount: null, polledAt: new Date() },
+        thumbnailUrl: null,
+        mediaType: "self",
+      }),
+    );
+    const nums = Array.from(card.querySelectorAll(".card-stats .num")).map((n) =>
+      (n.textContent ?? "").trim(),
+    );
+    expect(nums).toHaveLength(1);
+    expect(nums).toContain("350");
+    expect(card.querySelector('.card-stats .stat[data-metric="comments"]')).toBeNull();
+    unmount(component);
+  });
+  // REGRESSION (review): the adapter stores the BARE slug, so the card used to render
+  // "gamedev" while a hand-pasted post from the same community rendered "r/gamedev" —
+  // two spellings of one place in a single feed column.
+  it("[review] a subreddit source renders the r/ sigil, not the bare slug", () => {
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/gamedev");
+    unmount(component);
+  });
+
+  it("[review] subreddit-unknown fallbacks: URL metadata slug first, then the sigilled source name", () => {
+    // enrichment slug null → the URL-intrinsic metadata slug ("gamedev") wins.
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self", subredditSlug: null }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/gamedev");
+    unmount(component);
+
+    // No slug ANYWHERE (bare /comments/<id> or redd.it paste) → the registered
+    // source's live BARE name gets its kind sigil re-applied.
+    const { card: bareCard, component: bareComponent } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: null,
+        metadata: {},
+      }),
+      accountSource,
+    );
+    expect((bareCard.querySelector(".src")?.textContent ?? "").trim()).toBe("u/d954mas");
+    unmount(bareComponent);
+  });
+
+  it("[review] a subreddit source does NOT repeat its own slug as a byline", () => {
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+    );
+    expect(card.querySelector(".card-byline")).toBeNull();
+    unmount(component);
+  });
+
+  it("[review] an already-sigilled display name is never double-prefixed (fallback branch)", () => {
+    // Force the source-name fallback (no slug in enrichment OR metadata) so the
+    // sigil re-application branch is the one under test.
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: null,
+        metadata: {},
+      }),
+      { ...source, displayName: "r/gamedev" },
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/gamedev");
+    unmount(component);
+  });
+
+  // REGRESSION (review): the enrichment carried deletionDetectedAt and the event DETAIL
+  // rendered it, but the card type dropped the field — a deleted post looked completely
+  // normal in the feed.
+  it("[review] a deleted-on-Reddit post shows the notice on the CARD, not only in the detail", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        deletionDetectedAt: "2026-06-20T10:00:00Z",
+      }),
+    );
+    const notice = card.querySelector(".reddit-deleted");
+    expect(notice, "the feed must surface deletion without opening the event").not.toBeNull();
+    expect((notice?.textContent ?? "").toLowerCase()).toContain("deleted");
+    unmount(component);
+  });
+
+  it("[review] a live post shows NO deletion notice", () => {
+    const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+    );
+    expect(card.querySelector(".reddit-deleted")).toBeNull();
+    unmount(component);
+  });
+});

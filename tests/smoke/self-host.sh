@@ -473,34 +473,34 @@ youtube_polling_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
 log "=== YouTube polling smoke extension PASSED ==="
 
 # ============================================================
-# Reddit adapter (Phase 03.1 plan 10 — V3 + V24 + V25)
+# Reddit not-configured parity (Phase 12 — gated ScrapeCreators provider)
 # ============================================================
+# Phase 12 razed the old free-`.json` transport (the deleted per-role Reddit
+# user-agent / base-URL-override / proxy envs, the round-robin batch worker, and
+# its old cron schedules) and rebuilt Reddit as a PAID ScrapeCreators adapter
+# behind a provider gate + the D-08 kill-switch. The baseline smoke
+# image boots the production image with NO REDDIT_IMPORT_ENABLED in
+# common_env_args, so isRedditConfigured() is false and Reddit reports
+# not-configured. Mirrors the Instagram / TikTok not-configured parity blocks:
+# a self-host operator who hasn't opted Reddit in gets a CLEANLY DISABLED
+# Reddit — identical to SaaS — NOT a 500 and NOT an enabled import path.
+#
 # The full assertion chain lives in tests/smoke/lib/reddit-polling-flow.sh
-# (sourced below). Summary of what it covers:
+# (sourced below):
+#   - RDT.1 POST /api/sources {kind:"reddit_account", …} → 422
+#     kind_not_configured (the createSource provider gate), never a 500.
+#   - RDT.2 /sources/new HTML renders the Reddit chip disabled ("not configured")
+#     and names REDDIT_IMPORT_ENABLED in that chip's tooltip.
 #
-#   Half A — empty REDDIT_USER_AGENT (V3 + V24):
-#     - /readyz still 200 with empty env (parity preserved).
-#     - /sources HTML renders "Reddit not configured" empty state.
-#     - POST /api/events with Reddit URL → 422 reddit_not_configured.
-#
-#   Half B — configured + mock-Reddit (V25):
-#     - Boots tests/smoke/lib/reddit-mock.{mjs,sh} on a free local port;
-#       restarts smoke-app + smoke-worker + smoke-scheduler with
-#       REDDIT_USER_AGENT + REDDIT_BASE_URL_OVERRIDE pointing at it.
-#     - Asserts worker grep contract
-#       "reddit batch-worker ready: 8-tick round-robin loop".
-#     - Asserts 4 reddit.cron.* schedules in pgboss.schedule.
-#     - Paste a Reddit post URL → 201 event_created → reddit_post_snapshots
-#       row lands (handlePostSingle UPSERT + snapshot end-to-end through
-#       the mock).
-#
-# All Reddit HTTP traffic is intercepted by reddit-mock — NO live Reddit
-# calls in CI.
-log "=== Reddit adapter smoke extension ==="
+# No live ScrapeCreators API is hit (mirrors the YouTube-mock / no-live-API
+# discipline): createSource degrades BEFORE any provider call, so the 422 never
+# touches the network. The paid import path is covered by the human UAT +
+# integration tests, not the smoke gate.
+log "=== Reddit not-configured parity ==="
 # shellcheck source=tests/smoke/lib/reddit-polling-flow.sh
 source "$(dirname "$0")/lib/reddit-polling-flow.sh"
-reddit_polling_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
-log "=== Reddit adapter smoke extension PASSED ==="
+reddit_not_configured_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
+log "=== Reddit not-configured parity PASSED ==="
 
 # ============================================================
 # Instagram not-configured parity (Phase 08 — SOC-05 / SOC-03)
@@ -559,5 +559,21 @@ if ! echo "$IG_SOURCES_HTML" | grep -qi 'not configured by operator'; then
 fi
 log "(IG.2) PASS — /sources/new renders Instagram disabled ('not configured by operator')"
 log "=== Instagram not-configured parity PASSED ==="
+
+# ============================================================
+# Reddit PROVIDER-ON smoke (Phase 12 — hermetic ScrapeCreators mock)
+# ============================================================
+# The OFF parity flows above prove Reddit degrades cleanly when unconfigured. This
+# final block flips the D-08 kill-switch ON against a hermetic ScrapeCreators mock and
+# drives the paid path the OFF flow can't reach: provider-ON bootstrap, worker
+# registration of the reddit backfill queues + outbox forwarder, the create-source gate
+# ACCEPTING, the author walk fetching through the mock, and the reserve-before-HTTP
+# budget seam debiting the SHARED "scrapecreators" ledger (the P0 fix). No live
+# ScrapeCreators traffic — every call hits the local stub. Runs LAST because it
+# re-launches smoke-app/smoke-worker provider-ON (the earlier OFF flows must run first).
+# reddit_provider_on_smoke is defined in reddit-polling-flow.sh (sourced above).
+log "=== Reddit provider-ON smoke ==="
+reddit_provider_on_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
+log "=== Reddit provider-ON smoke PASSED ==="
 
 log "ALL SMOKE ASSERTIONS PASSED"

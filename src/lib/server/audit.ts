@@ -16,7 +16,7 @@
 // silent audit drops are a risk, so we log loudly. Operators wire alerts
 // on `audit write failed` log lines.
 
-import { db } from "./db/client.js";
+import { db, type Tx } from "./db/client.js";
 import { auditLog } from "./db/schema/audit-log.js";
 import type { AuditAction } from "./audit/actions.js";
 import { logger } from "./logger.js";
@@ -120,6 +120,33 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
  */
 export async function writeAuditStrict(entry: AuditEntry): Promise<void> {
   await db.insert(auditLog).values({
+    userId: entry.userId,
+    action: entry.action,
+    ipAddress: entry.ipAddress,
+    userAgent: entry.userAgent ?? null,
+    metadata: entry.metadata ?? null,
+  });
+}
+
+/**
+ * Transaction-scoped variant of `writeAuditStrict` — INSERTs on the SUPPLIED tx
+ * connection instead of the module-level `db`.
+ *
+ * Use when the audit row MUST be atomic with a state change already happening
+ * inside a caller's transaction — e.g. the Reddit deletion-propagation purge that
+ * NULLs author* and audits the purge in ONE tx. Routing that write through the
+ * db-bound `writeAudit`/`writeAuditStrict` from inside a tx would acquire a SECOND
+ * pool connection while the tx still holds its first (the pool-deadlock pattern);
+ * reusing the caller's `tx` sidesteps it. This keeps audit writes flowing through
+ * audit.ts (AGENTS.md: audit writes only via audit.ts) rather than open-coding
+ * `tx.insert(auditLog)` at the call site.
+ *
+ * Strict (propagates errors): the audit is compliance-critical and must commit or
+ * roll back together with the state change — a failed INSERT should abort the whole
+ * transaction, not be swallowed.
+ */
+export async function writeAuditTx(tx: Tx, entry: AuditEntry): Promise<void> {
+  await tx.insert(auditLog).values({
     userId: entry.userId,
     action: entry.action,
     ipAddress: entry.ipAddress,

@@ -14,6 +14,46 @@ const sentJobs: Array<{
   options: Record<string, unknown>;
 }> = [];
 
+const quotaRace = vi.hoisted(() => {
+  let release: (() => void) | null = null;
+  let wait = Promise.resolve();
+  return {
+    enabled: false,
+    arrivals: 0,
+    begin(): void {
+      this.enabled = true;
+      this.arrivals = 0;
+      wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    },
+    async arrive(): Promise<void> {
+      if (!this.enabled) return;
+      this.arrivals += 1;
+      if (this.arrivals === 2) release?.();
+      await wait;
+    },
+    end(): void {
+      this.enabled = false;
+      release?.();
+    },
+  };
+});
+
+vi.mock("../../src/lib/server/services/quota.js", async (importOriginal) => {
+  const actual =
+    (await importOriginal()) as typeof import("../../src/lib/server/services/quota.js");
+  return {
+    ...actual,
+    async enforceAdapterUserQuota(
+      ...args: Parameters<typeof actual.enforceAdapterUserQuota>
+    ): Promise<void> {
+      await actual.enforceAdapterUserQuota(...args);
+      await quotaRace.arrive();
+    },
+  };
+});
+
 vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -31,8 +71,23 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
   };
 });
 
+// Reddit is D-08 default-OFF in the test env (REDDIT_IMPORT_ENABLED unset) → the
+// adapter's refreshQueue.canRun would skip with "reddit not configured". Mock the
+// provider as configured so the reddit refresh-poll cases exercise the enqueue + the
+// shared social cap (the youtube cases are unaffected — they don't read this module).
+vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    isRedditConfigured: () => true,
+    getSocialProvider: (platform: string) =>
+      platform === "reddit" ? ({ name: "scrapecreators-reddit" } as never) : null,
+  };
+});
+
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { youtubeVideos, adapterRefreshQueue } =
   await import("../../src/lib/server/db/schema/index.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
@@ -290,39 +345,229 @@ describe("refresh-poll cooldown service", () => {
     );
   });
 
-  it("reddit_post refresh-poll enforces the post-refresh sliding-window cap before cooldown metadata write", async () => {
+  it("[review] rejects recognition-only Reddit URLs without consuming quota or cooldown", async () => {
+    const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/quota.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-short-${uniq()}@test.local` });
+    const ev = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "short123",
+      url: "https://redd.it/short123",
+    });
+    const before = await getUserQuotaUsedToday(u.id, "reddit_account");
+
+    await expect(requestRefreshPoll(u.id, ev.id, "127.0.0.1")).rejects.toMatchObject({
+      code: "reddit_short_link_unsupported",
+      status: 422,
+    });
+
+    const after = await getUserQuotaUsedToday(u.id, "reddit_account");
+    expect(after.requests).toBe(before.requests);
+    const queued = await db
+      .select({ id: adapterRefreshQueue.id })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id));
+    expect(queued).toHaveLength(0);
+    const [row] = await db.select().from(events).where(eq(events.id, ev.id));
+    expect(
+      (row!.metadata as { last_user_refresh_at?: string }).last_user_refresh_at,
+    ).toBeUndefined();
+  });
+
+  it("[review] charges a subreddit event to the independent reddit_subreddit bucket", async () => {
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-subcap-${uniq()}@test.local` });
+    const [source] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_subreddit",
+        handleUrl: "https://www.reddit.com/r/IndieDev",
+        channelId: `indiedev_${uniq()}`,
+        metadata: { slug: "indiedev" },
+      })
+      .returning({ id: dataSources.id });
+    const ev = await insertEvent(u.id, {
+      sourceId: source!.id,
+      kind: "reddit_post",
+      externalId: "abc_subcap",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_subcap/test/",
+    });
+    for (let i = 0; i < env.LIMIT_SOCIAL_REQUESTS_PER_DAY; i++) {
+      await writeAuditStrict({
+        userId: u.id,
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: "reddit_subreddit",
+          platform: "reddit_subreddit",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+
+    await expect(requestRefreshPoll(u.id, ev.id, "127.0.0.1")).rejects.toMatchObject({
+      code: "requests_quota_exhausted",
+      status: 429,
+    });
+    const queued = await db
+      .select({ id: adapterRefreshQueue.id })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id));
+    expect(queued).toHaveLength(0);
+  });
+
+  it("[review] soft-deleted reddit_subreddit source still resolves the reddit_subreddit quota platform", async () => {
+    // Regression guard: the quota-platform lookup must NOT filter on
+    // dataSources.deletedAt. softDeleteSource only tombstones the row (the
+    // event keeps its sourceId; the FK set-null fires on hard delete only), and
+    // kind is immutable — so a tombstoned reddit_subreddit source still owns
+    // the event's quota keyspace. Re-adding an isNull(deletedAt) predicate
+    // makes the lookup miss and fall back to reddit_account, which this
+    // platform assertion catches.
     sentJobs.length = 0;
+    const { softDeleteSource } = await import("../../src/lib/server/services/data-sources.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-softdel-${uniq()}@test.local` });
+    const [source] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_subreddit",
+        handleUrl: "https://www.reddit.com/r/IndieDev",
+        channelId: `indiedev_${uniq()}`,
+        metadata: { slug: "indiedev" },
+      })
+      .returning({ id: dataSources.id });
+    const ev = await insertEvent(u.id, {
+      sourceId: source!.id,
+      kind: "reddit_post",
+      externalId: "abc_softdel",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_softdel/test/",
+    });
+
+    await softDeleteSource(u.id, source!.id, "127.0.0.1");
+
+    const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
+    expect(result.enqueued).toBe(true);
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.poll_refreshed")));
+    const auditMeta = audits.find(
+      (row) => (row.metadata as { event_id?: string }).event_id === ev.id,
+    )?.metadata as { platform?: string } | undefined;
+    expect(auditMeta?.platform).toBe("reddit_subreddit");
+  });
+
+  it("reddit_post refresh-poll enforces the shared social per-user cap (429) before the cooldown write", async () => {
+    // Phase 12: reddit joined the paid-scraper model — the old bespoke 30/15-min
+    // reddit_post_quota_exhausted cap is gone; the load-bearing per-user limit is the
+    // shared enforceAdapterUserQuota (requests_quota_exhausted), keyed on the source
+    // kind. Park the user AT the cap and assert the refresh-poll is rejected BEFORE the
+    // cooldown metadata write (enforceAdapterUserQuota runs before the eager-write).
+    sentJobs.length = 0;
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
     const u = await seedUserDirectly({ email: `rp-reddit-cap-${uniq()}@test.local` });
     const ev = await insertEvent(u.id, {
       kind: "reddit_post",
       externalId: "abc_blocked",
       url: "https://www.reddit.com/r/IndieDev/comments/abc_blocked/test/",
     });
-    const now = new Date();
-    // Seed REDDIT_USER_CAP.postRefreshesPerWindow rows so the next refresh
-    // hits the cap (recalibrated v0.1: 30 per 15-min window).
-    for (let i = 0; i < 30; i++) {
-      await db.insert(adapterRefreshQueue).values({
-        adapterKind: "reddit_account",
-        queueName: "user_post",
-        type: "post_single",
-        payload: { post_id: `t3_seed_refresh_${i}`, flow: "refresh-now" },
+    for (let i = 0; i < env.LIMIT_SOCIAL_REQUESTS_PER_DAY; i++) {
+      await writeAuditStrict({
         userId: u.id,
-        priority: 0,
-        status: "done",
-        enqueuedAt: new Date(now.getTime() - 60_000),
-        lastAttemptAt: new Date(now.getTime() - 60_000),
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: "reddit_account",
+          platform: "reddit_account",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
       });
     }
 
     await expect(requestRefreshPoll(u.id, ev.id, "127.0.0.1")).rejects.toMatchObject({
-      code: "reddit_post_quota_exhausted",
+      code: "requests_quota_exhausted",
       status: 429,
     });
     expect(sentJobs).toHaveLength(0);
+    // No user_post row enqueued — the cap fired before the enqueue.
+    const queued = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(
+        and(eq(adapterRefreshQueue.userId, u.id), eq(adapterRefreshQueue.queueName, "user_post")),
+      );
+    expect(queued).toHaveLength(0);
 
     const [row] = await db.select().from(events).where(eq(events.id, ev.id));
     const meta = (row!.metadata ?? {}) as { last_user_refresh_at?: string };
     expect(meta.last_user_refresh_at).toBeUndefined();
+  });
+
+  it("[CR-01] concurrent Reddit Refresh Now requests reserve one remaining daily slot", async () => {
+    sentJobs.length = 0;
+    const { env } = await import("../../src/lib/server/config/env.js");
+    const { writeAuditStrict } = await import("../../src/lib/server/audit.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-race-${uniq()}@test.local` });
+    const first = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "abc_race_first",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_race_first/test/",
+    });
+    const second = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "abc_race_second",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_race_second/test/",
+    });
+    for (let i = 1; i < env.LIMIT_SOCIAL_REQUESTS_PER_DAY; i++) {
+      await writeAuditStrict({
+        userId: u.id,
+        action: "source.refresh_content_requested",
+        ipAddress: "0.0.0.0",
+        metadata: {
+          kind: "reddit_account",
+          platform: "reddit_account",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+
+    quotaRace.begin();
+    const results = await Promise.allSettled([
+      requestRefreshPoll(u.id, first.id, "127.0.0.1"),
+      requestRefreshPoll(u.id, second.id, "127.0.0.1"),
+    ]).finally(() => quotaRace.end());
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    expect(rejected?.reason).toMatchObject({
+      code: "requests_quota_exhausted",
+      status: 429,
+    });
+
+    const queued = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(
+        and(eq(adapterRefreshQueue.userId, u.id), eq(adapterRefreshQueue.queueName, "user_post")),
+      );
+    expect(queued).toHaveLength(1);
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.poll_refreshed")));
+    expect(audits).toHaveLength(1);
   });
 });

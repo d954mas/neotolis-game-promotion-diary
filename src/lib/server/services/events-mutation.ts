@@ -189,6 +189,7 @@ export async function createEvent(
   // mismatch is silently left as null; the route-layer superRefine catches
   // malformed kind/URL pairs before the service is called.
   let derivedExternalId: string | null = input.externalId ?? null;
+  let resolvedAuthorIsMe = false;
   if (derivedExternalId == null && input.url != null && input.url !== "") {
     // CYCLE-BREAKER: source URL parsing imports the adapter registry, and
     // the registry resolves adapter barrels that call back into event
@@ -237,6 +238,17 @@ export async function createEvent(
     if (adapter.resolveCachedExternalId !== undefined) {
       derivedExternalId = await adapter.resolveCachedExternalId(input.url);
     }
+    // Per-post ownership for kinds whose source can carry other people's content
+    // (Reddit). An explicit caller value always wins; otherwise the adapter matches
+    // the CACHED post's author against the tenant's own accounts. Runs after the
+    // external_id derivation because that id is the cache key.
+    if (
+      input.authorIsMe === undefined &&
+      derivedExternalId !== null &&
+      adapter.resolveCachedAuthorIsMe !== undefined
+    ) {
+      resolvedAuthorIsMe = await adapter.resolveCachedAuthorIsMe(userId, derivedExternalId);
+    }
   }
 
   // The events INSERT + junction INSERT loop run in a single tx so a
@@ -256,7 +268,7 @@ export async function createEvent(
           userId,
           sourceId: input.sourceId ?? null,
           kind: input.kind,
-          authorIsMe: input.authorIsMe ?? false,
+          authorIsMe: input.authorIsMe ?? resolvedAuthorIsMe,
           occurredAt,
           title: input.title.trim(),
           url: input.url ?? null,
@@ -473,6 +485,7 @@ export interface EnrichmentResult {
  * Error mapping (route layer preserves UX):
  *   - unsupported URL                → AppError 'unsupported_url' 422
  *   - reddit_post unreachable        → AppError 'reddit_unreachable' 502
+ *   - reddit_post redd.it short link → AppError 'reddit_short_link_unsupported' 422
  *   - reddit_post private/unavailable → AppError 'reddit_post_not_found' 404
  *   - telegram_post any failure      → soft-degrade to recognition-only (no 422
  *                                       dead-end; mirrors the IG branch — free
@@ -502,11 +515,10 @@ export async function enrichFromUrl(
   }
 
   // Reddit branch — adapter-driven preview through
-  // redditAdapter.fetchEventPreviewMetadata. /api/events/preview-url
-  // (this endpoint) and /api/reddit/fetch-metadata both go through the
-  // same hook; the EnrichmentResult shape adapts Reddit's response so
-  // POST /api/events/preview-url returns a uniform contract across
-  // adapters.
+  // redditAdapter.fetchEventPreviewMetadata. Reddit mounts no /api/reddit/*
+  // route; paste-preview rides the universal POST /api/events/preview-url (this
+  // endpoint), and the EnrichmentResult shape adapts Reddit's response so the
+  // endpoint returns a uniform contract across adapters.
   if (parsed.kind === "reddit_post") {
     const adapter = getAdapter("reddit_account");
     if (adapter.fetchEventPreviewMetadata === undefined) {
@@ -535,6 +547,18 @@ export async function enrichFromUrl(
           cause: preview.cause,
         });
       }
+      // redd.it short link — RECOGNITION-ONLY (the subreddit is not in the URL and the
+      // provider has no lookup-by-id). 422, not 502: nothing is broken upstream and a
+      // retry cannot help — the user needs the full /r/<sub>/comments/<id> permalink.
+      // The UI maps this code to that instruction (AddEventForm).
+      if (preview.cause === "reddit_short_link_unsupported") {
+        throw new AppError(
+          "Paste the full Reddit post link (redd.it short links carry no subreddit)",
+          "reddit_short_link_unsupported",
+          422,
+          { cause: preview.cause },
+        );
+      }
       throw new AppError("Reddit endpoint unreachable", "reddit_unreachable", 502, {
         cause: preview.cause,
       });
@@ -546,17 +570,22 @@ export async function enrichFromUrl(
     }
     return {
       kind: "reddit_post",
-      externalId: parsed.externalId,
+      // A /s/ share paste parses with NO id (the path carries an opaque redirect
+      // token); the preview's detail fetch resolved the real identity — surface it
+      // (t3_ prefix stripped to match the URL-intrinsic short-id contract) and adopt
+      // the REWRITTEN canonical permalink so the client form saves a parseable post
+      // URL (it replaces the URL field with canonicalUrl).
+      externalId: parsed.externalId ?? preview.externalId?.replace(/^t3_/, "") ?? null,
       title: preview.title,
       occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,
       authorName: preview.authorName || null,
       authorUrl: preview.authorUrl || null,
-      canonicalUrl: parsed.canonicalUrl,
-      // author_is_me inheritance for Reddit lives in syncStats.fetch
-      // (matches t3.author against owned reddit_account.metadata.username).
-      // enrichFromUrl is the PREVIEW path — no DB write happens here, so
-      // we don't pre-compute sourceMatch.
+      canonicalUrl: preview.canonicalUrl ?? parsed.canonicalUrl,
+      // author_is_me is matched PER POST for Reddit (a subreddit feed carries other
+      // people's content), and it happens at CREATE time off the cached post row —
+      // see resolveRedditAuthorIsMe in createEvent. Not here: enrichFromUrl is the
+      // preview path and its sourceMatch is not carried into the create request.
       sourceMatch: null,
     };
   }
@@ -1385,11 +1414,17 @@ export async function attachEventToGames(
     // On any non-empty junction diff, additionally strip metadata.inbox so
     // the event re-enters the inbox triage flow if the user later detaches
     // all games.
+    //
+    // ONE CLOCK for the column: the INSERT takes `updated_at`'s defaultNow() (the
+    // DATABASE clock), so bumping it with the APP HOST's `new Date()` mixed two time
+    // sources on one column — where the two clocks drift, a freshly-attached row can
+    // report updated_at EARLIER than its own created_at. Postgres NOW() keeps every
+    // write on the same clock as the default.
     if (diffNonEmpty) {
       await tx
         .update(events)
         .set({
-          updatedAt: new Date(),
+          updatedAt: sql`NOW()`,
           metadata: sql`COALESCE(${events.metadata}, '{}'::jsonb) - 'inbox'`,
         })
         .where(and(eq(events.userId, userId), eq(events.id, eventId)));
@@ -1397,7 +1432,7 @@ export async function attachEventToGames(
       // No-op call — preserve metadata as-is (dismissed flag survives).
       await tx
         .update(events)
-        .set({ updatedAt: new Date() })
+        .set({ updatedAt: sql`NOW()` })
         .where(and(eq(events.userId, userId), eq(events.id, eventId)));
     }
   });
@@ -1505,7 +1540,7 @@ export async function dismissFromInbox(
         'true'::jsonb,
         true
       )`,
-      updatedAt: new Date(),
+      updatedAt: sql`NOW()`,
     })
     .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .returning();

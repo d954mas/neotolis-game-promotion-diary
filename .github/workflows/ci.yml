@@ -83,6 +83,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Snapshot-graph validity plus a disposable drizzle-kit generate against the
+      # real TypeScript schema. The generated output lives in a temporary copy, and
+      # any new journal entry means db:generate was omitted.
+      - run: pnpm db:check
       - run: pnpm test:unit
       - run: pnpm test:integration
 
@@ -177,6 +181,21 @@ jobs:
             cat vite-preview.log
             exit 1
           fi
+          # The vitest `browser` project (tests/browser/**) and the playwright
+          # specs (tests/playwright/**) are TWO different suites. This job used to
+          # run only `pnpm test:browser` (= `playwright test`, testDir
+          # ./tests/playwright), so every tests/browser/*.test.ts was provisioned
+          # for — chromium install, preview boot, the headless-shell comment above
+          # — and then never executed: a gate that could not fail.
+          #
+          # One file per vitest invocation: a single batch run tears down the
+          # browser between files and dies on `[birpc] rpc is closed` after the
+          # first one or two. Per-file is deterministic and all 12 files pass.
+          for f in tests/browser/*.test.ts; do
+            echo "::group::vitest browser $f"
+            pnpm exec vitest run --project=browser "$f"
+            echo "::endgroup::"
+          done
           pnpm test:browser
 
   smoke:
@@ -222,17 +241,22 @@ jobs:
       #     here; documented for operator readability).
       SERVICE_YOUTUBE_API_KEYS: mock-key
       ADMIN_EMAIL_ALLOWLIST: ''
-      # Reddit adapter smoke env (Phase 03.1 plan 10, V3+V24+V25).
-      # REDDIT_USER_AGENT is INTENTIONALLY UNSET at the job level so the
-      # baseline smoke-app boots with empty env — Half A asserts the
-      # parity contract (/readyz 200 + /sources HTML "Reddit not configured"
-      # + paste 422 reddit_not_configured). Half B
-      # (tests/smoke/lib/reddit-polling-flow.sh) tears down smoke-app and
-      # re-launches it together with smoke-worker + smoke-scheduler with
-      # REDDIT_USER_AGENT="node:com.neotolis.gpd-smoke:0.1.0 (by /u/smoke)"
-      # and REDDIT_BASE_URL_OVERRIDE=http://localhost:$REDDIT_MOCK_PORT
-      # (allocated by tests/smoke/lib/reddit-mock.sh). NO live Reddit
-      # calls in CI.
+      # Reddit smoke (Phase 12 — gated ScrapeCreators provider). Two flows in
+      # tests/smoke/lib/reddit-polling-flow.sh:
+      #   1. NOT-CONFIGURED parity: REDDIT_IMPORT_ENABLED is INTENTIONALLY UNSET at
+      #      the job level so the baseline smoke-app boots with the provider OFF (the
+      #      D-08 kill-switch). Asserts POST /api/sources {reddit_account} → 422
+      #      kind_not_configured + /sources/new renders the Reddit chip disabled.
+      #   2. PROVIDER-ON smoke (reddit_provider_on_smoke, runs LAST): re-launches
+      #      smoke-app/smoke-worker with REDDIT_IMPORT_ENABLED=true + a funded budget,
+      #      pointed at a HERMETIC ScrapeCreators mock (tests/smoke/lib/
+      #      scrapecreators-mock.mjs). Asserts provider-ON bootstrap + worker/queue
+      #      registration, the create-source gate ACCEPTING, a walk importing through
+      #      the mock, and the reserve-before-HTTP seam debiting the SHARED
+      #      "scrapecreators" ledger (the P0 budget-key fix). The provider-ON env is
+      #      injected per-container by the flow, NOT here — the baseline stays OFF.
+      # Still NO live ScrapeCreators calls in CI (the mock intercepts every request,
+      # mirroring the YouTube-mock discipline) — no real API key ever enters CI.
       CI: 'true'
     steps:
       - uses: actions/checkout@v4

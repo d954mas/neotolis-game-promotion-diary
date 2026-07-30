@@ -6,8 +6,8 @@ import {
 
 // deriveThumbnailUrl (the FeedCard + event-detail-modal resolver) for twitter_post must
 // read the enrichment thumbnail — the RAW pbs.twimg.com cover HOTLINKED directly (no
-// proxy, 11-SPIKE.md Q6) — NOT event.metadata. The bug: the twitter_post arm read
-// readMediaUrlFromMetadata(event.metadata), so the feed card + chart marker (which read
+// proxy, 11-SPIKE.md Q6) — NOT event.metadata. The bug: the twitter_post arm read the
+// media url off event.metadata, so the feed card + chart marker (which read
 // twitterEnrichment) showed the image but the event-detail modal (which also calls
 // deriveThumbnailUrl) rendered blank. The fix routes through the enrichment seam, the
 // same D-09 parity Telegram/IG/TikTok established.

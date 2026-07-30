@@ -26,7 +26,15 @@ import {
   instagramPostSnapshots,
 } from "$lib/server/db/schema/index.js";
 
-export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
+// `inconclusive` exists for the shared refresh lane's bounded-lookup platforms
+// (Reddit); this tree never writes it but accepts the shared lane status union.
+export type SnapshotStatus =
+  | "ok"
+  | "not_found"
+  | "private"
+  | "auth_error"
+  | "rate_limited"
+  | "inconclusive";
 
 export interface WriteSnapshotArgs {
   /** instagram_posts.post_id — keys the UPSERT + the snapshot INSERT. */

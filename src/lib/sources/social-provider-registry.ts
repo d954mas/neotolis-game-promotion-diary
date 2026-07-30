@@ -28,6 +28,10 @@ import {
   isTwitterConfigured,
   twitterProvider,
 } from "$lib/sources/twitter/server/provider/registry.js";
+import {
+  isRedditConfigured,
+  redditProvider,
+} from "$lib/sources/reddit/server/provider/registry.js";
 import type { SocialPlatform, SocialProvider } from "$lib/sources/social-provider.js";
 
 /**
@@ -45,6 +49,10 @@ export function getSocialProvider(platform: SocialPlatform): SocialProvider | nu
       return isTikTokConfigured() ? tiktokProvider : null;
     case "twitter":
       return isTwitterConfigured() ? twitterProvider : null;
+    case "reddit":
+      // ★ D-08: isRedditConfigured() gates on REDDIT_IMPORT_ENABLED FIRST (the
+      // shared ScrapeCreators key alone never auto-enables Reddit).
+      return isRedditConfigured() ? redditProvider : null;
     default:
       return null;
   }

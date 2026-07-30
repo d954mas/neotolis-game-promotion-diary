@@ -30,28 +30,15 @@
  *   pnpm test:browser
  */
 
-import { describe, it, expect } from "vitest";
-import { page, commands } from "@vitest/browser/context";
-
-// `process.env` is undefined in the browser context where vitest 4 + Playwright
-// run these tests. The vite preview server boots on :5173 in both CI and local
-// flows, so hard-coding the URL is correct for the test surface; if a future
-// env override is needed, vitest.config.ts can inject via `define:`.
-const BASE = "http://localhost:5173";
+import { describe, it } from "vitest";
 
 describe("/feed responsive at 360px", () => {
-  it("anonymous request to /feed redirects to /login (public-routed)", async () => {
-    await page.viewport(360, 640);
-    await commands.goto(`${BASE}/feed`);
-    // Anonymous → +layout.server.ts protected-paths sweep redirects to /login,
-    // OR /feed/+page.server.ts's defense-in-depth `if (!locals.user) throw
-    // redirect(303, "/login?next=...")` fires. Either way, the URL after
-    // navigation contains "/login". The `?next=` param-encoded value is the
-    // original `/feed` path so a subsequent successful sign-in lands the user
-    // on the page they originally wanted.
-    const url = await commands.currentUrl();
-    expect(url).toMatch(/\/login/);
-  });
+  // The anonymous /feed -> /login assertion lives in
+  // tests/playwright/responsive-360.spec.ts, NOT here. A full-page navigation is
+  // native to Playwright but tears down Vitest browser mode's own runner
+  // connection ("Browser connection was closed while running tests"), which took
+  // this whole file down the moment the vitest browser project was actually wired
+  // into CI. The assertion is not lost — it is duplicated there and green.
 
   it.skip(
     "authenticated /feed at 360px (cookie-injection harness deferred — see Manual-Only Verifications)",

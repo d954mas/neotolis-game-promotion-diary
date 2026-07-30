@@ -1,28 +1,20 @@
-// Reddit ui/card-props.ts — per-source toCardProps mapper.
+// Reddit ui/card-props.ts — per-source toCardProps mapper (fork of twitter/
+// ui/card-props.ts, trimmed to the D-09 like/comment metric set).
 //
 // Pure function — no Svelte component imports — safe to call from
-// +page.server.ts loaders. (SvelteKit pre-render crashes when a server
-// module transitively imports a .svelte file outside a Svelte context.)
+// +page.server.ts loaders. (SvelteKit pre-render crashes when a server module
+// transitively imports a .svelte file outside a Svelte context.)
 //
-// Maps a reddit_post EventDto (decorated by feed-enrichment.ts with the
-// `redditEnrichment` field) to the universal CardProps shape consumed by
-// EventCard.svelte.
+// The shape produced matches src/lib/sources/card-props.ts (CardProps). The
+// universal <EventCard.svelte> shell consumes this shape; the per-source
+// override (RedditFeedCard) is the actual /feed surface.
 //
-// Card layout:
-//   - Author chip: `/u/<author>` (🧑 icon — rendered by FeedCard alongside
-//     the source row context).
-//   - Subreddit chip: `/r/<subreddit>` (🏛 icon).
-//   - Stats line: `↑<score> 💬<num_comments> (<upvote_ratio>%)`.
-//   - Underperforming-median badge when the latest score <
-//     median_score_24h AND sample_size >= 5.
-//
-// The universal CardProps shape carries: thumbnail / title / subtitle /
-// badge / metrics[] / href. We map Reddit's emoji-flavoured display via
-// the metrics[] array (labels are Paraglide keys so future locales just
-// translate). The author + sub chips render in the FeedCard via the
-// event's metadata.author / metadata.subreddit fields (FeedCard reads
-// these directly — same pattern as YouTube's channelTitle).
-
+// Metrics-by-presence (D-09): a metric is pushed ONLY when its value is non-null
+// — a metric-less post carries null → omitted, never 0. Reddit exposes exactly TWO
+// metrics (likes = score, comments = num_comments); it has NO view count and NO
+// share/crosspost count (12-SPIKE Q4), so — unlike Twitter/TikTok — there is NO
+// views chip and NO shares chip. The Reddit enrichment lives on the decorated dto
+// under `redditEnrichment` (set by ./server/feed-enrichment.ts).
 import type { CardProps } from "$lib/sources/card-props.js";
 import { m } from "$lib/paraglide/messages.js";
 // Shared K/M stat formatter (loader-safe: derive-card-data imports only the pure
@@ -31,76 +23,49 @@ import { formatStat } from "$lib/components/feed/parts/derive-card-data.js";
 
 interface RedditEventLite {
   id: string;
-  externalId: string | null;
   title: string;
-  authorIsMe: boolean;
-  /** Decoration written by ./server/feed-enrichment.ts enrichRedditFeedDtos.
-   *  Optional — if missing, the card renders without stats (e.g. on the
-   *  brief window between INSERT and the first worker drain). */
   redditEnrichment?: {
     stats: {
-      score: number;
-      numComments: number;
-      upvoteRatio: number;
-      awardsTotal: number;
+      likeCount: number | null;
+      commentCount: number | null;
     } | null;
-    subredditSubscribers: number | null;
-    authorKarma: number | null;
-    baseline: {
-      medianScore24h: number | null;
-      p75Score24h: number | null;
-      sampleSize: number;
-    } | null;
+    thumbnailUrl: string | null;
+    mediaType: string | null;
+    /** Outbound destination domain — LINK posts only (see RedditEnrichment). */
+    linkDomain?: string | null;
   };
 }
 
-/** Map a reddit_post event DTO to the FeedCard render shape.
- *  Card content is end-user-visible; per-platform adapters localize via
- *  shared Paraglide keys (card_reddit_*) so future locales just
- *  translate the keys without touching adapter code. */
 export function toCardProps(event: RedditEventLite): CardProps {
   const stats = event.redditEnrichment?.stats ?? null;
-  const baseline = event.redditEnrichment?.baseline ?? null;
-
-  // Underperforming-median badge — only fires when we have BOTH a
-  // snapshot AND a baseline with sample_size >= 5. "Mine" badge takes
-  // precedence (matches the YouTube priority — owner identity is the
-  // load-bearing chip).
-  const isUnderperforming =
-    stats !== null &&
-    baseline !== null &&
-    baseline.medianScore24h !== null &&
-    baseline.sampleSize >= 5 &&
-    stats.score < baseline.medianScore24h;
-
+  const metrics: CardProps["metrics"] = [];
+  if (stats) {
+    // Score (= Reddit net ups, the `likeCount` field) and comments render whenever
+    // present. Reddit-namespaced labels (card_reddit_metric_*) — NOT the YouTube keys —
+    // so a YouTube copy change never leaks into the Reddit card. NO views chip and NO
+    // shares chip (D-09 — Reddit exposes neither).
+    if (stats.likeCount !== null) {
+      metrics.push({ label: m.card_reddit_metric_score(), value: formatStat(stats.likeCount) });
+    }
+    if (stats.commentCount !== null) {
+      metrics.push({
+        label: m.card_reddit_metric_comments(),
+        value: formatStat(stats.commentCount),
+      });
+    }
+  }
   return {
-    // Reddit doesn't have a per-post thumbnail surface as cleanly as
-    // YouTube's `i.ytimg.com/vi/{id}/...` pattern. Posts may carry a
-    // preview image in metadata.preview_url, but the canonical card
-    // surface in v0.1 is text-first; thumbnail stays null.
-    thumbnail: null,
+    // Null for a self/link post (no image) → the card renders text-only (adaptive).
+    thumbnail: event.redditEnrichment?.thumbnailUrl ?? null,
     title: event.title,
-    subtitle: event.authorIsMe ? m.card_reddit_subtitle_mine() : null,
-    badge: event.authorIsMe
-      ? m.card_reddit_badge_mine()
-      : isUnderperforming
-        ? m.feed_card_reddit_baseline_underperforming({
-            pct: String(Math.round((stats!.score / baseline!.medianScore24h!) * 100)),
-          })
+    // D-06 link card = "title + domain": the outbound destination host (intrinsic
+    // immutable post content, domain only) rides as the muted subtitle.
+    subtitle:
+      event.redditEnrichment?.mediaType === "link"
+        ? (event.redditEnrichment?.linkDomain ?? null)
         : null,
-    metrics: stats
-      ? [
-          { label: m.card_reddit_metric_score(), value: formatStat(stats.score) },
-          {
-            label: m.card_reddit_metric_comments(),
-            value: formatStat(stats.numComments),
-          },
-          {
-            label: m.card_reddit_metric_upvote_ratio(),
-            value: `${Math.round(stats.upvoteRatio * 100)}%`,
-          },
-        ]
-      : [],
+    badge: null,
+    metrics,
     href: `/events/${event.id}`,
   };
 }

@@ -68,30 +68,34 @@ export interface CardEventLite {
     commentCount: number;
     polledAt: Date | string;
   } | null;
+  /** Reddit public-data decoration attached by
+   *  sources/reddit/server/feed-enrichment.ts (mirrors instagramEnrichment). D-09
+   *  metric set: likes (score) + comments (num_comments) ONLY — Reddit exposes no
+   *  view count and no share/crosspost count (12-SPIKE Q4), so NO viewCount /
+   *  shareCount fields. Each stat is INDEPENDENTLY nullable (metrics-by-presence).
+   *  thumbnailUrl is the raw i.redd.it cover HOTLINKED directly (12-SPIKE Pitfall 5
+   *  — NO proxy; onerror fallback in the card), FREQUENTLY NULL (ScrapeCreators
+   *  omits `thumbnail`; only image/gallery posts derive one). mediaType
+   *  ("self" | "link" | "image" | "gallery") drives the adaptive card variant. */
   redditEnrichment?: {
     stats: {
-      score: number;
-      numComments: number;
-      upvoteRatio: number;
-      awardsTotal: number;
+      likeCount: number | null;
+      commentCount: number | null;
+      polledAt: Date | string;
     } | null;
-    subredditSubscribers: number | null;
-    authorKarma: number | null;
-    baseline: {
-      medianScore24h: number | null;
-      p75Score24h: number | null;
-      sampleSize: number;
-    } | null;
-    linkUrl?: string | null;
-    bodyExcerpt?: string | null;
-    /** Subreddit slug from reddit_posts.subreddit (source-of-truth). */
-    subreddit?: string | null;
-    /** Author handle from reddit_posts.author (source-of-truth, NULL on
-     *  Reddit-side account deletion). */
-    author?: string | null;
-    /** ISO timestamp when the worker detected the post is gone from
-     *  Reddit. Cards use this for the "Deleted on Reddit" banner. */
+    thumbnailUrl: string | null;
+    mediaType: string | null;
+    /** Outbound destination domain — LINK posts only (mediaType "link"), else null.
+     *  Intrinsic immutable post content (domain only, never the full URL). The link
+     *  card renders it as a muted byline so "title + domain" reads at a glance. */
+    linkDomain?: string | null;
+    /** ISO timestamp the post was detected deleted-on-Reddit, else null. The feed card
+     *  renders a notice off this — without it a deleted post looked like any other in
+     *  the feed and the user had to open the detail view to find out. */
     deletionDetectedAt?: string | null;
+    /** The post's OWN subreddit slug (intrinsic, rename-proof — the sanctioned
+     *  denormalization). Lets an account-sourced post show which community it went to. */
+    subredditSlug?: string | null;
   };
   /** Instagram public-data decoration attached by
    *  sources/instagram/server/feed-enrichment.ts (mirrors redditEnrichment).
@@ -185,6 +189,11 @@ export interface CardSourceLite {
   displayName: string | null;
   handleUrl: string;
   channelTitle?: string | null;
+  /** The source kind (`reddit_account` / `reddit_subreddit` / …). Reddit needs it to
+   *  render the right sigil: the stored displayName is the BARE slug/handle, so a card
+   *  showed "gamedev" while a hand-pasted post from the same community showed
+   *  "r/gamedev" — two spellings of one place in a single column. */
+  kind?: string | null;
 }
 
 /** Read the YouTube channel name from FK-joined data_sources, NEVER
@@ -197,24 +206,16 @@ export function youtubeChannelLabel(source: CardSourceLite | null): string {
 
 /** Read the subreddit slug from event metadata. SAFE per AGENTS.md —
  *  subreddit slug is intrinsic to the Reddit URL and Reddit forbids
- *  subreddit rename. The value cannot drift from the post. */
+ *  subreddit rename. The value cannot drift from the post.
+ *
+ *  A PROFILE post lives in Reddit's pseudo-subreddit `u_<name>` (that is the
+ *  literal slug the API returns and the walker caches), so render it the way
+ *  Reddit does — `u/<name>`, not `r/u_<name>`. */
 export function redditSubredditLabel(metadata: unknown): string {
   if (metadata === null || typeof metadata !== "object") return "";
   const md = metadata as { subreddit?: unknown };
-  return typeof md.subreddit === "string" && md.subreddit.length > 0 ? `r/${md.subreddit}` : "";
-}
-
-/** Read the Reddit author handle from event metadata. SAFE — the
- *  author handle is the user's permanent identifier at post time and
- *  the post URL doesn't carry it; the metadata snapshot reflects who
- *  posted, not a renameable display name. */
-export function redditAuthorByline(metadata: unknown): string | null {
-  if (metadata === null || typeof metadata !== "object") return null;
-  const md = metadata as { author?: unknown };
-  if (typeof md.author === "string" && md.author.length > 0) {
-    return `/u/${md.author}`;
-  }
-  return null;
+  if (typeof md.subreddit !== "string" || md.subreddit.length === 0) return "";
+  return md.subreddit.startsWith("u_") ? `u/${md.subreddit.slice(2)}` : `r/${md.subreddit}`;
 }
 
 /** Read the Instagram account handle/display name from FK-joined
@@ -293,32 +294,6 @@ export function resolveSourceLabel(
   return sourceLabel;
 }
 
-/** Image-URL predicate — accepts Reddit's CDN hosts + common image
- *  extensions. The card thumbnail only renders for Reddit posts when
- *  this returns true to avoid embedding non-image URLs as <img>. */
-export function isImageLikeUrl(url: string): boolean {
-  const lower = url.toLowerCase();
-  if (lower.startsWith("https://i.redd.it/")) return true;
-  if (lower.startsWith("https://preview.redd.it/")) return true;
-  return /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(lower);
-}
-
-/** Read metadata.media.url defensively — used by Reddit/Twitter/
- *  Telegram thumbnails. Returns null when missing/wrong shape. */
-export function readMediaUrlFromMetadata(md: unknown): string | null {
-  if (md === null || typeof md !== "object") return null;
-  const mediaContainer = (md as { media?: unknown }).media;
-  if (
-    mediaContainer === null ||
-    mediaContainer === undefined ||
-    typeof mediaContainer !== "object"
-  ) {
-    return null;
-  }
-  const url = (mediaContainer as { url?: unknown }).url;
-  return typeof url === "string" && url.length > 0 ? url : null;
-}
-
 /** Compute the thumbnail URL for any event kind. Returns null when no
  *  derivable thumbnail exists (text-shape kinds + reddit posts without
  *  image media). */
@@ -328,9 +303,11 @@ export function deriveThumbnailUrl(event: CardEventLite): string | null {
     return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
   }
   if (event.kind === "reddit_post") {
-    const link = event.redditEnrichment?.linkUrl ?? null;
-    if (link && isImageLikeUrl(link)) return link;
-    return readMediaUrlFromMetadata(event.metadata);
+    // Reddit HOTLINKS the raw i.redd.it cover (12-SPIKE Pitfall 5 — NO proxy, unlike
+    // TikTok/IG). Read the enrichment thumbnail (the source-of-truth the chart marker
+    // + feed card read), NOT event.metadata. FREQUENTLY null (thumbnail absent from
+    // ScrapeCreators; only image/gallery posts derive one) → no image, text card.
+    return event.redditEnrichment?.thumbnailUrl ?? null;
   }
   if (event.kind === "twitter_post") {
     // Twitter HOTLINKS the raw pbs.twimg.com cover (no proxy — unlike TikTok's ORB-

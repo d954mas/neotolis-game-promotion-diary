@@ -11,7 +11,7 @@
 //
 // Types + interfaces only. No implementation lives here.
 
-export type SocialPlatform = "instagram" | "tiktok" | "twitter"; // grows per later phase
+export type SocialPlatform = "instagram" | "tiktok" | "twitter" | "reddit"; // grows per later phase
 
 export interface NormalizedPost {
   /** Platform-native post/reel id → events.external_id. */
@@ -69,6 +69,10 @@ export interface ProviderPage {
  *  seam so EVERY page counts against the operator budget. */
 export type ProviderOrigin = "cron" | "user";
 
+export interface ProviderPostFetchOptions {
+  origin?: ProviderOrigin;
+}
+
 /**
  * Single-post lookup result (paste-preview path). The provider issues ONE
  * by-URL request (1 credit) and maps the vendor's single-media shape into this
@@ -106,6 +110,28 @@ export interface NormalizedSinglePost {
   ownerId: string | null;
   /** Owner handle/username — display value, read from source-of-truth, not cached. */
   ownerUsername: string | null;
+  /** The provider explicitly reported that the owner account was deleted while the
+   * post itself remains available. Optional because only Reddit exposes this
+   * distinction today. Consumers use it to clear stale owner identity without
+   * marking the post unavailable. */
+  ownerDeleted?: boolean;
+  /** Reddit post FORM ("self"|"link"|"image"|"gallery") when the provider is Reddit;
+   *  else null/absent. OPTIONAL so non-Reddit provider impls stay untouched (same
+   *  pattern as ResolvedAccount.secUid). Lets the paste-preview snapshot persist the
+   *  real reddit_posts.media_type so an image/gallery card renders its media variant
+   *  IMMEDIATELY — without it the paste stored null and the card fell back to a plain
+   *  text layout until the next source walk re-derived the form. */
+  mediaType?: string | null;
+  /** Outbound destination domain for a Reddit LINK post (mediaType "link"); else
+   *  null/absent. OPTIONAL for the same reason as `mediaType` (non-Reddit provider
+   *  impls stay untouched). Lets the paste-preview snapshot persist
+   *  reddit_posts.link_domain so the link card renders "title + domain"
+   *  immediately, not only after the next source walk. Domain only, never the
+   *  full URL. */
+  linkDomain?: string | null;
+  /** Reddit's post-level removal signal from exact detail. Optional because other
+   * providers do not expose this field. */
+  removedByCategory?: string | null;
 }
 
 /**
@@ -173,7 +199,7 @@ export interface SocialProvider {
   fetchPostByUrl(
     platform: SocialPlatform,
     url: string,
-    opts: { origin?: ProviderOrigin },
+    opts: ProviderPostFetchOptions,
   ): Promise<NormalizedSinglePost | null>;
   /** D-23 additive-only; NEVER depended on. */
   getCreditBalance?(): Promise<number | null>;

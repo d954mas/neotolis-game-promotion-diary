@@ -54,8 +54,8 @@
 // FOUNDATION ONLY: this table is the subject entity that future per-account
 // percentile baselines + an account page will read. Those are NOT built now —
 // designed for, not implemented. The canonical percentile pattern to copy when
-// they land is reddit_subreddit_baselines (a separate public-data aggregate
-// table keyed by the subject key). The backfill depth cap
+// they land is a separate public-data aggregate table keyed by the subject
+// key. The backfill depth cap
 // (SOCIAL_BACKFILL_MAX_POSTS) will be revisited when percentiles land, since a
 // meaningful per-account baseline may want a deeper historical sample than the
 // steady-state feed needs.

@@ -26,6 +26,7 @@
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
   import SourceKindIcon from "$lib/components/SourceKindIcon.svelte";
   import {
+    inferRedditPlate,
     inferSourceKindFromUrl,
     normalizeHandleUrl,
   } from "$lib/components/sources/infer-source-kind.js";
@@ -146,6 +147,11 @@
     return value === "reddit" ? "reddit_subreddit" : value;
   }
 
+  // Chip-sized status only. These render INSIDE a legend chip (and twice over for
+  // Reddit's u/ + r/ plate pair), so a full sentence there blows the legend up —
+  // 12-06 UAT. The operator-facing detail (which env vars to set) lives in the
+  // chip's tooltip (disabledTooltip) and in the inline hint under the URL input
+  // (sources_new_reddit_disabled), which is where a self-host operator looks.
   function statusFor(key: KindStatusKey | null): string | null {
     if (!key) return null;
     switch (key) {
@@ -170,7 +176,13 @@
     // generic "schema ready, adapter isn't" tail would mislead a self-host
     // operator (issue #64) — use the configuration-focused copy instead.
     if (entry.disabledReason === "not-configured") {
-      return m.sources_kind_disabled_tooltip_not_configured({ kind: kindLabel });
+      // Name the actual variable(s) when the matrix knows them — the chip's status is
+      // deliberately just "not configured", so this tooltip is the only place on the
+      // page that tells a self-host operator WHAT to set (smoke RDT.2 asserts it).
+      return m.sources_kind_disabled_tooltip_not_configured({
+        kind: kindLabel,
+        env: entry.envVar ?? "the required environment variables",
+      });
     }
     const status = statusFor(entry.statusKey) ?? "";
     return m.sources_kind_disabled_tooltip({ kind: kindLabel, status });
@@ -359,13 +371,17 @@
           {@const isMatch = inferredKind === entry.value}
           {#if entry.value === "reddit"}
             <!-- Reddit resolves u/ (author) and r/ (subreddit) by URL shape on
-                 submit; show both as separate plates so the support is explicit. -->
+                 submit; show both as separate plates so the support is explicit.
+                 Highlight only the plate the pasted shape matches (both while
+                 the shape is still ambiguous). -->
+            {@const plate = inferRedditPlate(handleUrl)}
             {#each ["u/", "r/"] as suffix (suffix)}
+              {@const plateMatch = isMatch && (plate === null || plate === suffix)}
               <li
                 class="chip"
-                class:active={isMatch && !entry.disabled}
+                class:active={plateMatch && !entry.disabled}
                 class:muted={entry.disabled}
-                class:matched={isMatch}
+                class:matched={plateMatch}
                 title={entry.disabled ? disabledTooltip(entry) : undefined}
               >
                 <span class="chip-icon"><SourceKindIcon kind="reddit_subreddit" /></span>

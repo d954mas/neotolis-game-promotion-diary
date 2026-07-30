@@ -31,6 +31,9 @@ scripts/grafana-audit-output/
 
 # Grafana persistent browser session (login cookie) — local only.
 scripts/.grafana-session/
+# Belt-and-suspenders: a legacy bespoke Grafana profile path (loki-window.mjs now
+# reuses scripts/.grafana-session/ instead). Never stage a live browser session.
+.grafana-auth/
 
 # Issue #27 — GSD workflow artifacts are local-only.
 #
@@ -69,3 +72,7 @@ scripts/.grafana-session/
 # scripts' process.env reads (which are intentional outside config/env.ts).
 .dev-*.ts
 .dev-*.mjs
+
+# pnpm local content-addressable store — created when pnpm is run with a
+# project-local store dir. Package cache, never committed.
+.pnpm-store/

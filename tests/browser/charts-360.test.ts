@@ -416,10 +416,10 @@ describe("04-12 HTML marker overlay + area/smooth/crosshair + Steam mini-chart r
     expect(eventThumbnail(baseEvents[0]!)).toBe("https://img.youtube.com/vi/abc123/mqdefault.jpg");
   });
 
-  it("eventThumbnail uses the Reddit enrichment preview image when image-like", () => {
+  it("eventThumbnail uses the Reddit enrichment thumbnail (raw i.redd.it hotlink)", () => {
     const redditWithImage = {
       ...baseEvents[1]!,
-      redditEnrichment: { linkUrl: "https://i.redd.it/abc.jpg" },
+      redditEnrichment: { thumbnailUrl: "https://i.redd.it/abc.jpg" },
     };
     expect(eventThumbnail(redditWithImage)).toBe("https://i.redd.it/abc.jpg");
   });

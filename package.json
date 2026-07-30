@@ -24,7 +24,7 @@
     "playwright:install": "playwright install chromium --with-deps",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/server/db/migrate.ts",
-    "db:check": "drizzle-kit check",
+    "db:check": "drizzle-kit check && node scripts/check-db-schema-drift.mjs",
     "licenses:generate": "tsx scripts/gen-third-party-licenses.ts",
     "start": "node build/server.js"
   },

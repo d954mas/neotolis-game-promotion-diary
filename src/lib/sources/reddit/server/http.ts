@@ -1,359 +1,292 @@
-// Reddit HTTP wrapper — public-`.json` adapter.
+// Reddit (ScrapeCreators) HTTP wrapper — timeout + status→AdapterError mapping
+// + per-request OBS emission. The FOURTH impl of the social-provider HTTP seam
+// (instagram = first, tiktok = second, twitter = third/twitterapi.io). Cloned
+// from the TikTok wrapper and re-pointed to platform label "reddit"; the budget
+// machinery (reserveSocialCredits / getSocialSpendToday) is the SHARED
+// social-provider quota — keyed by PROVIDER ("scrapecreators"), the prepaid
+// balance is ONE pool across IG + TikTok + Reddit (D-01), implemented in the
+// neutral server layer rather than owned by any one feature.
 //
-// Responsibilities:
-//   - Add `User-Agent: env.REDDIT_USER_AGENT` to every outgoing fetch
-//     (Reddit aggressively rate-limits the default Node UA).
-//   - Acquire a slot from the global pacer before firing the request.
-//   - Map response codes to AdapterError 5-category taxonomy
-//     (transient | rate-limited | not-found | permanent | operator-issue).
-//   - Detect 403-burst (3 × 403 within a 5-min rolling window) and emit
-//     ONE `reddit.adapter_degraded` audit row per burst window — not
-//     per failed request.
-//   - Parse `Retry-After` (preferred) or `X-Ratelimit-Reset` for
-//     retryAfterMs.
+// This wrapper is where the provider seam's HTTP discipline lives, so the
+// provider (provider/scrapecreators-reddit.ts) stays a thin issuer that never
+// touches prom-client and never re-implements the AbortController/error-map
+// boilerplate.
 //
-// Not here:
-//   - Rate-limit budget enforcement — owned by the global pacer
-//     (pacer.ts) and the 8-tick worker (worker-tick.ts).
-//   - Bearer/OAuth refresh — no OAuth in this adapter (single UA env var).
-//   - Retry loops — callers decide retry policy from the AdapterError
-//     category + retryAfterMs.
+// status→AdapterError taxonomy (IDENTICAL to IG/TikTok — D-24):
+//   - 401 → operator-issue   (bad / revoked x-api-key)
+//   - 402 → operator-issue   (prepaid balance exhausted — surfaces in /admin/quota)
+//   - 404 → not-found        (missing handle/subreddit)
+//   - 429 → rate-limited     (parse Retry-After)
+//   - 5xx → transient
+//   - 400 → permanent        (e.g. the subreddit `timeframe`-without-`sort=top`
+//                             trap — 12-SPIKE.md; the provider AVOIDS it by never
+//                             sending `timeframe` on the subreddit endpoint)
 //
-// Module-scope burst state is in-process. Under multi-replica deploys
-// each replica counts independently — a real 403 burst that trips on
-// K replicas writes K `reddit.adapter_degraded` audit rows instead of
-// one. Conscious trade-off:
-//   - Load-bearing concerns (rate-limit, per-user cap, adapter pause)
-//     all live in DB rows — multi-replica safe by construction.
-//   - This counter only coalesces a forensic audit signal; dup rows on
-//     a catastrophic path (Reddit fenced us out) are an acceptable cost
-//     vs the cleaner-but-heavier alternatives below.
-// Fix paths if dup rows ever become annoying:
-//   (a) Set requiresSingletonRuntime=true on the adapter — 1-line change;
-//       Reddit-loop runs on one replica only. YouTube still parallel.
-//   (b) Move counter into reddit_pacer (new columns + SQL writer) — keeps
-//       Reddit-loop on every replica.
-// A worker restart loses the in-memory counter — worst case one extra
-// audit row when the next burst trips, which is safer than over-
-// suppressing.
-//
-// Audit user-id: `audit_log.user_id` is NOT NULL by schema, so we
-// resolve operator user-id via ADMIN_EMAIL_ALLOWLIST[0] (same pattern
-// YouTube uses). When no operator is resolvable we log at WARN and
-// skip the audit row; the AdapterError still propagates, so the caller
-// always sees the rate-limit signal.
+// Credit reservation (reserve-before-HTTP, D-18 / BUDGET-02): every provider
+// request reserves one prepaid credit via reserveSocialCredits BEFORE the HTTP
+// call when an `origin` pool is set. A null permit (prepaid balance exhausted OR
+// the daily pool / 95% throttle full) STOPS the request — Reddit is never
+// over-spent past the shared prepaid balance (T-12-03-D mitigation). The
+// per-user + 80/95 throttle enforcement composes on top in Plans 12-04/05.
 
-import type { z } from "zod";
-import { fetch as undiciFetch, ProxyAgent } from "undici";
-import { AdapterError } from "$lib/sources/errors.js";
-import { pickRedditCredentials } from "./credentials.js";
-import { writeAudit } from "$lib/server/audit.js";
-import { logger } from "$lib/server/logger.js";
 import { env } from "$lib/server/config/env.js";
-import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "./operator-resolver.js";
-import { acquireRedditPacerSlot, recordRedditAdapterPause } from "./pacer.js";
+import { logger } from "$lib/server/logger.js";
+import { AdapterError } from "$lib/sources/errors.js";
+import {
+  socialProviderCredits,
+  socialProviderRequestDuration,
+  socialProviderRequests,
+} from "$lib/server/metrics.js";
+import {
+  getSocialSpendToday,
+  reserveSocialCredits,
+  type SocialQuotaPool,
+} from "$lib/server/services/social-provider-quota.js";
+import type { SocialPlatform } from "$lib/sources/social-provider.js";
+import type { DailyUserRequestAccounting } from "$lib/server/daily-user-quota.js";
 
-export interface RedditHttpResult<T> {
-  data: T;
-  statusCode: number;
-  headers: Headers;
-}
-
-// Production default = the official reddit.com endpoint. The CI smoke gate
-// sets env.REDDIT_BASE_URL_OVERRIDE to a mock reverse-proxy URL so worker
-// traffic is intercepted by tests/smoke/lib/reddit-mock.mjs (no live Reddit
-// calls in CI). Mirrors YouTube's YOUTUBE_API_BASE_URL precedent.
-const REDDIT_BASE = env.REDDIT_BASE_URL_OVERRIDE ?? "https://www.reddit.com";
-
-// 403-burst detection state. Module-scope is conscious — see the
-// "multi-replica trade-off" section in the file header. The load-bearing
-// rate-limit gate lives in pacer.ts (DB row, atomic). This counter just
-// coalesces the forensic `reddit.adapter_degraded` audit signal.
-interface BurstState {
-  count: number;
-  windowStartMs: number;
-  auditEmittedThisBurst: boolean;
-}
-let burstState: BurstState = { count: 0, windowStartMs: 0, auditEmittedThisBurst: false };
-const BURST_WINDOW_MS = 5 * 60_000;
-const BURST_THRESHOLD = 3;
-
-// Outbound HTTP proxy for Reddit. Lazily constructed on first use so the
-// undici ProxyAgent's connection pool is created once and reused across
-// every redditFetch (keep-alive is what makes residential-proxy latency
-// tolerable — TCP+TLS handshake per call would dominate).
-// Empty/unset env var → null → direct fetch (self-host parity).
-//
-// allowH2:false forces HTTP/1.1 to the proxy/origin. undici negotiates h2 by
-// default; an idle keep-alive h2 connection the proxy closes makes undici emit
-// a SocketError on the h2 session-end (client-h2.js onHttp2SocketEnd) with NO
-// in-flight request — so it escapes the redditFetch try/catch below and reaches
-// process 'uncaughtException', crashing the worker (~2×/day on the flaky
-// Webshare proxy). h1 drops an idle-closed socket from the pool gracefully (the
-// next reuse rejects inside the awaited fetch). Reddit/the proxy support h1;
-// h2 multiplexing is irrelevant at the 10 req/min ceiling.
-export const REDDIT_PROXY_AGENT_OPTIONS = { allowH2: false } as const;
-let cachedProxyAgent: ProxyAgent | null = null;
-function getProxyDispatcher(): ProxyAgent | null {
-  if (!env.REDDIT_PROXY_URL) return null;
-  if (cachedProxyAgent === null) {
-    cachedProxyAgent = new ProxyAgent({ uri: env.REDDIT_PROXY_URL, ...REDDIT_PROXY_AGENT_OPTIONS });
-    logger.info(
-      { proxyHost: new URL(env.REDDIT_PROXY_URL).host },
-      "reddit outbound proxy configured",
-    );
-  }
-  return cachedProxyAgent;
-}
-
-/** Test-only helper — drop the cached ProxyAgent so tests can swap
- *  REDDIT_PROXY_URL via vi.stubEnv and pick up the new value. */
-export function __resetProxyAgentForTest(): void {
-  cachedProxyAgent = null;
-}
+/** Dollar cost of one ScrapeCreators reddit request. 1 request = 1 credit = 1
+ *  page (12-SPIKE.md Q5: full 17-post author backfill = 3 credits ≈ $0.006 ⇒
+ *  ~$0.002/credit). Feeds the observability cost projection (Plan 12-06). */
+export const USD_PER_REQUEST = 0.002;
 
 /**
- * Wraps native fetch with Reddit-specific behavior:
- *   - User-Agent header from credentials.ts
- *   - AdapterError taxonomy on non-2xx
- *   - Optional Zod schema validation on response body
- *
- * `path` may be a relative `/r/...` path (REDDIT_BASE is prepended) or a
- * full https URL (used as-is — useful for redd.it short-links or
- * cross-host calls inside the same domain family).
+ * Bare fetch with abort-on-timeout. 30s default mirrors the IG/TikTok wrapper.
+ * The x-api-key header rides in `headers`.
  */
-export async function redditFetch<T = unknown>(
-  path: string,
-  opts: { schema?: z.ZodTypeAny; method?: "GET"; pacer?: "acquire" | "already-acquired" } = {},
-): Promise<RedditHttpResult<T>> {
-  const creds = pickRedditCredentials();
-  if (creds === null) {
-    // Safety-net. The usual path is /admin/quota Reddit tab + ingest.ts
-    // checking isRedditConfigured() before calling — but if some new
-    // caller forgets the check, this throws a clear operator-issue
-    // instead of leaking an Authorization-less request.
-    throw new AdapterError("reddit_not_configured (REDDIT_USER_AGENT env empty)", {
-      category: "operator-issue",
-      context: { httpStatus: 0 },
-    });
-  }
-
-  // Global pacer — every redditFetch goes through one DB-side token so
-  // the 10 req/min Reddit ceiling is enforced across worker + sync
-  // user paths uniformly. Denial surfaces as rate-limited; caller
-  // (worker re-queues with backoff via next_attempt_at, sync paths
-  // return 429 to the UI).
-  if (opts.pacer !== "already-acquired") {
-    const slot = await acquireRedditPacerSlot();
-    if (!slot.acquired) {
-      throw new AdapterError(`Reddit pacer denied -- ${slot.waitMs}ms until next slot`, {
-        category: "rate-limited",
-        retryAfterMs: slot.waitMs,
-        context: {
-          httpStatus: 0,
-          source: slot.paused ? "adapter-pause" : "global-pacer",
-          pauseReason: slot.pauseReason,
-          pausedUntil: slot.pausedUntil?.toISOString() ?? null,
-        },
-      });
-    }
-  }
-
-  const url = path.startsWith("http") ? path : REDDIT_BASE + path;
-  const dispatcher = getProxyDispatcher();
-  let res: Response;
+export async function fetchWithTimeout(
+  url: URL,
+  headers: Record<string, string>,
+  timeoutMs = 30_000,
+): Promise<Response> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    if (dispatcher !== null) {
-      // Proxy path. undiciFetch is API-compatible with global fetch but
-      // accepts the `dispatcher` option that routes through ProxyAgent.
-      res = (await undiciFetch(url, {
-        method: opts.method ?? "GET",
-        headers: {
-          "User-Agent": creds.userAgent,
-          Accept: "application/json",
-        },
-        dispatcher,
-      })) as unknown as Response;
-    } else {
-      // No proxy → use global fetch so tests can mock via vi.stubGlobal.
-      // Behaviour identical (Node 18+ global fetch is undici under the
-      // hood); only the test surface differs.
-      res = await fetch(url, {
-        method: opts.method ?? "GET",
-        headers: {
-          "User-Agent": creds.userAgent,
-          Accept: "application/json",
-        },
-      });
-    }
-  } catch (cause) {
-    throw new AdapterError(`Reddit fetch network error: ${String(cause)}`, {
-      category: "transient",
-      cause,
-    });
+    return await fetch(url, { headers, signal: ac.signal });
+  } finally {
+    clearTimeout(timer);
   }
-
-  const statusCode = res.status;
-  const headers = res.headers;
-
-  // 403-burst detection — Reddit's anti-bot fence. Emit
-  // `reddit.adapter_degraded` audit ONCE per burst window; always throw
-  // AdapterError(rate-limited).
-  if (statusCode === 403) {
-    await maybeEmitBurstAuditAndThrow(headers);
-    // unreachable — maybeEmitBurstAuditAndThrow always throws.
-  }
-  if (statusCode === 429) {
-    const retryAfterMs = parseRetryAfter(headers);
-    await recordRedditAdapterPause("http_429", retryAfterMs);
-    throw new AdapterError("Reddit 429 — rate limited", {
-      category: "rate-limited",
-      retryAfterMs,
-      context: { httpStatus: 429 },
-    });
-  }
-  if (statusCode === 404) {
-    throw new AdapterError("Reddit resource not found", {
-      category: "not-found",
-      context: { httpStatus: 404 },
-    });
-  }
-  if (statusCode >= 500) {
-    throw new AdapterError(`Reddit ${statusCode}`, {
-      category: "transient",
-      context: { httpStatus: statusCode },
-    });
-  }
-  if (statusCode < 200 || statusCode >= 300) {
-    throw new AdapterError(`Reddit unexpected ${statusCode}`, {
-      category: "permanent",
-      context: { httpStatus: statusCode },
-    });
-  }
-
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch (cause) {
-    throw new AdapterError("Reddit response not JSON", {
-      category: "permanent",
-      cause,
-      context: { httpStatus: statusCode },
-    });
-  }
-
-  if (opts.schema) {
-    const parsed = opts.schema.safeParse(body);
-    if (!parsed.success) {
-      throw new AdapterError("Reddit response schema mismatch", {
-        category: "permanent",
-        cause: parsed.error,
-        context: { httpStatus: statusCode },
-      });
-    }
-    return { data: parsed.data as T, statusCode, headers };
-  }
-  return { data: body as T, statusCode, headers };
 }
 
-/**
- * Parse Retry-After (preferred — RFC 7231 seconds form) or
- * X-Ratelimit-Reset (Reddit-specific fallback) into milliseconds.
- *
- * Both headers carry SECONDS in Reddit's responses (Retry-After is
- * sometimes an HTTP-date but Reddit's API uses seconds). Default 60s
- * gives the worker a sane backoff when both headers are absent.
- */
-/** Jitter window applied to EVERY retry value — header-supplied or
- *  default. N concurrent clients (preview button + paste submit + sub_poll
- *  cron) seeing the same Retry-After otherwise retry in the same second.
- *  5s smear is small enough not to violate the server's hint, large
- *  enough to spread thundering-herd hits across multiple ticks of the
- *  8-tick worker (7.5s tick interval). */
-const RETRY_JITTER_MS = 5_000;
+type RedditFetchContextBase = {
+  platform: SocialPlatform;
+  provider: string;
+  logTag: string;
+  /** Credits charged on a successful (200) request. Defaults to 1 (D-18). */
+  creditsUsed?: number;
+  /**
+   * Budget pool to reserve against BEFORE the HTTP call (BUDGET-02).
+   *   - "user": user-initiated work (onboarding add / refresh-now / paste).
+   *   - "cron": background work (incremental + auto-backfill continuation pages).
+   * When set, reserveSocialCredits(units=creditsUsed??1) runs first; a null
+   * permit throws AdapterError (operator-issue when the prepaid balance is the
+   * blocker, rate-limited when the daily pool / 95% throttle is the blocker) so
+   * the walker pauses + persists its cursor. Omitted origin leaves the request
+   * unmetered.
+   */
+};
 
-function jitteredRetryMs(base: number): number {
-  return base + Math.floor(Math.random() * RETRY_JITTER_MS);
-}
-
-function parseRetryAfter(headers: Headers): number {
-  const retryAfter = headers.get("retry-after");
-  if (retryAfter !== null) {
-    const n = parseInt(retryAfter, 10);
-    if (!Number.isNaN(n) && n > 0) return jitteredRetryMs(n * 1000);
-  }
-  const reset = headers.get("x-ratelimit-reset");
-  if (reset !== null) {
-    const n = parseInt(reset, 10);
-    if (!Number.isNaN(n) && n > 0) return jitteredRetryMs(n * 1000);
-  }
-  // No header — default to 60s + jitter.
-  return jitteredRetryMs(60_000);
-}
-
-/**
- * Burst tracker. Increments count within the rolling 5-min window;
- * resets count on a new window. Emits the audit row exactly ONCE per
- * burst when count crosses BURST_THRESHOLD; always throws
- * AdapterError(rate-limited).
- *
- * Audit emission is best-effort — never throws upward. A failed audit
- * write must not mask the 403; the caller still gets the AdapterError.
- */
-async function maybeEmitBurstAuditAndThrow(headers: Headers): Promise<never> {
-  const now = Date.now();
-  const elapsed = now - burstState.windowStartMs;
-  if (elapsed > BURST_WINDOW_MS) {
-    // New window starts now. First 403 of the new burst.
-    burstState = { count: 1, windowStartMs: now, auditEmittedThisBurst: false };
-  } else {
-    burstState.count++;
-  }
-  if (burstState.count >= BURST_THRESHOLD && !burstState.auditEmittedThisBurst) {
-    burstState.auditEmittedThisBurst = true;
-    try {
-      const operatorId = await resolveOperatorUserId();
-      if (operatorId === null) {
-        // No operator resolvable — log loudly and skip the audit row.
-        // The cap state still applies via the AdapterError thrown below.
-        logger.warn(
-          { burst_count: burstState.count, window_minutes: 5 },
-          "reddit.adapter_degraded burst detected but no operator user_id resolvable",
-        );
-      } else {
-        await writeAudit({
-          userId: operatorId,
-          action: "reddit.adapter_degraded",
-          // System-emitted (worker-context). Loopback sentinel matches
-          // quota.service_throttled convention.
-          ipAddress: "127.0.0.1",
-          metadata: {
-            burst_count: burstState.count,
-            since: new Date(burstState.windowStartMs).toISOString(),
-            window_minutes: 5,
-          },
-        });
+export type RedditFetchContext = RedditFetchContextBase &
+  (
+    | {
+        origin?: SocialQuotaPool;
+        userAccounting?: undefined;
       }
-    } catch (err) {
-      // Best-effort — never mask the 403.
+    | {
+        origin: "user";
+        /** Per-user cap + audit row committed atomically with the provider reservation. */
+        userAccounting: DailyUserRequestAccounting;
+      }
+  );
+
+/** Bucket an HTTP status (or a non-HTTP failure) into the `status` OBS label. */
+function statusLabel(httpStatus: number): string {
+  if (httpStatus === 200) return "200";
+  if (httpStatus >= 500) return "5xx";
+  if (httpStatus >= 400) return "4xx";
+  return "other";
+}
+
+/**
+ * Issue a ScrapeCreators reddit request with the x-api-key header, emit the
+ * per-request OBS metrics, and map non-2xx to AdapterError. Returns the raw
+ * Response on 200 for the caller to JSON-parse + normalize.
+ */
+export async function redditFetch(url: URL, ctx: RedditFetchContext): Promise<Response> {
+  const { platform: reservePlatform, provider: reserveProvider } = ctx;
+  if (ctx.origin !== undefined) {
+    // Reserve-before-HTTP (BUDGET-02): decrement the daily counter AND the
+    // shared prepaid balance in one FOR-UPDATE tx before issuing the request. A
+    // null permit means the spend would over-run the budget — refuse it.
+    const permit =
+      ctx.origin === "user" && ctx.userAccounting !== undefined
+        ? await reserveSocialCredits({
+            platform: reservePlatform,
+            provider: reserveProvider,
+            origin: "user",
+            units: ctx.creditsUsed ?? 1,
+            userAccounting: ctx.userAccounting,
+          })
+        : await reserveSocialCredits({
+            platform: reservePlatform,
+            provider: reserveProvider,
+            origin: ctx.origin,
+            units: ctx.creditsUsed ?? 1,
+          });
+    if (permit === null) {
+      // Disambiguate the two null causes so the caller maps the right
+      // AdapterError category (mirrors IG/TikTok's two-branch null handling):
+      //   prepaid balance == 0 → operator-issue (operator must top up)
+      //   daily pool / 95% throttle full → rate-limited (resets at midnight PT)
+      const { prepaidBalance } = await getSocialSpendToday(reservePlatform, reserveProvider);
+      const exhausted = prepaidBalance <= 0;
       logger.warn(
-        { err: String((err as Error)?.message ?? err) },
-        "reddit.adapter_degraded audit emit failed",
+        {
+          platform: reservePlatform,
+          provider: reserveProvider,
+          origin: ctx.origin,
+          prepaidBalance,
+        },
+        `${ctx.logTag}: reserveSocialCredits null -> AdapterError(${exhausted ? "operator-issue" : "rate-limited"})`,
+      );
+      throw new AdapterError(
+        exhausted
+          ? "social provider budget exhausted (prepaid balance depleted)"
+          : "social provider daily budget exhausted (throttled)",
+        {
+          category: exhausted ? "operator-issue" : "rate-limited",
+          context: {
+            platform: reservePlatform,
+            provider: reserveProvider,
+            origin: ctx.origin,
+            prepaidBalance,
+            logTag: ctx.logTag,
+          },
+        },
       );
     }
   }
-  const retryAfterMs = parseRetryAfter(headers);
-  await recordRedditAdapterPause("http_403", retryAfterMs);
-  throw new AdapterError("Reddit 403 (anti-bot fence?) — adapter may be degraded", {
-    category: "rate-limited",
-    retryAfterMs,
-    context: { httpStatus: 403 },
-  });
-}
 
-/** Test-only helper — flushes burst state between cases.
- *  Not exported from the package barrel; only the test file imports it. */
-export function __resetBurstStateForTest(): void {
-  burstState = { count: 0, windowStartMs: 0, auditEmittedThisBurst: false };
-  __resetOperatorIdCacheForTest();
+  const headers = { "x-api-key": env.SCRAPECREATORS_API_KEY };
+  const { platform, provider } = ctx;
+  const startedAt = performance.now();
+
+  let resp: Response;
+  try {
+    resp = await fetchWithTimeout(url, headers);
+  } catch (err) {
+    const status = err instanceof DOMException && err.name === "AbortError" ? "timeout" : "error";
+    const seconds = (performance.now() - startedAt) / 1000;
+    socialProviderRequestDuration.observe({ platform, provider, status }, seconds);
+    socialProviderRequests.inc({ platform, provider, status });
+    logger.warn(
+      { err, platform, provider, logTag: ctx.logTag },
+      `${ctx.logTag}: ${status} -> AdapterError(transient)`,
+    );
+    throw new AdapterError(`ScrapeCreators ${status}`, {
+      category: "transient",
+      cause: err,
+      context: { platform, provider, logTag: ctx.logTag },
+    });
+  }
+
+  const status = statusLabel(resp.status);
+  const seconds = (performance.now() - startedAt) / 1000;
+  socialProviderRequestDuration.observe({ platform, provider, status }, seconds);
+  socialProviderRequests.inc({ platform, provider, status });
+
+  if (resp.ok) {
+    // Each successful request consumes one prepaid credit (D-18).
+    socialProviderCredits.inc({ platform, provider }, ctx.creditsUsed ?? 1);
+    return resp;
+  }
+
+  if (resp.status === 401) {
+    logger.warn(
+      { status: 401, platform, provider, logTag: ctx.logTag },
+      `${ctx.logTag}: 401 -> AdapterError(operator-issue, x-api-key invalid/revoked)`,
+    );
+    throw new AdapterError("ScrapeCreators auth failed (401 - key invalid or revoked)", {
+      category: "operator-issue",
+      context: { platform, provider, status: 401, logTag: ctx.logTag },
+    });
+  }
+
+  if (resp.status === 402) {
+    logger.warn(
+      { status: 402, platform, provider, logTag: ctx.logTag },
+      `${ctx.logTag}: 402 -> AdapterError(operator-issue, prepaid balance exhausted)`,
+    );
+    throw new AdapterError("ScrapeCreators prepaid balance exhausted (402)", {
+      category: "operator-issue",
+      context: { platform, provider, status: 402, logTag: ctx.logTag },
+    });
+  }
+
+  if (resp.status === 404) {
+    logger.warn(
+      { status: 404, platform, provider, logTag: ctx.logTag },
+      `${ctx.logTag}: 404 -> AdapterError(not-found, missing handle/subreddit)`,
+    );
+    throw new AdapterError("ScrapeCreators resource not found (404 - missing handle)", {
+      category: "not-found",
+      context: { platform, provider, status: 404, logTag: ctx.logTag },
+    });
+  }
+
+  if (resp.status === 429) {
+    const retryAfterHeader = resp.headers.get("retry-after");
+    let retryAfterMs = 60_000;
+    if (retryAfterHeader !== null) {
+      const asInt = parseInt(retryAfterHeader, 10);
+      if (Number.isFinite(asInt) && asInt > 0) {
+        retryAfterMs = asInt * 1000;
+      } else {
+        const asDate = Date.parse(retryAfterHeader);
+        if (Number.isFinite(asDate)) {
+          retryAfterMs = Math.max(1000, asDate - Date.now());
+        }
+      }
+    }
+    logger.warn(
+      { status: 429, retryAfterMs, platform, provider, logTag: ctx.logTag },
+      `${ctx.logTag}: 429 -> AdapterError(rate-limited)`,
+    );
+    throw new AdapterError("ScrapeCreators rate-limited (429)", {
+      category: "rate-limited",
+      retryAfterMs,
+      context: { platform, provider, status: 429, logTag: ctx.logTag },
+    });
+  }
+
+  if (resp.status >= 500) {
+    logger.warn(
+      { status: resp.status, platform, provider, logTag: ctx.logTag },
+      `${ctx.logTag}: 5xx -> AdapterError(transient)`,
+    );
+    throw new AdapterError(`ScrapeCreators transient ${resp.status}`, {
+      category: "transient",
+      context: { platform, provider, status: resp.status, logTag: ctx.logTag },
+    });
+  }
+
+  if (resp.status === 400) {
+    logger.warn(
+      { status: 400, platform, provider, logTag: ctx.logTag },
+      `${ctx.logTag}: 400 -> AdapterError(permanent, request shape rejected)`,
+    );
+    throw new AdapterError("ScrapeCreators bad request (400 - caller bug)", {
+      category: "permanent",
+      context: { platform, provider, status: 400, logTag: ctx.logTag },
+    });
+  }
+
+  logger.warn(
+    { status: resp.status, platform, provider, logTag: ctx.logTag },
+    `${ctx.logTag}: ${resp.status} -> AdapterError(transient, last-resort)`,
+  );
+  throw new AdapterError(`ScrapeCreators unexpected ${resp.status}`, {
+    category: "transient",
+    context: { platform, provider, status: resp.status, logTag: ctx.logTag },
+  });
 }

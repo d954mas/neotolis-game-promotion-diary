@@ -1,12 +1,10 @@
 // Reddit ui/server.ts — server-safe entry.
 //
-// Exports ONLY pure functions (no Svelte component imports). Importable
-// from SvelteKit +page.server.ts loaders without crashing pre-render.
+// Exports ONLY pure functions (no Svelte component imports). Importable from
+// SvelteKit +page.server.ts loaders without crashing pre-render.
 //
-// Per-source ui/index.ts (client-safe entry) re-exports from this file
-// AND adds Svelte components (none yet for Reddit — universal FeedCard
-// handles reddit_post via its kind switch). registry-ui.ts imports THIS
-// file so /admin/quota loaders, /sources loaders, /feed loaders can all
-// dispatch via getAdapterUI(kind).toCardProps without dragging .svelte
-// modules into the server bundle.
+// Per-source ui/index.ts (client-safe entry) re-exports from this file AND adds
+// the Svelte component. registry-ui.ts imports THIS file (server-safe) so the
+// /sources + /feed loaders can all dispatch via getAdapterUI(kind).toCardProps
+// without dragging .svelte modules into the server bundle.
 export { toCardProps } from "./card-props.js";

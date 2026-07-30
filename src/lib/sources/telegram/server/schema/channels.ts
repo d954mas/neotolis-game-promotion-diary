@@ -45,8 +45,8 @@
 // FOUNDATION ONLY (Phase 9 scope): this table is the subject entity that future
 // per-channel percentile baselines + a channel page will read. Those are NOT
 // built now — designed for, not implemented. The canonical percentile pattern
-// to copy when they land is reddit_subreddit_baselines (a separate public-data
-// aggregate table keyed by the subject key). The backfill depth cap
+// to copy when they land is a separate public-data aggregate table keyed by
+// the subject key. The backfill depth cap
 // (TELEGRAM_BACKFILL_MAX_POSTS, currently 100) will be revisited when
 // percentiles land, since meaningful per-channel baselines may want a deeper
 // historical sample than the steady-state feed needs.

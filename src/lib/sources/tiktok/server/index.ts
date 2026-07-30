@@ -619,6 +619,23 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
   app.route("/api", tiktokThumbnailRoutes);
 }
 
+function validateEventInput(input: { kind: string; url?: string | null }): void {
+  if (input.kind !== "tiktok_post") return;
+  // EVENT_KIND_DISPLAY.tiktok_post.urlValidation is "match-if-present": a manual
+  // social log may legitimately have no link. Requiring one here would also make
+  // every already-stored url-less row uneditable, since updateEvent re-validates
+  // the MERGED url (existing.url) on every PATCH.
+  if (!input.url) return;
+  if (tiktokParseUrl(input.url) === null) {
+    throw new AppError(
+      "url must be a recognized TikTok post URL when kind=tiktok_post",
+      "kind_url_inconsistent",
+      422,
+      { reason: "url_not_tiktok_post" },
+    );
+  }
+}
+
 // tiktokAdapter — composes the core (./adapter.ts) with the infrastructure-touching
 // methods (registerQueues / scheduleCronTicks / backfillSource / registerRoutes) and
 // the create-time hooks (canonicalizeOnCreate / onSourceCreated /
@@ -641,6 +658,7 @@ export const tiktokAdapter: SourceAdapter & typeof tiktokAccountAdapterCore = {
   resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
   resolveCachedExternalId,
+  validateEventInput,
   registerRoutes,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "tiktok_post",

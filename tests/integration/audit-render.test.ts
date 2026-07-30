@@ -559,7 +559,10 @@ describe("FeedCard restructured layout", () => {
     expect(out.body).toMatch(/img\.youtube\.com\/vi\/abc123\/mqdefault\.jpg/);
   });
 
-  it("renders metadata.media.url thumbnail for kind=reddit_post when media present", async () => {
+  it("renders the redditEnrichment thumbnail for kind=reddit_post when present", async () => {
+    // Phase 12: the reddit card HOTLINKS the enrichment thumbnail (source-of-truth from
+    // reddit_post_snapshots via feed-enrichment.ts), NOT a denormalized metadata.media.url
+    // (no-denorm rule). The /feed loader decorates reddit_post events with redditEnrichment.
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -567,7 +570,11 @@ describe("FeedCard restructured layout", () => {
           ...baseEvent,
           kind: "reddit_post" as const,
           externalId: null,
-          metadata: { media: { url: "https://i.redd.it/abc.jpg" } },
+          redditEnrichment: {
+            stats: null,
+            thumbnailUrl: "https://i.redd.it/abc.jpg",
+            mediaType: "image",
+          },
         },
         source: null,
         game: null,
