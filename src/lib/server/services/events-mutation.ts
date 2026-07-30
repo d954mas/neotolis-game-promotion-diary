@@ -1540,7 +1540,7 @@ export async function dismissFromInbox(
         'true'::jsonb,
         true
       )`,
-      updatedAt: new Date(),
+      updatedAt: sql`NOW()`,
     })
     .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .returning();

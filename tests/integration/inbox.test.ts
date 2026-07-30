@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import {
   createEvent,
@@ -78,6 +78,35 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     expect(updated.id).toBe(ev.id);
     const meta = updated.metadata as { inbox?: { dismissed?: unknown } };
     expect(meta.inbox?.dismissed).toBe(true);
+  });
+
+  it("dismissFromInbox uses the PostgreSQL clock when the Node clock is ahead", async () => {
+    const u = await seedUserDirectly({ email: "inbox-db-clock@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Database clock",
+      },
+      "127.0.0.1",
+    );
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2099-01-01T00:00:00Z"));
+    let updated: Awaited<ReturnType<typeof dismissFromInbox>>;
+    try {
+      updated = await dismissFromInbox(u.id, ev.id, "127.0.0.1");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const clockResult = await db.execute<{ now: Date | string }>(sql`SELECT NOW() AS now`);
+    const clock = clockResult.rows[0]!;
+    expect(Math.abs(updated.updatedAt.getTime() - new Date(clock.now).getTime())).toBeLessThan(
+      5_000,
+    );
   });
 
   it("dismissed event no longer appears in attached=false (still in DB; not in inbox view)", async () => {
