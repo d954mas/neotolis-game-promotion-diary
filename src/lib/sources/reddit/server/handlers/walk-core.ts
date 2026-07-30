@@ -17,8 +17,9 @@
 // ceiling (unlike twitterapi.io), so a bounded multi-page loop is cheap + safe.
 //
 // COST CAPS (12-SPIKE "Cost caps"):
-//   - INITIAL / deep backfill: walk to end-of-feed OR SOCIAL_BACKFILL_MAX_POSTS (100)
-//     OR the depth-bound date — one-time, bounds the archive pull.
+//   - INITIAL / deep backfill: walk to end-of-feed OR SOCIAL_BACKFILL_MAX_POSTS
+//     OR the depth-bound date — bounds the archive pull. A pull deeper than one
+//     invocation's page cap resumes across ticks (deepResume) until it settles.
 //   - DAILY INCREMENTAL poll: bounded to K = INCREMENTAL_PAGE_CAP (2) pages — the
 //     firehose bound. A busy subreddit is capped to ~2 credits/poll; a legit
 //     low-traffic source hits end-of-feed / the window first.
@@ -58,6 +59,7 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { getSocialProvider } from "../provider/registry.js";
 import { fetchRedditFeedPage, type RedditFeedMode } from "../provider/scrapecreators-reddit.js";
 import { writeSnapshot, upsertRedditAccount, upsertRedditSubreddit } from "../snapshots.js";
+import { enqueueRedditFormEnrichment } from "./refresh-queue-tick.js";
 import { buildRedditTitle, type NormalizedRedditPost } from "../normalize.js";
 import {
   readRedditBackfillState,
@@ -103,9 +105,11 @@ function deletionSubjectKey(kind: RedditSourceKind, channelKey: string): string 
 
 /** Daily incremental firehose bound (12-SPIKE cost caps: K=2). */
 const INCREMENTAL_PAGE_CAP = 2;
-/** Safety ceiling on the deep/initial loop (page count) — bounds the one-time pull
- *  even if SOCIAL_BACKFILL_MAX_POSTS is set huge. 100 posts / ~7-24 per page ⇒ well
- *  under this. */
+/** Safety ceiling on the deep/initial loop (page count) — bounds ONE invocation.
+ *  A target deeper than this many pages pauses here WITHOUT completing: the
+ *  cursor persists and the next tick (daily cron / manual pull) resumes the same
+ *  pass via deepResume — a big archive tops up across passes instead of holding
+ *  one job for minutes. */
 const DEEP_PAGE_CAP = 30;
 /** Consecutive complete-and-empty passes required before an empty feed is treated as
  *  "the subject deleted everything" and its whole cached history is flagged for GDPR
@@ -307,6 +311,15 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   let notFoundAtPage = -1;
   let walkedThisTick = false;
   let fetchedThisTick = 0;
+  // Posts ACCEPTED by the subject-identity filter. The raw fetchedThisTick counts
+  // the page BEFORE filtering, and the author path is a broad fuzzy search — a page
+  // of only strangers' posts is NOT evidence the subject exists, so the two
+  // subject-existence gates below (never-polled flag + needs_reconnect clear) key
+  // on this counter, never the raw one.
+  let subjectFetchedThisTick = 0;
+  // Posts cached with an UNKNOWN media form (the evidence-free author-search
+  // shape) — queued for the cron-funded per-post detail enrichment after fan-out.
+  const unknownFormPostIds: string[] = [];
   // TWO drop classes with different consequences: a PARSE drop (malformed provider
   // row) means a subject post may have been silently lost from the import — an
   // archive intent must not be settled against such a pass. An OFF-SUBJECT drop
@@ -405,6 +418,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         ? post.author !== null && post.author.toLowerCase() === channelKeyLower
         : post.subredditSlug === null || post.subredditSlug === channelKeyLower,
     );
+    subjectFetchedThisTick += subjectPosts.length;
     const offSubject = page.posts.length - subjectPosts.length;
     if (offSubject > 0) {
       offSubjectDroppedThisTick += offSubject;
@@ -431,6 +445,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         postId: post.id,
         subredditSlug: effectiveSubredditSlug,
         mediaType: post.mediaType,
+        linkDomain: post.linkDomain,
         title: post.title,
         caption: post.selftext,
         permalink: post.permalink,
@@ -443,6 +458,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
         status: "ok",
       });
       seenIds.push(post.id);
+      if (post.mediaType === null) unknownFormPostIds.push(post.id);
 
       // Depth-window bound: the feed is newest-first, so stop the moment a post is
       // older than the target (deep) / already covered (incremental).
@@ -593,7 +609,9 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     wasNeverPolled &&
     !pausedThisTick &&
     walkedThisTick &&
-    fetchedThisTick === 0 &&
+    // Subject-accepted count: a fuzzy page of only strangers' posts on a typo'd
+    // NEW handle must still flag needs_reconnect, not pass as a live subject.
+    subjectFetchedThisTick === 0 &&
     requestsUsed > 0 &&
     state.complete
   ) {
@@ -668,6 +686,29 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     lossy: parseDroppedThisTick > 0,
     branch,
   });
+
+  // ── Media-form enrichment (12-06 UAT) ──
+  // Queue a cron-funded per-post detail fetch for every post this pass cached
+  // with an UNKNOWN form (the author-search shape carries no media evidence, so
+  // its image/gallery/link posts land with media_type NULL). The refresh lane
+  // paces the fetches, the reserve seam budgets them, and writeSnapshot upgrades
+  // media_type + thumbnail in place. Best-effort: a failure leaves the form
+  // unknown for the next pass to re-queue.
+  if (unknownFormPostIds.length > 0) {
+    const enrichQueued = await enqueueRedditFormEnrichment(unknownFormPostIds).catch((err) => {
+      logger.warn(
+        { jobId: job.id, channelKey, err: String((err as Error)?.message ?? err) },
+        `${config.queue}: form-enrichment enqueue failed (non-fatal)`,
+      );
+      return 0;
+    });
+    if (enrichQueued > 0) {
+      logger.info(
+        { jobId: job.id, channelKey, enrichQueued },
+        `${config.queue}: queued media-form enrichment`,
+      );
+    }
+  }
 
   // ── Variant-A deletion reconciliation (12-SPIKE) ──
   // Only on a genuine COMPLETE coverage pass (unpaused; reached end-of-feed or the
@@ -755,13 +796,14 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
   await markChannelLastPolledAt(config.kind, channelKey);
 
   // Clearing needs_reconnect requires EVIDENCE the subject exists — at least one
-  // fetched post (raw page-1 count, so a healthy-but-quiet source still clears: its
-  // page 1 returns old posts). An EMPTY successful pass proves nothing: the author
-  // search path answers a typo'd/private/empty subject with an empty 200 (never a
-  // 404), so an unconditional clear here would un-flag it after the weekly rehab
-  // pass and return it to daily paid polling forever — with no path that ever
-  // re-flags it (markSourceNeedsReconnect needs a 404 or a never-polled channel).
-  if (!pausedThisTick && !notFound && fetchedThisTick > 0) {
+  // SUBJECT-ACCEPTED post (a healthy-but-quiet source still clears: its page 1
+  // returns its own old posts, which pass the identity filter). An empty pass — or
+  // a fuzzy page of only strangers' posts — proves nothing: the author search path
+  // answers a typo'd/private/empty subject with an empty-or-off-subject 200 (never
+  // a 404), so a laxer clear here would un-flag it after the weekly rehab pass and
+  // return it to daily paid polling forever — with no path that ever re-flags it
+  // (markSourceNeedsReconnect needs a 404 or a never-polled channel).
+  if (!pausedThisTick && !notFound && subjectFetchedThisTick > 0) {
     for (const sub of subscribers) {
       await clearNeedsReconnect(sub.userId, sub.id).catch((err) =>
         logger.warn(

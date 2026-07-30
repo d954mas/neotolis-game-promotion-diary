@@ -85,6 +85,10 @@ export interface CardEventLite {
     } | null;
     thumbnailUrl: string | null;
     mediaType: string | null;
+    /** Outbound destination domain — LINK posts only (mediaType "link"), else null.
+     *  Intrinsic immutable post content (domain only, never the full URL). The link
+     *  card renders it as a muted byline so "title + domain" reads at a glance. */
+    linkDomain?: string | null;
     /** ISO timestamp the post was detected deleted-on-Reddit, else null. The feed card
      *  renders a notice off this — without it a deleted post looked like any other in
      *  the feed and the user had to open the detail view to find out. */

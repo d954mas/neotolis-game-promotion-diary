@@ -78,35 +78,55 @@
     currentUserName?: string;
   } = $props();
 
-  // Subreddit slug / handle from the FK source-of-truth (data_sources via `source`
-  // prop), falling back to the r/<sub> slug the URL carries (redditSubredditLabel
-  // reads event metadata only as the URL-intrinsic, rename-proof last resort).
-  //
-  // The stored displayName is the BARE slug/handle ("gamedev", "d954mas") — Reddit's
-  // canonicalizeOnCreate strips the sigil. Rendering it raw put "gamedev" next to a
-  // hand-pasted "r/gamedev" from the same community, i.e. two spellings of one place
-  // in a single column. Re-apply the sigil from the SOURCE KIND, and never
-  // double-prefix a value that already carries one.
+  // WHERE the post lives is ALWAYS the top .src line (12-06 UAT decision): the
+  // subreddit is a reddit post's primary identity regardless of which source
+  // imported it, so the r/<sub> ↔ u/<author> pair never swaps places between an
+  // account-sourced and a subreddit-sourced card. Resolution order:
+  //   1. the post's own cache row (enrichment subredditSlug — walk-written), with
+  //      the u_<name> pseudo-subreddit rendered u/<name> the way Reddit does;
+  //   2. the URL-intrinsic metadata slug (redditSubredditLabel — rename-proof, the
+  //      one sanctioned denormalization);
+  //   3. subreddit unknown (bare /comments/<id> or redd.it paste) — the registered
+  //      source's live name with the kind sigil re-applied. The stored displayName
+  //      is the BARE slug/handle ("gamedev") — never double-prefix one that
+  //      already carries a sigil.
   const sourceLabel = $derived.by((): string => {
+    const slug = event.redditEnrichment?.subredditSlug ?? null;
+    if (slug !== null && slug !== "") {
+      return slug.startsWith("u_") ? `u/${slug.slice(2)}` : `r/${slug}`;
+    }
+    const fromUrl = redditSubredditLabel(event.metadata);
+    if (fromUrl !== "") return fromUrl;
     const raw = source?.channelTitle ?? source?.displayName ?? null;
-    if (raw === null || raw === "") return redditSubredditLabel(event.metadata);
+    if (raw === null || raw === "") return "";
     if (/^[ru]\//i.test(raw)) return raw;
     if (source?.kind === "reddit_account") return `u/${raw}`;
     if (source?.kind === "reddit_subreddit") return `r/${raw}`;
     return raw;
   });
 
-  // Which community the post landed in. For a SUBREDDIT source that is the label
-  // above, so it would be pure repetition; for an ACCOUNT source the label is the
-  // handle, and without this line a dev tracking their own posts cannot tell whether
-  // one went to r/gamedev or r/IndieDev. The slug is intrinsic and rename-proof (the
-  // one sanctioned denormalization), read from the post's own cache row.
+  // WHO wrote it + (for LINK posts) where it points — always UNDER the community
+  // line (the fixed "where → who → destination" order, 12-06 UAT). The author part:
+  // a subreddit feed / foreign paste carries OTHER people's posts, and without it
+  // the card showed only r/<sub> — the author was invisible. Rendered from the
+  // event's own author_handle snapshot (the source-less-paste pattern
+  // resolveSourceLabel already blesses; the deletion purge scrubs it to null),
+  // skipped only when it would repeat the top line (a PROFILE post's src is
+  // already u/<name>). The domain part (D-06 adaptive link card — "title +
+  // domain"): the outbound destination host is IMMUTABLE post content, rendered as
+  // muted TEXT only (domain, never the full URL — no href surface).
   const bylineLabel = $derived.by((): string | null => {
-    if (source?.kind === "reddit_subreddit") return null;
-    const slug = event.redditEnrichment?.subredditSlug ?? null;
-    if (slug === null || slug === "") return null;
-    const label = `r/${slug}`;
-    return label === sourceLabel ? null : label;
+    const parts: string[] = [];
+    const author = event.authorHandle ?? null;
+    if (author !== null && author !== "") {
+      const label = `u/${author}`;
+      if (label.toLowerCase() !== sourceLabel.toLowerCase()) parts.push(label);
+    }
+    const linkDomain = event.redditEnrichment?.linkDomain ?? null;
+    if (event.redditEnrichment?.mediaType === "link" && linkDomain !== null && linkDomain !== "") {
+      parts.push(linkDomain);
+    }
+    return parts.length > 0 ? parts.join(" · ") : null;
   });
 
   // Deleted-on-Reddit notice. The enrichment has always carried this and the event

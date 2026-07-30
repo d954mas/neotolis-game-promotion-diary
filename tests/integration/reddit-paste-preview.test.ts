@@ -16,10 +16,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { NormalizedSinglePost } from "../../src/lib/sources/social-provider.js";
+// type-only import — erased at runtime, so the provider module (which reads env at
+// load) is never actually imported into the test process.
+import type { RedditSinglePost } from "../../src/lib/sources/reddit/server/provider/scrapecreators-reddit.js";
 import type { DailyUserRequestAccounting } from "../../src/lib/server/daily-user-quota.js";
 
 interface ScriptedSinglePost {
-  next: NormalizedSinglePost | null;
+  next: RedditSinglePost | null;
   /** When set, fetchPostByUrl THROWS this instead of returning `next`. */
   error: Error | null;
   creditReserved: boolean;
@@ -121,7 +124,7 @@ const resolveCachedExternalId = adapter.resolveCachedExternalId;
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-function singlePost(overrides: Partial<NormalizedSinglePost> = {}): NormalizedSinglePost {
+function singlePost(overrides: Partial<RedditSinglePost> = {}): RedditSinglePost {
   return {
     id: "t3_abc123",
     shortcode: "abc123",
@@ -132,6 +135,8 @@ function singlePost(overrides: Partial<NormalizedSinglePost> = {}): NormalizedSi
     thumbnailUrl: "https://i.redd.it/cover.png",
     ownerId: "t2_owner",
     ownerUsername: "d954mas",
+    permalink: null,
+    subredditSlug: "gamedev",
     ...overrides,
   };
 }
@@ -242,6 +247,61 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     expect(snap).toBeDefined();
     expect(snap!.likeCount).toBe(42);
     expect(snap!.commentCount).toBe(7);
+  });
+
+  it("[12-06-s] pasting a /s/ share link resolves the post + REWRITES the canonical permalink", async () => {
+    const user = await seedUserDirectly({ email: `rdt-preview-share-${uniq()}@t.io` });
+    const resolved = "https://www.reddit.com/r/itchio/comments/share01/my_shared_post/";
+    single.next = singlePost({ id: "t3_share01", shortcode: "share01", permalink: resolved });
+    const shareUrl = "https://www.reddit.com/r/itchio/s/IAnrjbuzIT";
+
+    const result = await fetchEventPreviewMetadata(shareUrl, {
+      userId: user.id,
+      ipAddress: "127.0.0.1",
+    });
+
+    if (result.kind !== "ok") throw new Error(`expected ok, got ${result.kind}`);
+    // The provider was handed the SHARE url VERBATIM (the detail endpoint follows the
+    // redirect server-side); the preview surfaces the RESOLVED canonical so the saved
+    // event stores a parseable slugged post URL, never the opaque share token.
+    expect(single.calls).toHaveLength(1);
+    expect(single.calls[0]!.url).toBe(shareUrl);
+    expect(result.externalId).toBe("t3_share01");
+    expect(result.canonicalUrl).toBe(resolved);
+
+    // The cache anchors on the RESOLVED permalink, never the share URL — so the
+    // create boundary re-derives the id from the rewritten event URL (#70).
+    const [cached] = await db
+      .select()
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, "t3_share01"));
+    expect(cached).toBeDefined();
+    expect(cached!.permalink).toBe(resolved);
+    expect(await resolveCachedExternalId(resolved)).toBe("t3_share01");
+  });
+
+  it("[12-06-s] a DIRECT permalink paste does NOT rewrite the canonical (no canonicalUrl override)", async () => {
+    const user = await seedUserDirectly({ email: `rdt-preview-noshare-${uniq()}@t.io` });
+    single.next = singlePost({
+      id: "t3_direct1",
+      shortcode: "direct1",
+      permalink: "https://www.reddit.com/r/gamedev/comments/direct1/provider_slug/",
+    });
+    const pasted = "https://www.reddit.com/r/gamedev/comments/direct1/user_slug/";
+
+    const result = await fetchEventPreviewMetadata(pasted, {
+      userId: user.id,
+      ipAddress: "127.0.0.1",
+    });
+
+    if (result.kind !== "ok") throw new Error(`expected ok, got ${result.kind}`);
+    // The pasted canonical stays authoritative — enrichFromUrl falls back to it.
+    expect(result.canonicalUrl).toBeUndefined();
+    const [cached] = await db
+      .select()
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, "t3_direct1"));
+    expect(cached!.permalink).toBe(pasted);
   });
 
   it("[review-P2] the preview persists the provider's media_type (image card renders before the walk)", async () => {
@@ -499,9 +559,10 @@ describe("reddit paste preview — HTTP contract (POST /api/events/preview-url)"
     expect(body.authorName).toBe("d954mas");
     expect(body.authorUrl).toBe("https://www.reddit.com/user/d954mas");
     expect(body.thumbnailUrl).toBe("https://i.redd.it/cover.png");
-    // The canonical permalink drops the human-readable title slug (parseIngestUrl); the
-    // form adopts this value, so the saved event stores the clean link.
-    expect(body.canonicalUrl).toBe("https://www.reddit.com/r/gamedev/comments/http01/");
+    // The canonical permalink PRESERVES the title slug (12-06 UAT: the detail
+    // endpoint returns a degraded post for slug-less URLs, so the slug is
+    // load-bearing for the fetch); the form adopts this value.
+    expect(body.canonicalUrl).toBe("https://www.reddit.com/r/gamedev/comments/http01/my_devlog/");
     // The form dates the event from this — a null would silently stamp "today" on a
     // month-old post.
     expect(body.occurredAt).toBe("2026-06-01T12:00:00.000Z");

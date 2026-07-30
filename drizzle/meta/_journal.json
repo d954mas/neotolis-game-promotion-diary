@@ -533,6 +533,13 @@
       "when": 1785170516730,
       "tag": "0075_reddit_legacy_refresh_queue_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1785265321088,
+      "tag": "0076_reddit_post_link_domain",
+      "breakpoints": true
     }
   ]
 }

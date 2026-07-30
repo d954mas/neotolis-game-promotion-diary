@@ -394,6 +394,12 @@ export type EventPreviewMetadata =
       // Adapters whose URL-parsed externalId already matches the cache key (e.g.
       // YouTube's videoId) leave this undefined and the caller keeps the parsed id.
       externalId?: string;
+      // The RESOLVED canonical permalink when the PASTED URL was an indirection the
+      // adapter had to resolve upstream (Reddit /s/ share links — the post id is not
+      // in the pasted URL, only an opaque redirect token). The caller adopts it as
+      // EnrichmentResult.canonicalUrl so the saved event stores a parseable post URL.
+      // Absent when the pasted canonical is already authoritative.
+      canonicalUrl?: string;
     }
   | { kind: "private" }
   | { kind: "unavailable" }

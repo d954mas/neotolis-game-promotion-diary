@@ -69,6 +69,10 @@ export interface WriteSnapshotArgs {
   /** reddit_posts.media_type — the richer Reddit FORM ("self"|"link"|"image"|
    *  "gallery"), derived by the Plan 03 normalizer. */
   mediaType?: string | null;
+  /** Outbound destination domain (reddit_posts.link_domain) — LINK posts only.
+   *  Intrinsic immutable post content (domain only, never the full URL).
+   *  COALESCE-preserved on null, same rule as the other snippet fields. */
+  linkDomain?: string | null;
   /** The post title (reddit_posts.title). */
   title?: string | null;
   /** The self-post body excerpt (reddit_posts.caption — null for link/image posts). */
@@ -134,6 +138,7 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         postId: args.postId,
         subredditSlug: args.subredditSlug ?? null,
         mediaType: args.mediaType ?? null,
+        linkDomain: args.linkDomain ?? null,
         title: args.title ?? null,
         caption: args.caption ?? null,
         permalink: args.permalink ?? null,
@@ -153,6 +158,7 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         set: {
           subredditSlug: sql`COALESCE(${args.subredditSlug ?? null}, ${redditPosts.subredditSlug})`,
           mediaType: sql`COALESCE(${args.mediaType ?? null}, ${redditPosts.mediaType})`,
+          linkDomain: sql`COALESCE(${args.linkDomain ?? null}, ${redditPosts.linkDomain})`,
           title: sql`COALESCE(${args.title ?? null}, ${redditPosts.title})`,
           caption: sql`COALESCE(${args.caption ?? null}, ${redditPosts.caption})`,
           permalink: sql`COALESCE(${args.permalink ?? null}, ${redditPosts.permalink})`,

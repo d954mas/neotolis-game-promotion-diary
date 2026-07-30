@@ -31,6 +31,8 @@ interface RedditEventLite {
     } | null;
     thumbnailUrl: string | null;
     mediaType: string | null;
+    /** Outbound destination domain — LINK posts only (see RedditEnrichment). */
+    linkDomain?: string | null;
   };
 }
 
@@ -56,7 +58,12 @@ export function toCardProps(event: RedditEventLite): CardProps {
     // Null for a self/link post (no image) → the card renders text-only (adaptive).
     thumbnail: event.redditEnrichment?.thumbnailUrl ?? null,
     title: event.title,
-    subtitle: null,
+    // D-06 link card = "title + domain": the outbound destination host (intrinsic
+    // immutable post content, domain only) rides as the muted subtitle.
+    subtitle:
+      event.redditEnrichment?.mediaType === "link"
+        ? (event.redditEnrichment?.linkDomain ?? null)
+        : null,
     badge: null,
     metrics,
     href: `/events/${event.id}`,

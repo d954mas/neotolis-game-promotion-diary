@@ -58,13 +58,23 @@
   // telegram_channel (older Telegram posts also import as a current snapshot;
   // per-post view history only accrues once tracking begins).
   //
-  // The POST-CAP note renders for BOTH too: IG caps the imported posts per
-  // window via SOCIAL_BACKFILL_MAX_POSTS, and Telegram has its OWN cap
-  // (TELEGRAM_BACKFILL_MAX_POSTS, default 100) the resumable ?before walker
-  // stops at (Plan 04 capReached / collected >= maxPosts). Each consumer passes
-  // the kind-appropriate cap as `postCap`, so the "up to N posts" note is honest
-  // for both — no false "no cap" claim for telegram_channel.
-  const isSocialSource = $derived(kind === "instagram_account" || kind === "telegram_channel");
+  // The POST-CAP note renders for every CAPPED kind: the paid walkers
+  // (IG / TikTok / Twitter / Reddit) stop at SOCIAL_BACKFILL_MAX_POSTS and
+  // Telegram has its OWN cap (TELEGRAM_BACKFILL_MAX_POSTS) its resumable
+  // ?before walker stops at. Each consumer passes the kind-appropriate cap as
+  // `postCap`, so the "up to N posts" note is honest everywhere it applies —
+  // and YouTube (no post cap, free API) correctly renders none. "reddit" is
+  // the Add-Source synthetic ui-kind; the two real kinds cover PATCH surfaces.
+  const CAPPED_KINDS = new Set([
+    "instagram_account",
+    "telegram_channel",
+    "tiktok_account",
+    "twitter_account",
+    "reddit",
+    "reddit_account",
+    "reddit_subreddit",
+  ]);
+  const isSocialSource = $derived(kind !== undefined && CAPPED_KINDS.has(kind));
   const showPostCapNote = $derived(
     isSocialSource &&
       postCap !== undefined &&

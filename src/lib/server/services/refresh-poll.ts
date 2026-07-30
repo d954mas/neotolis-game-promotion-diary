@@ -93,16 +93,14 @@ export async function requestRefreshPoll(
 
   let quotaPlatform = sourceKindForPoll;
   if (event.kind === "reddit_post" && event.sourceId !== null) {
+    // Deliberately NO deletedAt filter: a soft-deleted (tombstoned) source still
+    // owns the truth about the event's quota keyspace — kind is immutable, so
+    // reading it from a tombstone is safe. Only a hard delete (FK nulls the
+    // event's sourceId) legitimately falls back to reddit_account.
     const [source] = await db
       .select({ kind: dataSources.kind })
       .from(dataSources)
-      .where(
-        and(
-          eq(dataSources.id, event.sourceId),
-          eq(dataSources.userId, userId),
-          isNull(dataSources.deletedAt),
-        ),
-      )
+      .where(and(eq(dataSources.id, event.sourceId), eq(dataSources.userId, userId)))
       .limit(1);
     if (source?.kind === "reddit_account" || source?.kind === "reddit_subreddit") {
       quotaPlatform = source.kind;

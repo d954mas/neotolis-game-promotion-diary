@@ -317,6 +317,7 @@ describe("migration 0073 — legacy reddit raze (full destructive reset)", () =>
           permalink: `/user/${legacyHandle}/comments/${legacyBareId}/legacy/`,
           title: "legacy import",
           selftext: "legacy body",
+          linkDomain: null,
           subredditSlug: null,
           author: legacyHandle,
           authorFullname: "t2_legacy",

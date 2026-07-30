@@ -120,6 +120,28 @@ function imagePost(shortId: string, daysAgo: number, author: string, imgUrl: str
   };
 }
 
+// A link post: external destination url + empty selftext → mediaType "link" →
+// reddit_posts.link_domain persisted (the subreddit endpoint carries `domain`;
+// the author-search shape omits it and the normalizer derives the url hostname).
+function linkPost(shortId: string, daysAgo: number, author: string) {
+  return {
+    name: `t3_${shortId}`,
+    id: shortId,
+    author,
+    author_fullname: `t2_${author}`,
+    subreddit: "gamedev",
+    title: `Trailer ${shortId}`,
+    selftext: "",
+    score: 21,
+    num_comments: 6,
+    post_hint: "link",
+    url: "https://www.youtube.com/watch?v=abc123",
+    domain: "youtube.com",
+    created_utc: Math.floor((Date.now() - daysAgo * DAY) / 1000),
+    permalink: `/r/gamedev/comments/${shortId}/trailer/`,
+  };
+}
+
 async function seedAccountSource(handle: string): Promise<{ userId: string; sourceId: string }> {
   const u = await seedUserDirectly({ email: `rdt-viz-${uniq()}@t.io` });
   const [row] = await db
@@ -208,6 +230,47 @@ describe("reddit feed inbox + metric series (VIZ-05 + PLAT-04)", () => {
     expect(imgDto.redditEnrichment?.stats?.commentCount).toBe(12);
     expect(imgDto.redditEnrichment?.mediaType).toBe("image");
     expect(imgDto.redditEnrichment?.thumbnailUrl).toBe(imgUrl);
+  });
+
+  it("[12-06] a LINK post persists its outbound domain and the enrichment projects it (the title + domain link card)", async () => {
+    const handle = `viz_${uniq()}`;
+    const linkId = `l${uniq()}`;
+    const selfId = `s${uniq()}`;
+    const { userId } = await seedAccountSource(handle);
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [linkPost(linkId, 1, handle), selfPost(selfId, 2, handle)],
+        after: null,
+      }),
+    ];
+    await runBackfill(userId, handle);
+
+    // The walker persisted the domain on the public-data cache row (domain only —
+    // never the full destination URL).
+    const [row] = await db
+      .select()
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, `t3_${linkId}`))
+      .limit(1);
+    expect(row!.mediaType).toBe("link");
+    expect(row!.linkDomain).toBe("youtube.com");
+
+    const evs = await db
+      .select()
+      .from(events)
+      .where(inArray(events.externalId, [`t3_${linkId}`, `t3_${selfId}`]));
+    const dtos = await mapEventsToDtos(userId, evs);
+    await redditEnrichFeedDtos(userId, dtos);
+    type LinkDto = {
+      externalId: string | null;
+      redditEnrichment?: { mediaType: string | null; linkDomain: string | null };
+    };
+    const byId = new Map((dtos as unknown as LinkDto[]).map((d) => [d.externalId as string, d]));
+    // The link post rides "title + domain"; a self post carries null (form-gated).
+    expect(byId.get(`t3_${linkId}`)!.redditEnrichment?.mediaType).toBe("link");
+    expect(byId.get(`t3_${linkId}`)!.redditEnrichment?.linkDomain).toBe("youtube.com");
+    expect(byId.get(`t3_${selfId}`)!.redditEnrichment?.linkDomain).toBeNull();
   });
 
   it("[12-06] attach an imported reddit_post to a game → the metric series renders likes + comments on /games/[id] (VIZ-05/PLAT-04)", async () => {

@@ -59,6 +59,11 @@ export interface RedditEnrichment {
    *  Drives the per-form card affordance + the cross-source media-type filter. NULL
    *  until resolved. */
   mediaType: string | null;
+  /** Outbound destination domain from reddit_posts.link_domain — LINK posts only,
+   *  null for every other form. Intrinsic immutable post content (the link target
+   *  cannot be edited on Reddit), NOT a renameable denorm. Domain only, never the
+   *  full URL — the card renders it as muted text, no href surface. */
+  linkDomain: string | null;
   /** ISO timestamp when the Variant-A walk / write-path belt first detected this post
    *  as deleted-on-Reddit (reddit_posts.deletion_detected_at), else null. The event
    *  detail surface (EventDetailContent) renders a "Deleted on Reddit" notice off this;
@@ -122,6 +127,7 @@ export async function redditEnrichFeedDtos(
           postId: redditPosts.postId,
           thumbnailUrl: redditPosts.thumbnailUrl,
           mediaType: redditPosts.mediaType,
+          linkDomain: redditPosts.linkDomain,
           subredditSlug: redditPosts.subredditSlug,
           deletionDetectedAt: redditPosts.deletionDetectedAt,
         })
@@ -165,6 +171,7 @@ export async function redditEnrichFeedDtos(
       {
         thumbnailUrl: string | null;
         mediaType: string | null;
+        linkDomain: string | null;
         subredditSlug: string | null;
         deletionDetectedAt: Date | null;
       }
@@ -173,6 +180,7 @@ export async function redditEnrichFeedDtos(
       postMeta.set(r.postId, {
         thumbnailUrl: r.thumbnailUrl,
         mediaType: r.mediaType,
+        linkDomain: r.linkDomain,
         subredditSlug: r.subredditSlug,
         deletionDetectedAt: r.deletionDetectedAt,
       });
@@ -229,6 +237,7 @@ export async function redditEnrichFeedDtos(
         stats: latest.get(eid) ?? null,
         thumbnailUrl: meta?.thumbnailUrl ?? null,
         mediaType: meta?.mediaType ?? null,
+        linkDomain: meta?.linkDomain ?? null,
         deletionDetectedAt: meta?.deletionDetectedAt ? meta.deletionDetectedAt.toISOString() : null,
         subredditSlug: meta?.subredditSlug ?? null,
       };

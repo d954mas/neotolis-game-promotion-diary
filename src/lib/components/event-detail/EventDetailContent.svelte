@@ -293,12 +293,20 @@
   // as a zoomed-in version of the card the user just clicked.
   // - youtube_video: always reserves a 16:9 slot (KindIcon fills the
   //   empty state)
-  // - reddit_post / twitter_post / telegram_post: only when image-like
-  //   URL is derivable
+  // - reddit_post: image/gallery posts reserve the slot by FORM, matching
+  //   the feed card (the hotlinked thumbnail is frequently null); self/link
+  //   posts only when a thumbnail is derivable
+  // - twitter_post / telegram_post: only when image-like URL is derivable
   // - other kinds: no thumb (showThumb=false)
   const mediaShape = $derived(deriveIsMediaShape(event.kind as CardEventLite["kind"]));
+  const redditMediaPost = $derived.by((): boolean => {
+    const re = (event as { redditEnrichment?: { mediaType?: string | null } }).redditEnrichment;
+    return (
+      event.kind === "reddit_post" && (re?.mediaType === "image" || re?.mediaType === "gallery")
+    );
+  });
   const thumbnailUrl = $derived(deriveThumbnailUrl(event as unknown as CardEventLite));
-  const showDetailThumb = $derived(mediaShape || thumbnailUrl !== null);
+  const showDetailThumb = $derived(mediaShape || redditMediaPost || thumbnailUrl !== null);
 
   // Media-type pill (short / carousel / video) over the detail thumbnail —
   // SAME shared pill the feed card uses (deriveMediaTypeOverlay + MediaTypePill),

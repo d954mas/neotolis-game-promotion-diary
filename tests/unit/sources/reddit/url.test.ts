@@ -3,7 +3,12 @@
 // host can NEVER produce a reddit_post / reddit source (T-12-03-T).
 
 import { describe, expect, it } from "vitest";
-import { redditParsePostUrl, redditParseSourceUrl } from "$lib/sources/reddit/server/url.js";
+import {
+  redditBuildPermalink,
+  redditParsePostUrl,
+  redditParseShareUrl,
+  redditParseSourceUrl,
+} from "$lib/sources/reddit/server/url.js";
 
 describe("reddit url parsing (Phase 12 rebuild)", () => {
   it("[12-03] redditParseSourceUrl: reddit.com/user/<u>, /u/<u>, old./m. hosts, raw u/<u> → reddit_account (lowercase)", () => {
@@ -103,5 +108,47 @@ describe("reddit url parsing (Phase 12 rebuild)", () => {
     expect(redditParsePostUrl("https://example.com/r/gamedev/comments/1ubhppn/title")).toBeNull();
     expect(redditParsePostUrl("https://reddit.com.evil.com/r/x/comments/y")).toBeNull();
     expect(redditParsePostUrl("garbage")).toBeNull();
+  });
+
+  it("[12-06-s] redditParseShareUrl: /r/<sub>/s/<token> → subreddit hint + normalized share URL (token case preserved)", () => {
+    const parsed = redditParseShareUrl(
+      "https://www.reddit.com/r/itchio/s/IAnrjbuzIT?utm_source=share",
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.subreddit).toBe("itchio");
+    // Query junk stripped; the token keeps its case (a case-sensitive redirect key).
+    expect(parsed!.canonicalUrl).toBe("https://www.reddit.com/r/itchio/s/IAnrjbuzIT");
+
+    // Profile share → the u_<name> pseudo-subreddit; the pasted root spelling (`u`)
+    // survives in the canonical share URL (handed verbatim to Reddit).
+    const profile = redditParseShareUrl("https://reddit.com/u/D954mas/s/AbCdEf123/");
+    expect(profile).not.toBeNull();
+    expect(profile!.subreddit).toBe("u_d954mas");
+    expect(profile!.canonicalUrl).toBe("https://www.reddit.com/u/D954mas/s/AbCdEf123");
+
+    // Host-check FIRST; a post permalink / source URL is NOT a share link.
+    expect(redditParseShareUrl("https://example.com/r/itchio/s/IAnrjbuzIT")).toBeNull();
+    expect(redditParseShareUrl("https://www.reddit.com/r/itchio/comments/abc/x/")).toBeNull();
+    expect(redditParseShareUrl("https://www.reddit.com/r/itchio")).toBeNull();
+    expect(redditParseShareUrl("garbage")).toBeNull();
+  });
+
+  it("[12-06-s] redditParseShareUrl does NOT collide with the source parser (share URL is never a source)", () => {
+    expect(redditParseSourceUrl("https://www.reddit.com/r/itchio/s/IAnrjbuzIT")).toBeNull();
+    expect(redditParseSourceUrl("https://www.reddit.com/u/d954mas/s/AbCdEf123")).toBeNull();
+  });
+
+  it("[12-06-s] redditBuildPermalink: slugged permalink from resolved parts (u_ → /user/, unsluggable title → 'post')", () => {
+    expect(redditBuildPermalink("itchio", "1v93m2q", "My devlog: week 10!")).toBe(
+      "https://www.reddit.com/r/itchio/comments/1v93m2q/my_devlog_week_10/",
+    );
+    // Profile pseudo-subreddit maps back to the /user/ root.
+    expect(redditBuildPermalink("u_d954mas", "1sw3kot", null)).toBe(
+      "https://www.reddit.com/user/d954mas/comments/1sw3kot/post/",
+    );
+    // The slug is NEVER empty — the detail endpoint degrades on slug-less URLs.
+    expect(redditBuildPermalink("gamedev", "abc123", "…—!!")).toBe(
+      "https://www.reddit.com/r/gamedev/comments/abc123/post/",
+    );
   });
 });

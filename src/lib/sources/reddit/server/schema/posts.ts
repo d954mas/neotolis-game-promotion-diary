@@ -45,6 +45,11 @@ export const redditPosts = pgTable(
     // ABSENT per spike deviation #2). events.kind stays 'reddit_post' for all
     // forms; the per-post form lives here.
     mediaType: text("media_type"),
+    // Outbound destination domain — LINK posts only (null for every other form).
+    // The link target is IMMUTABLE post content (Reddit forbids editing a link
+    // post's url), so its host is intrinsic — NOT a renameable denorm. Domain
+    // only, never the full URL (no href-sanitization surface on the card).
+    linkDomain: text("link_domain"),
     // The post title.
     title: text("title"),
     // The self-post body excerpt (null for link/image posts).

@@ -8,7 +8,7 @@
 //
 // Requirements: PLAT-04 / behavior (A).
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import authorFixture from "../fixtures/reddit/author-search-page.json";
 import type { RedditFeedPage } from "../../src/lib/sources/reddit/server/normalize.js";
@@ -844,6 +844,34 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     await walk();
     expect(await readFlag(), "an empty rehab pass is not recovery evidence").toBe(true);
 
+    // A fuzzy page carrying ONLY strangers' posts is off-subject noise, not subject
+    // evidence — the flag must survive it too (round-4 review: the raw fetched
+    // count used to clear here).
+    const strangerId = `st${Math.random().toString(36).slice(2, 8)}`;
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: `t3_${strangerId}`,
+            id: strangerId,
+            author: "somebody_else_entirely",
+            author_fullname: "t2_stranger",
+            subreddit: "gamedev",
+            title: "Not by the subject",
+            selftext: "body",
+            score: 1,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - 2 * DAY) / 1000),
+            permalink: `/r/gamedev/comments/${strangerId}/x/`,
+          },
+        ],
+        after: null,
+      }),
+    ];
+    await walk();
+    expect(await readFlag(), "off-subject fuzz is not recovery evidence").toBe(true);
+
     // A page WITH posts is direct evidence the subject exists — the flag clears.
     provider.pages = [
       normalizeRedditFeed({
@@ -868,6 +896,122 @@ describe("reddit author-walk completeness (Phase 12, spike-frozen)", () => {
     ];
     await walk();
     expect(await readFlag(), "a sighted post clears the flag").toBe(false);
+  });
+
+  it("[review-P2] a typo'd NEW handle whose fuzzy page carries only strangers' posts still flags needs_reconnect", async () => {
+    const handle = `typo_${Math.random().toString(36).slice(2, 7)}`;
+    const sourceId = await seedAccountSource(handle);
+    const strangerId = `sx${Math.random().toString(36).slice(2, 8)}`;
+    // Never polled; the fuzzy search answers the typo with somebody else's post.
+    provider.pages = [
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: `t3_${strangerId}`,
+            id: strangerId,
+            author: "somebody_else_entirely",
+            author_fullname: "t2_stranger",
+            subreddit: "gamedev",
+            title: "Fuzzy match, wrong author",
+            selftext: "body",
+            score: 1,
+            num_comments: 0,
+            created_utc: Math.floor((Date.now() - 2 * DAY) / 1000),
+            permalink: `/r/gamedev/comments/${strangerId}/x/`,
+          },
+        ],
+        after: null,
+      }),
+    ];
+
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 30 * DAY).toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const [src] = await db
+      .select({ needsReconnect: dataSources.needsReconnect })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId));
+    expect(
+      src!.needsReconnect,
+      "strangers' posts must not pass as proof the typo'd subject exists",
+    ).toBe(true);
+  });
+
+  it("[12-06 UAT] an unknown-form post queues ONE cron-funded media-form enrichment row (idempotent)", async () => {
+    const { adapterRefreshQueue } = await import("../../src/lib/server/db/schema/index.js");
+    const handle = `enrich_${Math.random().toString(36).slice(2, 7)}`;
+    await seedAccountSource(handle);
+    const catId = `cat${Math.random().toString(36).slice(2, 7)}`;
+    // The evidence-free author-search shape: no post_hint/domain, url = the
+    // comments permalink, NO selftext — an image post indistinguishable from text.
+    const evidenceFreePage = () =>
+      normalizeRedditFeed({
+        success: true,
+        posts: [
+          {
+            name: `t3_${catId}`,
+            id: catId,
+            author: handle,
+            author_fullname: `t2_${handle}`,
+            subreddit: "Catmemes",
+            title: "She chose her cape",
+            score: 184,
+            num_comments: 11,
+            created_utc: Math.floor((Date.now() - 2 * DAY) / 1000),
+            permalink: `/r/Catmemes/comments/${catId}/x/`,
+            url: `https://www.reddit.com/r/Catmemes/comments/${catId}/x/`,
+          },
+        ],
+        after: null,
+      });
+    const readRows = () =>
+      db
+        .select({ id: adapterRefreshQueue.id, userId: adapterRefreshQueue.userId })
+        .from(adapterRefreshQueue)
+        .where(
+          and(
+            eq(adapterRefreshQueue.queueName, "service_post"),
+            sql`${adapterRefreshQueue.payload}->>'post_id' = ${`t3_${catId}`}`,
+          ),
+        );
+
+    provider.pages = [evidenceFreePage()];
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 14 * DAY).toISOString(),
+        flow: "initial",
+      },
+    });
+
+    const [cached] = await db
+      .select({ mediaType: redditPosts.mediaType })
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, `t3_${catId}`));
+    expect(cached!.mediaType, "no media evidence → form cached as unknown").toBeNull();
+    const rows = await readRows();
+    expect(rows, "one enrichment row queued").toHaveLength(1);
+    expect(rows[0]!.userId, "cron-funded — no user pays").toBeNull();
+
+    // A second pass over the same post must NOT queue a duplicate.
+    provider.pages = [evidenceFreePage()];
+    await handleBackfillAccount({
+      data: {
+        kind: "reddit_account",
+        channelKey: handle,
+        depthBoundIso: new Date(Date.now() - 14 * DAY).toISOString(),
+        flow: "auto_passive",
+      },
+    });
+    expect(await readRows(), "skip-if-pending keeps it one row").toHaveLength(1);
   });
 
   it("[review-P2] a parse-lossy pass leaves an ARCHIVE intent pending; a lossless pass coalesces it", async () => {

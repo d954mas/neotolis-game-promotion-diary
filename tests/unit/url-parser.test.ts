@@ -98,12 +98,23 @@ describe("URL parser canonicalization", () => {
     // subreddit / username at the parser boundary so both the metadata
     // hint AND the canonicalUrl come out in lowercase form. Mixed-case
     // input ("IndieDev") normalizes to "indiedev".
+    // The title SLUG is PRESERVED in the canonical form (12-06 UAT): the
+    // ScrapeCreators detail endpoint returns a degraded post for slug-less
+    // URLs, so stripping it broke the paste preview with a false not-found.
     const r1 = parseIngestUrl("https://www.reddit.com/r/IndieDev/comments/abc/foo/");
     expect(r1.kind).toBe("reddit_post");
     if (r1.kind === "reddit_post") {
       expect(r1.externalId).toBe("abc");
-      expect(r1.canonicalUrl).toBe("https://www.reddit.com/r/indiedev/comments/abc/");
-      expect(r1.metadata).toEqual({ subreddit: "indiedev" });
+      expect(r1.canonicalUrl).toBe("https://www.reddit.com/r/indiedev/comments/abc/foo/");
+      expect(r1.metadata).toEqual({ subreddit: "indiedev", slug: "foo" });
+    }
+
+    // A slug-less paste still canonicalizes to the slug-less form.
+    const r1b = parseIngestUrl("https://www.reddit.com/r/IndieDev/comments/abc");
+    expect(r1b.kind).toBe("reddit_post");
+    if (r1b.kind === "reddit_post") {
+      expect(r1b.canonicalUrl).toBe("https://www.reddit.com/r/indiedev/comments/abc/");
+      expect(r1b.metadata).toEqual({ subreddit: "indiedev", slug: null });
     }
 
     const r2 = parseIngestUrl("https://redd.it/abc");
@@ -114,14 +125,26 @@ describe("URL parser canonicalization", () => {
       // canonical fallback is the redd.it form itself until the worker
       // resolves the subreddit on first fetch.
       expect(r2.canonicalUrl).toBe("https://redd.it/abc");
-      expect(r2.metadata).toEqual({ subreddit: null });
+      expect(r2.metadata).toEqual({ subreddit: null, slug: null });
     }
 
     const r3 = parseIngestUrl("https://old.reddit.com/r/IndieDev/comments/xyz/foo");
     expect(r3.kind).toBe("reddit_post");
     if (r3.kind === "reddit_post") {
       expect(r3.externalId).toBe("xyz");
-      expect(r3.metadata).toEqual({ subreddit: "indiedev" });
+      expect(r3.metadata).toEqual({ subreddit: "indiedev", slug: "foo" });
+    }
+
+    // /s/ SHARE link (12-06 UAT): the path carries an opaque redirect token, not
+    // the post id — recognized as reddit_post with externalId null; the preview
+    // path resolves the identity via the provider detail endpoint and REWRITES
+    // canonicalUrl to the full permalink before the event is saved.
+    const s = parseIngestUrl("https://www.reddit.com/r/itchio/s/IAnrjbuzIT?utm_source=share");
+    expect(s.kind).toBe("reddit_post");
+    if (s.kind === "reddit_post") {
+      expect(s.externalId).toBeNull();
+      expect(s.canonicalUrl).toBe("https://www.reddit.com/r/itchio/s/IAnrjbuzIT");
+      expect(s.metadata).toEqual({ subreddit: "itchio", slug: null });
     }
   });
 

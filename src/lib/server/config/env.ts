@@ -208,9 +208,12 @@ const RawSchema = z.object({
   LIMIT_SOCIAL_REQUESTS_PER_DAY: z.coerce.number().int().positive().default(50),
 
   // Backfill post-count cap (D-10): the cost-meaningful internal ceiling.
-  // Default 48 = 4 pages of 12. The walker stops at this OR the date window,
-  // whichever first — cost is independent of archive size (BACK-01).
-  SOCIAL_BACKFILL_MAX_POSTS: z.coerce.number().int().positive().default(48),
+  // Default 1000 ≈ the deepest listing Reddit exposes (~83 pages of 12, well
+  // under a dollar at ScrapeCreators rates). The walker stops at this OR the
+  // date window, whichever first; deep archives top up ACROSS resumed passes
+  // (per-invocation page caps + persisted cursors), so the real spend guards
+  // are the daily budget caps + the per-user request quota, not this ceiling.
+  SOCIAL_BACKFILL_MAX_POSTS: z.coerce.number().int().positive().default(1000),
 
   // Default backfill date window in days (D-10). The user may self-expand to
   // any window incl. "everything" via the existing BackfillPicker /
@@ -277,10 +280,10 @@ const RawSchema = z.object({
   TELEGRAM_WARM_MAX_FAILURES: z.coerce.number().int().positive().default(5),
   // Telegram backfill post-count cap (B1) — the dedicated ceiling the ?before
   // walker stops at (collected >= this), so a giant channel costs a bounded
-  // number of pages regardless of archive size. Separate from IG's
+  // number of pages regardless of archive size. Separate knob from the paid
   // SOCIAL_BACKFILL_MAX_POSTS: Telegram is a FREE t.me/s scrape, so its depth
-  // is paced (not credit-bounded) and earns its own, deeper default (100 vs 48).
-  TELEGRAM_BACKFILL_MAX_POSTS: z.coerce.number().int().positive().default(100),
+  // is paced (politeness), not credit-bounded.
+  TELEGRAM_BACKFILL_MAX_POSTS: z.coerce.number().int().positive().default(1000),
 
   // TikTok provider selection (Phase 10). Mirrors INSTAGRAM_PROVIDER exactly:
   // empty default => TikTok is NOT configured (the add-source TikTok chip renders

@@ -419,6 +419,49 @@ describe("refresh-poll cooldown service", () => {
     expect(queued).toHaveLength(0);
   });
 
+  it("[review] soft-deleted reddit_subreddit source still resolves the reddit_subreddit quota platform", async () => {
+    // Regression guard: the quota-platform lookup must NOT filter on
+    // dataSources.deletedAt. softDeleteSource only tombstones the row (the
+    // event keeps its sourceId; the FK set-null fires on hard delete only), and
+    // kind is immutable — so a tombstoned reddit_subreddit source still owns
+    // the event's quota keyspace. Re-adding an isNull(deletedAt) predicate
+    // makes the lookup miss and fall back to reddit_account, which this
+    // platform assertion catches.
+    sentJobs.length = 0;
+    const { softDeleteSource } = await import("../../src/lib/server/services/data-sources.js");
+    const u = await seedUserDirectly({ email: `rp-reddit-softdel-${uniq()}@test.local` });
+    const [source] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "reddit_subreddit",
+        handleUrl: "https://www.reddit.com/r/IndieDev",
+        channelId: `indiedev_${uniq()}`,
+        metadata: { slug: "indiedev" },
+      })
+      .returning({ id: dataSources.id });
+    const ev = await insertEvent(u.id, {
+      sourceId: source!.id,
+      kind: "reddit_post",
+      externalId: "abc_softdel",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_softdel/test/",
+    });
+
+    await softDeleteSource(u.id, source!.id, "127.0.0.1");
+
+    const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
+    expect(result.enqueued).toBe(true);
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.poll_refreshed")));
+    const auditMeta = audits.find(
+      (row) => (row.metadata as { event_id?: string }).event_id === ev.id,
+    )?.metadata as { platform?: string } | undefined;
+    expect(auditMeta?.platform).toBe("reddit_subreddit");
+  });
+
   it("reddit_post refresh-poll enforces the shared social per-user cap (429) before the cooldown write", async () => {
     // Phase 12: reddit joined the paid-scraper model — the old bespoke 30/15-min
     // reddit_post_quota_exhausted cap is gone; the load-bearing per-user limit is the

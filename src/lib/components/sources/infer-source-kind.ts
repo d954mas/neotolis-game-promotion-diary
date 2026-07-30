@@ -101,6 +101,22 @@ export function inferSourceKindFromUrl(input: string): InferredSourceKind | null
 }
 
 /**
+ * Which Reddit legend plate the pasted input matches: "u/" (author profile) or
+ * "r/" (subreddit). The legend renders TWO plates for the synthetic "reddit"
+ * kind; without this discriminator the active highlight lit BOTH regardless of
+ * the URL's shape. Pure preview, client-safe — the server parser still decides
+ * the real kind on submit. null when the shape is not recognizable yet (both
+ * plates stay highlighted as "some Reddit link").
+ */
+export function inferRedditPlate(input: string): "u/" | "r/" | null {
+  const lowered = input.trim().toLowerCase();
+  if (lowered.length === 0) return null;
+  if (/(^|\/)(u|user)\/[^/\s]/.test(lowered)) return "u/";
+  if (/(^|\/)r\/[^/\s]/.test(lowered)) return "r/";
+  return null;
+}
+
+/**
  * Normalize a pasted Handle URL into a submittable form for POST /api/sources.
  *
  * The Add-Source surfaces are URL-first and the placeholder advertises

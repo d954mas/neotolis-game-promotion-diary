@@ -23,8 +23,12 @@
 
 import { env } from "$lib/server/config/env.js";
 import { redditFetch } from "../http.js";
-import { normalizeRedditFeed, type RedditFeedPage } from "../normalize.js";
-import { redditParsePostUrl } from "../url.js";
+import {
+  normalizeRedditFeed,
+  normalizeRedditPostDetail,
+  type RedditFeedPage,
+} from "../normalize.js";
+import { redditParsePostUrl, redditParseShareUrl, redditBuildPermalink } from "../url.js";
 import type { DailyUserRequestAccounting } from "$lib/server/daily-user-quota.js";
 import type {
   NormalizedSinglePost,
@@ -37,6 +41,11 @@ import type {
 
 const SEARCH_PATH = "/v1/reddit/search";
 const SUBREDDIT_PATH = "/v1/reddit/subreddit";
+// Single-post detail (12-06 UAT discovery — post-dates the 12-01 spike, whose
+// endpoint list had no by-URL lookup): takes the FULL post URL, 1 credit, and
+// returns the complete post object whose `url` is the TRUE media/destination
+// url — the reliable resolver the page-1 feed lookup never was.
+const POST_COMMENTS_PATH = "/v1/reddit/post/comments";
 
 /** Which native feed a Reddit walk targets. `reddit_account` sources use the
  *  author-search path (D-02); `reddit_subreddit` sources use the native subreddit
@@ -54,12 +63,29 @@ export type RedditPostFetchOptions =
       userAccounting: DailyUserRequestAccounting;
     };
 
+/** NormalizedSinglePost + two Reddit-only fields the by-URL path must carry:
+ *
+ *  `permalink` — the RESOLVED canonical permalink: the provider's own (detail
+ *  response) when present, else REBUILT from the resolved subreddit / id / title.
+ *  The /s/ share-link preview adopts it as the event URL (the pasted share URL
+ *  carries no post id).
+ *
+ *  `subredditSlug` — the community identity as the RESPONSE reports it, which for a
+ *  profile post is the `u_<name>` pseudo-subreddit. The preview persists it so a
+ *  pasted post's cache row carries the same identity a walk would write (the feed
+ *  card reads the community line from this column; a `redd.it` / bare
+ *  `/comments/<id>` paste has no slug anywhere in its URL to fall back on). */
+export type RedditSinglePost = NormalizedSinglePost & {
+  permalink: string | null;
+  subredditSlug: string | null;
+};
+
 export type RedditSocialProvider = Omit<SocialProvider, "fetchPostByUrl"> & {
   fetchPostByUrl(
     platform: SocialPlatform,
     url: string,
     opts: RedditPostFetchOptions,
-  ): Promise<NormalizedSinglePost | null>;
+  ): Promise<RedditSinglePost | null>;
 };
 
 /**
@@ -158,51 +184,69 @@ export const scrapeCreatorsRedditProvider: RedditSocialProvider = {
     platform: SocialPlatform,
     url: string,
     opts: RedditPostFetchOptions,
-  ): Promise<NormalizedSinglePost | null> {
+  ): Promise<RedditSinglePost | null> {
     // Host-check-first parse (T-12-03-T): a non-Reddit URL can never reach the
-    // provider. ScrapeCreators exposes no single-post-by-id endpoint (only
-    // search + subreddit — RESEARCH endpoint list), so the paste-preview resolves
-    // the post from the subreddit feed: fetch the subreddit's newest page and
-    // match the post by its t3_ fullname. Recent posts (the common paste case)
-    // resolve in 1 credit; a cold post absent from page 1 yields null (the
-    // preview falls back to the pasted-URL metadata in Plan 12-06).
-    //
-    // The slug the parser hands over is the FEED identity, which for a
-    // `/user/<name>/comments/<id>` profile post is Reddit's pseudo-subreddit
-    // `u_<name>` (url.ts PROFILE_SUB_PREFIX) — passing the bare `<name>` here asked
-    // for the unrelated r/<name> community and never matched the post.
+    // provider. Resolution rides the /post/comments DETAIL endpoint (12-06 UAT
+    // discovery): 1 credit for the exact post by its full URL — replacing the
+    // old subreddit-page-1 lookup whose bounded miss made Refresh-Now / the
+    // paste preview inconclusive for anything that scrolled off the feed. A null
+    // here now means the post itself is gone/unresolvable, not "not on page 1".
     const parsed = redditParsePostUrl(url);
-    if (parsed === null) return null;
-    const subreddit = (parsed.metadata?.subreddit as string | null | undefined) ?? null;
-    // redd.it short-link: no subreddit in the URL ⇒ no feed to search. The paste
-    // preview rejects this BEFORE the cap gate with an explicit
-    // `reddit_short_link_unsupported` cause (index.ts); this stays as the seam-level
-    // belt for any other caller (e.g. a cached permalink that is somehow a short link).
-    if (subreddit === null) return null;
+    // /s/ SHARE link: the path carries an opaque redirect token instead of the
+    // post id — still a Reddit-host URL, and the detail endpoint follows the
+    // redirect server-side (12-06 UAT probe: /r/itchio/s/… resolved fully).
+    const share = parsed === null ? redditParseShareUrl(url) : null;
+    if (parsed === null && share === null) return null;
+    if (parsed !== null) {
+      // redd.it short-link belt: recognition-only (the preview rejects it BEFORE
+      // the cap gate with reddit_short_link_unsupported — index.ts). Kept until
+      // the detail endpoint's short-link behavior is live-verified.
+      const subreddit = (parsed.metadata?.subreddit as string | null | undefined) ?? null;
+      if (subreddit === null) return null;
+    }
 
-    const page = await fetchRedditFeedPage("subreddit", subreddit, null, opts);
+    const detailUrl = new URL(`${env.SCRAPECREATORS_BASE_URL}${POST_COMMENTS_PATH}`);
+    detailUrl.searchParams.set("url", url);
+    detailUrl.searchParams.set("trim", "true");
+    const resp = await redditFetch(detailUrl, {
+      platform: "reddit",
+      provider: scrapeCreatorsRedditProvider.name,
+      logTag: "reddit.post_detail",
+      ...opts,
+    });
+    const json: unknown = await resp.json();
+    const post = normalizeRedditPostDetail(json);
     void platform;
-    const fullname = `t3_${parsed.externalId}`;
-    const match = page.posts.find((p) => p.id === fullname);
-    if (match === undefined) return null;
-    // `match` is ALREADY a fully-normalized post — project it straight to the single-post
-    // shape. Do NOT re-normalize a stripped synthetic object: that dropped url/is_video/
-    // post_hint/thumbnail, so the preview kind always collapsed to text/link and image
-    // posts lost their thumbnail. The derived kind + thumbnail carry through here.
+    if (post === null) return null;
+    // `post` is ALREADY fully normalized — project it straight to the single-post
+    // shape so the derived kind / thumbnail / form / domain carry through.
     return {
-      id: match.id,
-      shortcode: parsed.externalId,
-      kind: match.kind,
-      publishedAt: match.publishedAt,
-      metrics: match.metrics,
-      caption: match.caption,
-      thumbnailUrl: match.thumbnailUrl,
-      ownerId: match.authorFullname,
-      ownerUsername: match.author,
-      ownerDeleted: match.raw.authorDeleted === true,
-      // Carry the richer Reddit FORM so the paste-preview snapshot persists the real
-      // media_type (image/gallery cards render correctly before the source walk).
-      mediaType: match.mediaType,
+      id: post.id,
+      // A share paste has no URL-intrinsic short id — derive it from the resolved
+      // t3 fullname (identity-belt-verified: name === `t3_${id}` in normalize).
+      shortcode: parsed?.externalId ?? post.id.replace(/^t3_/, ""),
+      kind: post.kind,
+      publishedAt: post.publishedAt,
+      metrics: post.metrics,
+      caption: post.caption,
+      thumbnailUrl: post.thumbnailUrl,
+      ownerId: post.authorFullname,
+      ownerUsername: post.author,
+      ownerDeleted: post.raw.authorDeleted === true,
+      // Carry the richer Reddit FORM so the snapshot persists the real media_type
+      // (image/gallery cards render correctly before/without a source walk).
+      mediaType: post.mediaType,
+      // Same rationale for the link card: persist the outbound domain.
+      linkDomain: post.linkDomain,
+      subredditSlug: post.subredditSlug,
+      // The resolved canonical permalink. The trim=true detail response carries no
+      // `permalink` field (12-06 UAT probe), so the rebuild from resolved parts is
+      // the live path; pickPermalink stays the preferred source as forward-compat.
+      permalink:
+        post.permalink ??
+        (post.subredditSlug !== null
+          ? redditBuildPermalink(post.subredditSlug, post.id.replace(/^t3_/, ""), post.title)
+          : null),
     };
   },
 };

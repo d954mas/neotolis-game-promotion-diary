@@ -258,11 +258,13 @@
         );
       }
       if (k === "reddit_post") {
+        // Mirrors sources/reddit/server/url.ts REDDIT_HOSTS + SHORT_LINK_HOST — must stay in sync.
         return (
           host === "reddit.com" ||
           host === "www.reddit.com" ||
           host === "old.reddit.com" ||
-          host === "new.reddit.com"
+          host === "m.reddit.com" ||
+          host === "redd.it"
         );
       }
       if (k === "instagram_post") {

@@ -112,8 +112,16 @@ const REDDIT_COMMENTS_URL_RE = /reddit\.com\/(?:r|user)\/[^/]+\/comments\//i;
  *  #2), so classify from the union-by-presence discriminators: gallery URL →
  *  gallery; post_hint/url image signal → image; self.<sub> domain / self-hint /
  *  selftext / comments-url → self; everything else with an external domain →
- *  link. Defensive (image/gallery unsampled — confirm at 12-06 UAT). */
-function deriveMediaType(raw: RedditPostRaw): RedditMediaType {
+ *  link.
+ *
+ *  Returns NULL for the EVIDENCE-FREE author-search shape (12-06 UAT finding):
+ *  that endpoint omits post_hint + domain AND its `url` is just the comments
+ *  permalink, so an IMAGE post is byte-identical to a text post — stamping
+ *  "self" was a lie that stuck (media_type COALESCE-preserves). NULL = form
+ *  unknown; any richer write (subreddit walk, paste preview, Refresh-Now — all
+ *  resolve the subreddit page shape) upgrades it in place. selftext present is
+ *  positive text evidence, so those still classify "self". */
+function deriveMediaType(raw: RedditPostRaw): RedditMediaType | null {
   const url = raw.url ?? "";
   const domain = raw.domain ?? null;
   const postHint = raw.post_hint ?? null;
@@ -126,6 +134,9 @@ function deriveMediaType(raw: RedditPostRaw): RedditMediaType {
   const isSelfDomain = domain !== null && domain.startsWith("self.");
   if (postHint === "self" || postHint === "text") return "self";
   if (isSelfDomain) return "self";
+  if (postHint === null && domain === null && REDDIT_COMMENTS_URL_RE.test(url)) {
+    return hasSelftext ? "self" : null; // evidence-free author-search shape
+  }
   if (REDDIT_COMMENTS_URL_RE.test(url)) return "self";
 
   if (postHint === "link") return "link";
@@ -136,7 +147,7 @@ function deriveMediaType(raw: RedditPostRaw): RedditMediaType {
 /** Reddit FORM → the cross-platform NormalizedPost.kind vocabulary. reddit_posts
  *  stores the richer RedditMediaType (via `mediaType` below); the port only
  *  carries the shared vocab so the feed card + cross-source filter stay uniform. */
-function toPortKind(mediaType: RedditMediaType, raw: RedditPostRaw): NormalizedPost["kind"] {
+function toPortKind(mediaType: RedditMediaType | null, raw: RedditPostRaw): NormalizedPost["kind"] {
   if (raw.is_video === true) return "video";
   switch (mediaType) {
     case "image":
@@ -145,6 +156,7 @@ function toPortKind(mediaType: RedditMediaType, raw: RedditPostRaw): NormalizedP
       return "carousel";
     case "self":
     case "link":
+    case null: // form unknown (evidence-free author shape) — render as text until enriched
       return "text";
   }
 }
@@ -179,7 +191,7 @@ function isRedditCdnHost(host: string): boolean {
  *  is the live one (spike #2). An external image host (e.g. an imgur link post)
  *  yields null — the card renders no image chip rather than hotlinking a
  *  third-party host from every feed view. */
-function pickThumbnail(raw: RedditPostRaw, mediaType: RedditMediaType): string | null {
+function pickThumbnail(raw: RedditPostRaw, mediaType: RedditMediaType | null): string | null {
   const thumb = raw.thumbnail ?? null;
   if (thumb !== null && !THUMBNAIL_NON_URLS.has(thumb) && urlHostAllowed(thumb, isRedditCdnHost)) {
     return thumb;
@@ -191,6 +203,33 @@ function pickThumbnail(raw: RedditPostRaw, mediaType: RedditMediaType): string |
     urlHostAllowed(raw.url, isRedditCdnHost)
   ) {
     return raw.url;
+  }
+  return null;
+}
+
+/** Outbound destination domain for a LINK post — the card's "title + domain"
+ *  affordance (D-06). The link target is IMMUTABLE post content (Reddit forbids
+ *  editing a link post's url), so carrying its host is intrinsic, NOT a denorm.
+ *  Provider `domain` when present (subreddit endpoint only), else derived from the
+ *  post url (the author-search endpoint omits `domain`) — https/http only,
+ *  lowercased. DOMAIN ONLY, never the full URL: the card renders it as text, so no
+ *  new href-sanitization surface. Null for every other form. */
+function deriveLinkDomain(raw: RedditPostRaw, mediaType: RedditMediaType | null): string | null {
+  if (mediaType !== "link") return null;
+  // A "link" post's provider domain is non-self by construction (deriveMediaType
+  // classifies any self.<sub> domain as "self"), so no self.* strip is needed.
+  const domain = raw.domain?.trim().toLowerCase() ?? "";
+  if (domain !== "") return domain;
+  if (typeof raw.url === "string" && raw.url !== "") {
+    let parsed: URL;
+    try {
+      parsed = new URL(raw.url);
+    } catch {
+      return null;
+    }
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.hostname.toLowerCase();
+    }
   }
   return null;
 }
@@ -246,13 +285,19 @@ export function buildRedditTitle(text: string | null | undefined): string {
  *  reddit_posts row — they ride ALONGSIDE the port NormalizedPost (D-09), never
  *  on the port type itself (nothing above the seam sees a ScrapeCreators name). */
 export interface NormalizedRedditPost extends NormalizedPost {
-  /** reddit_posts.media_type — the richer Reddit FORM (self|link|image|gallery). */
-  mediaType: RedditMediaType;
+  /** reddit_posts.media_type — the richer Reddit FORM (self|link|image|gallery).
+   *  NULL = form unknown (the evidence-free author-search shape) — persisted as
+   *  NULL so a later richer write upgrades it via COALESCE-preserve. */
+  mediaType: RedditMediaType | null;
   /** The post title (reddit_posts.title) — reddit posts carry a title distinct
    *  from the self-post body, unlike IG/TikTok captions. */
   title: string | null;
   /** The self-post body (reddit_posts.caption) — null for link/image posts. */
   selftext: string | null;
+  /** Outbound destination domain (reddit_posts.link_domain) — LINK posts only,
+   *  null for every other form. Intrinsic immutable post content (the target URL
+   *  cannot be edited on Reddit), NOT a denorm. Domain only, never the full URL. */
+  linkDomain: string | null;
   /** Lowercase intrinsic slug (the safe denorm — reddit_posts.subreddit_slug). */
   subredditSlug: string | null;
   /** Reddit username (reddit_posts.author — PURGED to null by the deletion cron). */
@@ -313,6 +358,7 @@ export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
     mediaType,
     title,
     selftext,
+    linkDomain: deriveLinkDomain(post, mediaType),
     subredditSlug: post.subreddit != null ? post.subreddit.toLowerCase() : null,
     author: authorDeleted ? null : (post.author ?? null),
     authorFullname: authorDeleted ? null : (post.author_fullname ?? null),
@@ -326,6 +372,35 @@ export function normalizeRedditPost(raw: unknown): NormalizedRedditPost {
       authorDeleted,
     },
   };
+}
+
+// ---- The single-post detail envelope (/v1/reddit/post/comments) ----
+// { success, post: {...}, comments: [...] }. With trim=true the post carries the
+// TRUE `url` field (the media / outbound destination — NOT the comments
+// permalink), so the standard by-presence derivation resolves the real form
+// (image/gallery/link) that the evidence-free author-search shape cannot.
+const DETAIL_ENVELOPE = z.object({
+  success: z.boolean().nullable().optional(),
+  post: z.unknown().nullable().optional(),
+});
+
+/** Map the /post/comments detail envelope → NormalizedRedditPost.
+ *  - transport/shape fault (unparseable envelope, success:false) → AdapterError
+ *    transient (mirrors the feed envelope belts);
+ *  - success with NO post, or a malformed post object → null: the post is gone
+ *    or unresolvable (deleted/private) — the caller records the paid attempt
+ *    without inventing data. */
+export function normalizeRedditPostDetail(raw: unknown): NormalizedRedditPost | null {
+  const parsed = DETAIL_ENVELOPE.safeParse(raw);
+  if (!parsed.success || parsed.data.success === false) {
+    throw new AdapterError("reddit post-detail envelope malformed", { category: "transient" });
+  }
+  if (parsed.data.post == null) return null;
+  try {
+    return normalizeRedditPost(parsed.data.post);
+  } catch {
+    return null;
+  }
 }
 
 /** Map one reddit post → NormalizedSinglePost (the paste-preview path). The

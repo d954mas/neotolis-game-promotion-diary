@@ -41,6 +41,9 @@ function makeEvent(opts: {
   mediaType: string | null;
   subredditSlug?: string | null;
   deletionDetectedAt?: string | null;
+  linkDomain?: string | null;
+  authorHandle?: string | null;
+  metadata?: Record<string, unknown>;
 }): CardEventLite {
   return {
     id: "ev_rd_1",
@@ -48,9 +51,10 @@ function makeEvent(opts: {
     gameIds: [] as string[],
     sourceId: "src_rd_1",
     externalId: "t3_abc123",
-    metadata: { subreddit: "gamedev" },
+    metadata: opts.metadata ?? { subreddit: "gamedev" },
     occurredAt: new Date("2026-06-03T08:00:00Z"),
     authorIsMe: false,
+    authorHandle: opts.authorHandle ?? null,
     title: "A test reddit post title",
     notes: null,
     url: null,
@@ -61,8 +65,11 @@ function makeEvent(opts: {
       stats: opts.stats,
       thumbnailUrl: opts.thumbnailUrl,
       mediaType: opts.mediaType,
-      subredditSlug: opts.subredditSlug ?? "gamedev",
+      // `??` would turn an EXPLICIT null (subreddit-unknown fixtures) back into the
+      // default — only an omitted field gets the default.
+      subredditSlug: opts.subredditSlug === undefined ? "gamedev" : opts.subredditSlug,
       deletionDetectedAt: opts.deletionDetectedAt ?? null,
+      linkDomain: opts.linkDomain ?? null,
     },
   };
 }
@@ -151,6 +158,133 @@ describe("RedditFeedCard adaptive rendering (Phase 12 Plan 06 — PLAT-04)", () 
     expect(commentsChip).not.toBeNull();
     expect(commentsChip!.querySelector(".num")?.textContent?.trim()).toBe("0");
     unmount(component);
+  });
+
+  // D-06 acceptance: the adaptive LINK card reads "title + domain" — the outbound
+  // destination host (intrinsic immutable post content) rendered as the muted byline.
+  it("[12-06] a LINK post with a domain renders it as the muted byline (title + domain)", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "link",
+        linkDomain: "youtube.com",
+      }),
+    );
+    const byline = card.querySelector(".card-byline");
+    expect(byline, "a link post must surface its destination domain").not.toBeNull();
+    expect((byline?.textContent ?? "").trim()).toBe("youtube.com");
+    // Domain is muted TEXT, not a link — no new href surface on the card.
+    expect(byline!.querySelector("a")).toBeNull();
+    unmount(component);
+  });
+
+  it("[12-06] an account-sourced LINK post shows the community on TOP and the domain in the byline", () => {
+    // Fixed "where → who → destination" order (12-06 UAT): the community is the top
+    // .src line even when the event came from an ACCOUNT source.
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "link",
+        subredditSlug: "IndieDev",
+        linkDomain: "store.steampowered.com",
+      }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/IndieDev");
+    expect((card.querySelector(".card-byline")?.textContent ?? "").trim()).toBe(
+      "store.steampowered.com",
+    );
+    unmount(component);
+  });
+
+  it("[12-06-s] the AUTHOR byline: a foreign post surfaces u/<author> from the event snapshot", () => {
+    // A subreddit feed / foreign paste carries OTHER people's posts — without the
+    // author part the card showed only r/<sub> and the author was invisible.
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        authorHandle: "CoriolandotheHermit",
+      }),
+    );
+    expect((card.querySelector(".card-byline")?.textContent ?? "").trim()).toBe(
+      "u/CoriolandotheHermit",
+    );
+    unmount(component);
+  });
+
+  it("[12-06-s] the fixed order holds on an account source too: community on top, author · domain below", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "link",
+        subredditSlug: "IndieDev",
+        linkDomain: "store.steampowered.com",
+        authorHandle: "someone_else",
+      }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/IndieDev");
+    expect((card.querySelector(".card-byline")?.textContent ?? "").trim()).toBe(
+      "u/someone_else · store.steampowered.com",
+    );
+    unmount(component);
+
+    // The dev's OWN post from their account source keeps the same order: the
+    // community on top, their handle below (no more src=u/… swap).
+    const { card: ownCard, component: ownComponent } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: "IndieDev",
+        authorHandle: "D954mas",
+      }),
+      accountSource,
+    );
+    expect((ownCard.querySelector(".src")?.textContent ?? "").trim()).toBe("r/IndieDev");
+    expect((ownCard.querySelector(".card-byline")?.textContent ?? "").trim()).toBe("u/D954mas");
+    unmount(ownComponent);
+  });
+
+  it("[12-06-s] a PROFILE post (u_<name> pseudo-subreddit) renders u/<name> on top and never repeats it as the author", () => {
+    const { card, component } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: "u_d954mas",
+        authorHandle: "D954mas",
+      }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("u/d954mas");
+    // The author IS the top line — case-insensitive dedup keeps the byline empty.
+    expect(card.querySelector(".card-byline")).toBeNull();
+    unmount(component);
+  });
+
+  it("[12-06] the domain byline is FORM-gated: a non-link post never renders it, a domain-less link post renders none", () => {
+    const { card: selfCard, component: selfComponent } = mountCard(
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        linkDomain: "should-not-render.example",
+      }),
+    );
+    expect(selfCard.querySelector(".card-byline")).toBeNull();
+    unmount(selfComponent);
+
+    const { card: bareCard, component: bareComponent } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "link", linkDomain: null }),
+    );
+    expect(bareCard.querySelector(".card-byline")).toBeNull();
+    unmount(bareComponent);
   });
 
   it("[12-06] an IMAGE post — thumbnailUrl present — renders the hotlinked i.redd.it cover + likes/comments chips", () => {
@@ -259,22 +393,29 @@ describe("RedditFeedCard adaptive rendering (Phase 12 Plan 06 — PLAT-04)", () 
     unmount(component);
   });
 
-  it("[review] an account source renders the u/ sigil AND the post's own subreddit as a byline", () => {
+  it("[review] subreddit-unknown fallbacks: URL metadata slug first, then the sigilled source name", () => {
+    // enrichment slug null → the URL-intrinsic metadata slug ("gamedev") wins.
     const { card, component } = mountCard(
+      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self", subredditSlug: null }),
+      accountSource,
+    );
+    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/gamedev");
+    unmount(component);
+
+    // No slug ANYWHERE (bare /comments/<id> or redd.it paste) → the registered
+    // source's live BARE name gets its kind sigil re-applied.
+    const { card: bareCard, component: bareComponent } = mountCard(
       makeEvent({
         stats: null,
         thumbnailUrl: null,
         mediaType: "self",
-        subredditSlug: "IndieDev",
+        subredditSlug: null,
+        metadata: {},
       }),
       accountSource,
     );
-    expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("u/d954mas");
-    expect(
-      (card.querySelector(".card-byline")?.textContent ?? "").trim(),
-      "a dev tracking their own posts must see WHICH community each went to",
-    ).toBe("r/IndieDev");
-    unmount(component);
+    expect((bareCard.querySelector(".src")?.textContent ?? "").trim()).toBe("u/d954mas");
+    unmount(bareComponent);
   });
 
   it("[review] a subreddit source does NOT repeat its own slug as a byline", () => {
@@ -285,9 +426,17 @@ describe("RedditFeedCard adaptive rendering (Phase 12 Plan 06 — PLAT-04)", () 
     unmount(component);
   });
 
-  it("[review] an already-sigilled display name is never double-prefixed", () => {
+  it("[review] an already-sigilled display name is never double-prefixed (fallback branch)", () => {
+    // Force the source-name fallback (no slug in enrichment OR metadata) so the
+    // sigil re-application branch is the one under test.
     const { card, component } = mountCard(
-      makeEvent({ stats: null, thumbnailUrl: null, mediaType: "self" }),
+      makeEvent({
+        stats: null,
+        thumbnailUrl: null,
+        mediaType: "self",
+        subredditSlug: null,
+        metadata: {},
+      }),
       { ...source, displayName: "r/gamedev" },
     );
     expect((card.querySelector(".src")?.textContent ?? "").trim()).toBe("r/gamedev");

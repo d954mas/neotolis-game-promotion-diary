@@ -5,29 +5,34 @@
 //   - "user_post"    — MANUAL "Refresh now" (enqueueRefreshNow). Payload
 //                      {event_id, post_id}, user_id SET. Resolved TENANT-SCOPED; the
 //                      fetch charges the USER pool.
-//   - "service_post" — CRON warm auto-refresh slot. DORMANT for Reddit: the warm
-//                      producer was disabled (review fix — ScrapeCreators has no
-//                      lookup-by-id, so a warm catch of a post that fell off the walk
-//                      almost never resolves from the subreddit's page 1 and just
-//                      burns a credit). The slot stays wired defensively for rows a
-//                      pre-disable deploy may have left behind.
+//   - "service_post" — CRON-funded MEDIA-FORM ENRICHMENT (12-06 UAT): the
+//                      author-search feed carries no media evidence, so its
+//                      image/gallery/link posts land with media_type NULL. The walk
+//                      enqueues one row per unknown-form post
+//                      (enqueueRedditFormEnrichment below); the fetch resolves the
+//                      true form + thumbnail via the /post/comments detail endpoint
+//                      and writeSnapshot upgrades the row in place. Payload
+//                      {post_id}, user_id NULL. (The original warm STATS producer
+//                      stays disabled — a settled decision.)
 //
 // NO QPS PACER (unlike Twitter): ScrapeCreators has no per-account QPS ceiling — the
 // shared prepaid-balance reserve + the 80/95 daily-cap throttle are the only rate
 // controls, and both live in the reserve-before-HTTP seam. So maxBatchSize rides the
 // shared concurrency knob and no acquirePacerSlot is threaded.
 //
-// The single-post fetch resolves the post from the subreddit feed (ScrapeCreators
-// exposes no single-post-by-id endpoint). A bounded page-1 miss writes an EXPLICIT
-// `inconclusive` poll status (the paid attempt stays visible, the button settles) and
-// leaves the previous snapshot intact; the account walk remains the authoritative path.
+// The single-post fetch rides the /post/comments DETAIL endpoint (12-06 UAT
+// discovery — the 12-01 spike predates it): exact post by URL, 1 credit. A null
+// result now means the post itself is gone/unresolvable — recorded as the explicit
+// `inconclusive` poll status (paid attempt visible, button settles, previous
+// snapshot intact); the account walk remains the authoritative deletion path.
 
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { events } from "$lib/server/db/schema/events.js";
 import { redditPosts } from "$lib/server/db/schema/index.js";
 import { db } from "$lib/server/db/client.js";
 import { env } from "$lib/server/config/env.js";
 import {
+  createServiceStatsEnqueuer,
   createSocialRefreshLane,
   REFRESH_SLOTS,
   type SocialRefreshQueueName,
@@ -40,6 +45,44 @@ import { redditParsePostUrl } from "../url.js";
 
 export const REDDIT_REFRESH_SLOTS = REFRESH_SLOTS;
 export type RedditRefreshQueueName = SocialRefreshQueueName;
+
+/** The shared service_post producer (advisory-lock per id + skip-if-pending-OR-
+ *  PROCESSING dedup + one batched insert), same factory telegram/tiktok/instagram
+ *  use. Reddit does NOT hand-roll this: a hand-rolled scan that only skipped
+ *  `status='pending'` re-queued a post already being processed, buying the same
+ *  detail fetch twice. */
+const enqueueServiceRedditFormFetch = createServiceStatsEnqueuer({
+  adapterKind: "reddit_account",
+  queueName: "service_post",
+  lockPrefix: "reddit_service_post:",
+  rowType: "post_stats",
+  payloadIdKey: "post_id",
+});
+
+/**
+ * Media-form enrichment producer (12-06 UAT). Called by the walk after fan-out
+ * with the pass's unknown-form post ids: queue ONE cron-funded service_post
+ * detail fetch per post whose form is STILL unknown. The reddit-specific part is
+ * only the PRE-FILTER — media_type IS NULL (a richer write may have resolved it
+ * since the walk collected the id) AND a cached permalink exists (the lane
+ * resolves the fetch URL from the cache, so a permalink-less row could never
+ * run). Queue-side idempotency comes from the shared producer.
+ */
+export async function enqueueRedditFormEnrichment(postIds: string[]): Promise<number> {
+  if (postIds.length === 0) return 0;
+  const stillUnknown = await db
+    .select({ postId: redditPosts.postId })
+    .from(redditPosts)
+    .where(
+      and(
+        inArray(redditPosts.postId, postIds),
+        isNull(redditPosts.mediaType),
+        isNotNull(redditPosts.permalink),
+      ),
+    );
+  if (stillUnknown.length === 0) return 0;
+  return enqueueServiceRedditFormFetch(stillUnknown.map((row) => row.postId));
+}
 
 // MANUAL path: resolve the post id from the event, TENANT-SCOPED.
 async function resolveUserPostId(row: AdapterLaneWorkerRow): Promise<string | null> {
@@ -116,6 +159,7 @@ const redditRefreshLane = createSocialRefreshLane({
             // reddit-specific raw columns / selftext stay absent on this path and
             // COALESCE-preserve.
             mediaType: post.mediaType ?? null,
+            linkDomain: post.linkDomain ?? null,
             title: post.caption,
             thumbnailUrl: post.thumbnailUrl,
             publishedAt: post.publishedAt,

@@ -62,7 +62,7 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { and, eq, desc, isNull, sql } from "drizzle-orm";
 import { redditPosts } from "$lib/server/db/schema/index.js";
 import { redditAccountAdapterCore } from "./adapter.js";
-import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
+import { redditParsePostUrl, redditParseShareUrl, redditParseSourceUrl } from "./url.js";
 import { buildRedditTitle } from "./normalize.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
@@ -522,7 +522,11 @@ async function enqueueRefreshNow(input: {
   if (event === undefined) throw new NotFoundError();
   const parsed = event.url === null ? null : redditParsePostUrl(event.url);
   const subreddit = (parsed?.metadata?.subreddit as string | null | undefined) ?? null;
-  if (parsed !== null && subreddit === null) {
+  // An event still carrying a raw /s/ share URL (a manual save whose preview never
+  // resolved) has no cached post identity to refresh — same dead-end as redd.it.
+  const unresolvedShare =
+    parsed === null && event.url !== null && redditParseShareUrl(event.url) !== null;
+  if ((parsed !== null && subreddit === null) || unresolvedShare) {
     throw new AppError(
       "Reddit URL has no subreddit feed to refresh",
       "reddit_short_link_unsupported",
@@ -563,7 +567,13 @@ async function fetchEventPreviewMetadata(
   if (provider === null) return { kind: "unreachable", cause: "reddit_not_configured" };
 
   const parsed = redditParsePostUrl(canonicalUrl);
-  if (parsed === null) return { kind: "unreachable", cause: "url_not_reddit_post" };
+  // /s/ SHARE link: the path carries an opaque redirect token, not the post id —
+  // identity resolves only through the paid detail fetch below, which follows the
+  // share redirect server-side (12-06 UAT probe).
+  const share = parsed === null ? redditParseShareUrl(canonicalUrl) : null;
+  if (parsed === null && share === null) {
+    return { kind: "unreachable", cause: "url_not_reddit_post" };
+  }
 
   // RECOGNITION-ONLY short link (review fix): `redd.it/<id>` carries no subreddit, and
   // ScrapeCreators exposes neither lookup-by-id nor a redirect follower — the provider
@@ -573,8 +583,8 @@ async function fetchEventPreviewMetadata(
   // "unavailable" (indistinguishable from a deleted post). The URL still parses, so the
   // user can save the event as a stats-less manual card — or re-paste the full
   // /r/<sub>/comments/<id> permalink to get live data.
-  const parsedSubreddit = (parsed.metadata?.subreddit as string | null | undefined) ?? null;
-  if (parsedSubreddit === null) {
+  const parsedSubreddit = (parsed?.metadata?.subreddit as string | null | undefined) ?? null;
+  if (parsed !== null && parsedSubreddit === null) {
     return { kind: "unreachable", cause: "reddit_short_link_unsupported" };
   }
 
@@ -599,7 +609,9 @@ async function fetchEventPreviewMetadata(
           action: "event.poll_refreshed",
           ipAddress: ctx.ipAddress,
           metadata: {
-            external_id: `t3_${parsed.externalId}`,
+            // A share paste's real id is unknown pre-fetch — record what was asked
+            // for (the share URL) so the cap row stays attributable.
+            external_id: parsed !== null ? `t3_${parsed.externalId}` : canonicalUrl,
             kind: "reddit_post",
             platform: QUOTA_PLATFORM,
             flow: "stats_refresh",
@@ -625,13 +637,30 @@ async function fetchEventPreviewMetadata(
     return { kind: "unavailable" };
   }
 
+  // A share paste's REAL identity arrived only now — adopt the provider's resolved
+  // canonical permalink as the event URL (the client form replaces the URL field with
+  // EnrichmentResult.canonicalUrl, so the SAVED event stores a parseable slugged post
+  // URL and every later parse / refresh / re-fetch works on it). A resolved post with
+  // no permalink cannot anchor an event URL → honest unavailable (the paid attempt is
+  // already on the cap counter, mirroring the not-found path).
+  const resolvedCanonical = share === null ? canonicalUrl : post.permalink;
+  if (resolvedCanonical === null) {
+    return { kind: "unavailable" };
+  }
+
   await writeSnapshot({
     postId: post.id,
+    // The community identity as the RESPONSE reports it (`u_<name>` for a profile
+    // post). The feed card reads its top line from this column, and a redd.it / bare
+    // `/comments/<id>` paste has no slug anywhere in the URL to fall back on — before
+    // this the preview left it null until some later walk happened to cover the post.
+    subredditSlug: post.subredditSlug ?? null,
     // Persist the real Reddit FORM (image/gallery/self/link) the provider derived, so
     // the feed card renders its media variant immediately (was hard-coded null → text).
     mediaType: post.mediaType ?? null,
+    linkDomain: post.linkDomain ?? null,
     title: post.caption,
-    permalink: canonicalUrl,
+    permalink: resolvedCanonical,
     thumbnailUrl: post.thumbnailUrl,
     publishedAt: post.publishedAt,
     author: post.ownerUsername,
@@ -661,6 +690,9 @@ async function fetchEventPreviewMetadata(
     occurredAt: post.publishedAt,
     thumbnailUrl: post.thumbnailUrl ?? undefined,
     externalId: post.id,
+    // Only a share paste rewrites the canonical — a direct permalink paste keeps the
+    // user's parsed canonical authoritative (slug preserved as pasted).
+    ...(share !== null ? { canonicalUrl: resolvedCanonical } : {}),
   };
 }
 
@@ -731,7 +763,9 @@ function validateEventInput(input: { kind: string; url?: string | null }): void 
       reason: "reddit_post_requires_url",
     });
   }
-  if (redditParsePostUrl(input.url) === null) {
+  // /s/ share links are accepted RECOGNITION-ONLY (a manual save whose preview never
+  // resolved keeps its stats-less card; a later PATCH must not 422 on the stored URL).
+  if (redditParsePostUrl(input.url) === null && redditParseShareUrl(input.url) === null) {
     throw new AppError("url is not a recognized Reddit post URL", "kind_url_inconsistent", 422, {
       reason: "url_not_reddit_post",
     });

@@ -30,6 +30,7 @@
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
   import SourceKindIcon from "$lib/components/SourceKindIcon.svelte";
   import {
+    inferRedditPlate,
     inferSourceKindFromUrl,
     normalizeHandleUrl,
   } from "$lib/components/sources/infer-source-kind.js";
@@ -450,13 +451,17 @@
             {@const isMatch = inferredKind === entry.value}
             {#if entry.value === "reddit"}
               <!-- Reddit resolves u/ (author) and r/ (subreddit) by URL shape on
-                   submit; show both as separate plates so the support is explicit. -->
+                   submit; show both as separate plates so the support is explicit.
+                   Highlight only the plate the pasted shape matches (both while
+                   the shape is still ambiguous). -->
+              {@const plate = inferRedditPlate(handleUrl)}
               {#each ["u/", "r/"] as suffix (suffix)}
+                {@const plateMatch = isMatch && (plate === null || plate === suffix)}
                 <li
                   class="chip"
-                  class:active={isMatch && !entry.disabled}
+                  class:active={plateMatch && !entry.disabled}
                   class:muted={entry.disabled}
-                  class:matched={isMatch}
+                  class:matched={plateMatch}
                   title={entry.disabled ? disabledTooltip(entry) : undefined}
                 >
                   <span class="chip-icon"><SourceKindIcon kind="reddit_subreddit" /></span>

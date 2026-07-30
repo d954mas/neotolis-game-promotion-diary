@@ -570,13 +570,18 @@ export async function enrichFromUrl(
     }
     return {
       kind: "reddit_post",
-      externalId: parsed.externalId,
+      // A /s/ share paste parses with NO id (the path carries an opaque redirect
+      // token); the preview's detail fetch resolved the real identity — surface it
+      // (t3_ prefix stripped to match the URL-intrinsic short-id contract) and adopt
+      // the REWRITTEN canonical permalink so the client form saves a parseable post
+      // URL (it replaces the URL field with canonicalUrl).
+      externalId: parsed.externalId ?? preview.externalId?.replace(/^t3_/, "") ?? null,
       title: preview.title,
       occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,
       authorName: preview.authorName || null,
       authorUrl: preview.authorUrl || null,
-      canonicalUrl: parsed.canonicalUrl,
+      canonicalUrl: preview.canonicalUrl ?? parsed.canonicalUrl,
       // author_is_me is matched PER POST for Reddit (a subreddit feed carries other
       // people's content), and it happens at CREATE time off the cached post row —
       // see resolveRedditAuthorIsMe in createEvent. Not here: enrichFromUrl is the

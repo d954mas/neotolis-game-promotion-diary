@@ -122,6 +122,13 @@ export interface NormalizedSinglePost {
    *  IMMEDIATELY — without it the paste stored null and the card fell back to a plain
    *  text layout until the next source walk re-derived the form. */
   mediaType?: string | null;
+  /** Outbound destination domain for a Reddit LINK post (mediaType "link"); else
+   *  null/absent. OPTIONAL for the same reason as `mediaType` (non-Reddit provider
+   *  impls stay untouched). Lets the paste-preview snapshot persist
+   *  reddit_posts.link_domain so the link card renders "title + domain"
+   *  immediately, not only after the next source walk. Domain only, never the
+   *  full URL. */
+  linkDomain?: string | null;
 }
 
 /**

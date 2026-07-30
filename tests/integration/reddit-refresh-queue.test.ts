@@ -253,6 +253,43 @@ describe("reddit per-post refresh lane", () => {
     expect(snapshot!.commentCount).toBe(12);
   });
 
+  it("[12-06 UAT] a service_post enrichment row upgrades an unknown-form post via the cron pool", async () => {
+    const s = uniq().slice(0, 6);
+    const url = `https://www.reddit.com/r/Catmemes/comments/${s}/x/`;
+    // The evidence-free author-walk cached the post with an UNKNOWN form.
+    await seedCachedPost(s, url, { mediaType: null, thumbnailUrl: null });
+    await db.insert(adapterRefreshQueue).values({
+      adapterKind: "reddit_account",
+      queueName: "service_post",
+      type: "post_stats",
+      payload: { post_id: `t3_${s}` },
+      userId: null,
+      priority: 0,
+      status: "pending",
+    });
+    single.next = singlePost({
+      id: `t3_${s}`,
+      shortcode: s,
+      kind: "image",
+      mediaType: "image",
+      thumbnailUrl: "https://i.redd.it/cat.png",
+    });
+
+    await redditRefreshQueueTick();
+
+    expect(single.calls).toHaveLength(1);
+    expect(single.calls[0]!.origin, "service rows ride the cron pool").toBe("cron");
+    const post = await readPost(s);
+    expect(post!.mediaType, "the detail fetch resolves the true form").toBe("image");
+    expect(post!.thumbnailUrl).toBe("https://i.redd.it/cat.png");
+    const [row] = await db
+      .select({ status: adapterRefreshQueue.status })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.queueName, "service_post"))
+      .limit(1);
+    expect(row!.status).toBe("done");
+  });
+
   it("[12-05] is tenant-scoped: another user's event cannot be enqueued or fetched", async () => {
     const owner = await seedUserDirectly({ email: `rdtrq-owner-${uniq()}@t.io` });
     const attacker = await seedUserDirectly({ email: `rdtrq-atk-${uniq()}@t.io` });

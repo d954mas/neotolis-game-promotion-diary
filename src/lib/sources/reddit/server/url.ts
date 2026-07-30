@@ -37,7 +37,11 @@ const SHORT_LINK_HOST = "redd.it";
 // docs); post ids are base36 lowercase alphanumeric. `/user/<u>/comments/<id>`
 // is the profile-self-post variant — accept both `/r/` and `/user/` roots, and
 // CAPTURE the root so the two can never be conflated (see PROFILE_SUB_PREFIX).
-const POST_URL_RE = /^\/(r|user)\/([A-Za-z0-9_-]+)\/comments\/([a-z0-9]+)(?:\/.*)?$/i;
+// The title SLUG (first segment after the id, before any comment-permalink tail)
+// is CAPTURED too: the ScrapeCreators detail endpoint returns a DEGRADED post
+// object (created_utc/author null) for slug-less URLs, so the canonical URL must
+// preserve the slug when the paste carried one (12-06 UAT).
+const POST_URL_RE = /^\/(r|user)\/([A-Za-z0-9_-]+)\/comments\/([a-z0-9]+)(?:\/([^/]*)(?:\/.*)?)?$/i;
 /** Reddit's pseudo-subreddit for a profile ("u/foo" posts live in "u_foo"). A
  *  `/user/<name>/comments/<id>` URL therefore resolves its feed under `u_<name>`,
  *  NOT `<name>`: the provider's subreddit endpoint keys on the SUBREDDIT slug, and
@@ -56,6 +60,13 @@ const SHORT_LINK_RE = /^\/([a-z0-9]+)$/i;
 // url does not parse, so an un-parsed form would 422 every later PATCH of that event.
 // Recognition-only, like redd.it — the subreddit is absent, so no feed can be searched.
 const BARE_COMMENTS_RE = /^\/comments\/([a-z0-9]+)(?:\/.*)?$/i;
+// `/r|u|user/<name>/s/<token>` — the mobile-app SHARE link. The token is an
+// OPAQUE case-sensitive redirect key, NOT the post id, so this form cannot
+// yield a ParsedUrl (no externalId exists until the redirect resolves) — it
+// parses through redditParseShareUrl into a recognition shape, and the preview
+// path resolves the identity via the provider's detail endpoint, which follows
+// the share redirect server-side (12-06 UAT probe: /r/itchio/s/… resolved).
+const SHARE_URL_RE = /^\/(r|u|user)\/([A-Za-z0-9_-]+)\/s\/([A-Za-z0-9]+)\/?$/i;
 // `/user/<handle>` and `/u/<handle>` (short form).
 const SOURCE_USER_RE = /^\/u(?:ser)?\/([A-Za-z0-9_-]+)\/?$/i;
 // `/r/<sub>` (no /comments/ segment).
@@ -121,11 +132,80 @@ export function redditParsePostUrl(input: string): ParsedUrl | null {
   const isProfilePost = m[1]!.toLowerCase() === "user";
   const name = m[2]!.toLowerCase();
   const externalId = m[3]!;
+  // URL-intrinsic title slug (safe to carry — part of the canonical URL). null
+  // when the paste had none; the canonicalizer then builds the slug-less form.
+  const slug = m[4] !== undefined && m[4] !== "" ? m[4] : null;
   return {
     kind: "reddit_post",
     externalId,
-    metadata: { subreddit: isProfilePost ? `${PROFILE_SUB_PREFIX}${name}` : name },
+    metadata: { subreddit: isProfilePost ? `${PROFILE_SUB_PREFIX}${name}` : name, slug },
   };
+}
+
+export interface RedditShareLink {
+  /** Feed-identity hint from the URL path (`u_<name>` for profile roots) — lowercase. */
+  subreddit: string;
+  /** Normalized `https://www.reddit.com` share URL, query/hash stripped. The token's
+   *  case is PRESERVED (it is a case-sensitive redirect key), and the root segment
+   *  keeps the pasted spelling (`u` vs `user`) — the URL is handed VERBATIM to
+   *  Reddit via the provider, and only the pasted spelling is known to resolve. */
+  canonicalUrl: string;
+}
+
+/**
+ * Parse a Reddit `/s/` SHARE link (`/r/<sub>/s/<token>`, `/u|user/<name>/s/<token>`)
+ * into a recognition shape, OR return null for foreign hosts / non-share URLs.
+ * Distinct from redditParsePostUrl because the share token is NOT the post id —
+ * there is no externalId to return; the provider's detail endpoint resolves the
+ * redirect server-side and the preview rewrites the canonical URL from the result.
+ */
+export function redditParseShareUrl(input: string): RedditShareLink | null {
+  let u: URL;
+  try {
+    u = new URL(input.trim());
+  } catch {
+    return null;
+  }
+  // Host-check FIRST (same T-12-03-T rule as the post parser).
+  if (!REDDIT_HOSTS.has(u.hostname.toLowerCase())) return null;
+  const m = SHARE_URL_RE.exec(u.pathname);
+  if (m === null) return null;
+  const root = m[1]!.toLowerCase();
+  const name = m[2]!;
+  const token = m[3]!;
+  return {
+    subreddit: root === "r" ? name.toLowerCase() : `${PROFILE_SUB_PREFIX}${name.toLowerCase()}`,
+    canonicalUrl: `https://www.reddit.com/${root}/${name}/s/${token}`,
+  };
+}
+
+/** Reddit-style title slug for a REBUILT permalink. Reddit resolves ANY slug for a
+ *  given post id, but the ScrapeCreators detail endpoint returns a DEGRADED post
+ *  for SLUG-LESS URLs (12-06 UAT), so a non-empty slug is load-bearing — "post" is
+ *  the guaranteed-non-empty fallback for unsluggable (e.g. all-emoji) titles. */
+export function redditTitleSlug(title: string | null): string {
+  const slug = (title ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 50)
+    .replace(/_+$/, "");
+  return slug === "" ? "post" : slug;
+}
+
+/** Rebuild the canonical slugged permalink from RESOLVED post parts — the /s/
+ *  share-link path, where the pasted URL carries no post id and the detail
+ *  response carries no permalink field. `subredditSlug` uses the walker's
+ *  `u_<name>` convention for profile posts (maps back to `/user/<name>/`). */
+export function redditBuildPermalink(
+  subredditSlug: string,
+  shortId: string,
+  title: string | null,
+): string {
+  const root = subredditSlug.startsWith(PROFILE_SUB_PREFIX)
+    ? `user/${subredditSlug.slice(PROFILE_SUB_PREFIX.length)}`
+    : `r/${subredditSlug}`;
+  return `https://www.reddit.com/${root}/comments/${shortId}/${redditTitleSlug(title)}/`;
 }
 
 /**
