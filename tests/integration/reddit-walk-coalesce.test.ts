@@ -20,7 +20,7 @@ import type { DailyUserRequestAccounting } from "../../src/lib/server/daily-user
 
 const provider = {
   pages: [] as RedditFeedPage[],
-  errors: [] as Error[],
+  errors: [] as Array<Error | null>,
   onFetch: null as null | (() => Promise<void>),
   calls: 0,
 };
@@ -86,7 +86,7 @@ vi.mock(
         if (permit === null) throw new Error("scripted Reddit reservation denied");
         provider.calls += 1;
         const error = provider.errors.shift();
-        if (error !== undefined) throw error;
+        if (error instanceof Error) throw error;
         return provider.pages.shift() ?? emptyPage();
       },
     };
@@ -119,8 +119,8 @@ function makePost(shortId: string, daysAgo: number, author: string) {
     permalink: `/r/gamedev/comments/${shortId}/devlog/`,
   };
 }
-function walkPage(posts: unknown[]): RedditFeedPage {
-  return normalizeRedditFeed({ success: true, posts, after: null });
+function walkPage(posts: unknown[], after: string | null = null): RedditFeedPage {
+  return normalizeRedditFeed({ success: true, posts, after });
 }
 
 /** The outbox intents still waiting for delivery for this channel. */
@@ -362,6 +362,65 @@ describe("reddit walk-intent coalescing (review P1)", () => {
     expect(
       intentB!.forwarded_at,
       "a paused pass must leave the intent pending (it will walk for real)",
+    ).toBeNull();
+  });
+
+  it("[review-P1] a shallow pass does not settle a deeper intent before the recursive walk succeeds", async () => {
+    const handle = `coalcrash_${uniq()}`;
+    const shallowTarget = new Date(Date.now() - 7 * DAY);
+    const deepTarget = new Date(Date.now() - 30 * DAY);
+    const first = await seedUserDirectly({ email: `rdt-coalc-a-${handle}@t.io` });
+    const second = await seedUserDirectly({ email: `rdt-coalc-b-${handle}@t.io` });
+
+    await createSource(
+      first.id,
+      {
+        kind: "reddit_account",
+        handleUrl: `https://www.reddit.com/user/${handle}`,
+        autoImport: true,
+        backfillTargetSince: shallowTarget,
+      },
+      "127.0.0.1",
+    );
+    const [intentA] = await pendingIntents(handle);
+    await db.execute(sql`UPDATE outbox SET forwarded_at = NOW() WHERE id = ${intentA!.id}`);
+
+    provider.onFetch = async () => {
+      await createSource(
+        second.id,
+        {
+          kind: "reddit_account",
+          handleUrl: `https://www.reddit.com/user/${handle}`,
+          autoImport: true,
+          backfillTargetSince: deepTarget,
+        },
+        "127.0.0.1",
+      );
+    };
+    // The current pass proves coverage only to 7d. It crosses that bound while the
+    // provider still advertises another page, which schedules the recursive 30d walk.
+    provider.pages = [walkPage([makePost(`c${uniq()}`, 8, handle)], "older-page")];
+    // Crash only the recursive fetch. If its durable outbox intent was already marked
+    // forwarded by the shallow pass, no worker can recover the missing 30d coverage.
+    provider.errors = [null, new Error("scripted recursive crash")];
+
+    await expect(
+      handleBackfillAccount({
+        data: {
+          kind: "reddit_account",
+          channelKey: handle,
+          triggerUserId: first.id,
+          depthBoundIso: shallowTarget.toISOString(),
+          flow: "initial",
+        },
+      }),
+    ).rejects.toThrow("scripted recursive crash");
+
+    const intents = await pendingIntents(handle);
+    const deepIntent = intents.find((row) => row.payload.triggerUserId === second.id);
+    expect(
+      deepIntent!.forwarded_at,
+      "the deeper intent remains durable until a pass actually covers its target",
     ).toBeNull();
   });
 });

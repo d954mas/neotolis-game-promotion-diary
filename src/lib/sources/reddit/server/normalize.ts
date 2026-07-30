@@ -387,9 +387,10 @@ const DETAIL_ENVELOPE = z.object({
 /** Map the /post/comments detail envelope → NormalizedRedditPost.
  *  - transport/shape fault (unparseable envelope, success:false) → AdapterError
  *    transient (mirrors the feed envelope belts);
- *  - success with NO post, or a malformed post object → null: the post is gone
- *    or unresolvable (deleted/private) — the caller records the paid attempt
- *    without inventing data. */
+ *  - success with an explicit null/absent post → null: the post is gone or
+ *    unresolvable (deleted/private);
+ *  - a present malformed post object → transient: provider drift is not deletion
+ *    evidence and must never be surfaced as a terminal 404. */
 export function normalizeRedditPostDetail(raw: unknown): NormalizedRedditPost | null {
   const parsed = DETAIL_ENVELOPE.safeParse(raw);
   if (!parsed.success || parsed.data.success === false) {
@@ -398,8 +399,11 @@ export function normalizeRedditPostDetail(raw: unknown): NormalizedRedditPost | 
   if (parsed.data.post == null) return null;
   try {
     return normalizeRedditPost(parsed.data.post);
-  } catch {
-    return null;
+  } catch (cause) {
+    throw new AdapterError("reddit post-detail object malformed", {
+      category: "transient",
+      cause,
+    });
   }
 }
 

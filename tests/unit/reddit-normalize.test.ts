@@ -195,7 +195,7 @@ describe("provider URL boundary validation (review-P2)", () => {
     expect(self.mediaType).toBe("self");
   });
 
-  it("post-detail envelope: the true url resolves the real form; success:false throws; missing post → null", () => {
+  it("post-detail envelope: the true url resolves the real form; only an explicit missing post returns null", () => {
     // /post/comments returns the post's TRUE url (media/destination), so the
     // standard derivation resolves what the author-search shape could not.
     const detail = normalizeRedditPostDetail({
@@ -208,9 +208,9 @@ describe("provider URL boundary validation (review-P2)", () => {
     expect(() => normalizeRedditPostDetail({ success: false })).toThrowError(AdapterError);
     expect(normalizeRedditPostDetail({ success: true, post: null }), "post gone → null").toBeNull();
     expect(
-      normalizeRedditPostDetail({ success: true, post: { garbage: true } }),
-      "malformed post object → unresolvable, not a transport fault",
-    ).toBeNull();
+      () => normalizeRedditPostDetail({ success: true, post: { garbage: true } }),
+      "a present malformed object is provider drift, not proof the post is gone",
+    ).toThrowError(AdapterError);
   });
 
   it("linkDomain: an unparseable or non-http(s) url on a link post yields null (domain-only, no href surface)", () => {

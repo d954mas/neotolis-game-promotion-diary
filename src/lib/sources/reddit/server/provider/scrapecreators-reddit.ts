@@ -28,7 +28,13 @@ import {
   normalizeRedditPostDetail,
   type RedditFeedPage,
 } from "../normalize.js";
-import { redditParsePostUrl, redditParseShareUrl, redditBuildPermalink } from "../url.js";
+import {
+  redditParsePostUrl,
+  redditParseShareUrl,
+  redditBuildPermalink,
+  redditIsShortPostUrl,
+} from "../url.js";
+import { AdapterError } from "$lib/sources/errors.js";
 import type { DailyUserRequestAccounting } from "$lib/server/daily-user-quota.js";
 import type {
   NormalizedSinglePost,
@@ -78,6 +84,7 @@ export type RedditPostFetchOptions =
 export type RedditSinglePost = NormalizedSinglePost & {
   permalink: string | null;
   subredditSlug: string | null;
+  removedByCategory: string | null;
 };
 
 export type RedditSocialProvider = Omit<SocialProvider, "fetchPostByUrl"> & {
@@ -197,13 +204,9 @@ export const scrapeCreatorsRedditProvider: RedditSocialProvider = {
     // redirect server-side (12-06 UAT probe: /r/itchio/s/… resolved fully).
     const share = parsed === null ? redditParseShareUrl(url) : null;
     if (parsed === null && share === null) return null;
-    if (parsed !== null) {
-      // redd.it short-link belt: recognition-only (the preview rejects it BEFORE
-      // the cap gate with reddit_short_link_unsupported — index.ts). Kept until
-      // the detail endpoint's short-link behavior is live-verified.
-      const subreddit = (parsed.metadata?.subreddit as string | null | undefined) ?? null;
-      if (subreddit === null) return null;
-    }
+    // redd.it short-link belt: recognition-only (the preview rejects it BEFORE the
+    // cap gate). Reddit's own `/comments/<id>` form is accepted by exact detail.
+    if (parsed !== null && redditIsShortPostUrl(url)) return null;
 
     const detailUrl = new URL(`${env.SCRAPECREATORS_BASE_URL}${POST_COMMENTS_PATH}`);
     detailUrl.searchParams.set("url", url);
@@ -218,6 +221,15 @@ export const scrapeCreatorsRedditProvider: RedditSocialProvider = {
     const post = normalizeRedditPostDetail(json);
     void platform;
     if (post === null) return null;
+    if (parsed !== null && post.id !== `t3_${parsed.externalId}`) {
+      throw new AdapterError("reddit post-detail identity mismatch", {
+        category: "transient",
+        context: {
+          requestedPostId: `t3_${parsed.externalId}`,
+          receivedPostId: post.id,
+        },
+      });
+    }
     // `post` is ALREADY fully normalized — project it straight to the single-post
     // shape so the derived kind / thumbnail / form / domain carry through.
     return {
@@ -239,6 +251,7 @@ export const scrapeCreatorsRedditProvider: RedditSocialProvider = {
       // Same rationale for the link card: persist the outbound domain.
       linkDomain: post.linkDomain,
       subredditSlug: post.subredditSlug,
+      removedByCategory: post.raw.removedByCategory,
       // The resolved canonical permalink. The trim=true detail response carries no
       // `permalink` field (12-06 UAT probe), so the rebuild from resolved parts is
       // the live path; pickPermalink stays the preferred source as forward-compat.

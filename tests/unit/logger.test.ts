@@ -80,6 +80,13 @@ describe("logger redaction", () => {
     }
   });
 
+  it("redacts ScrapeCreators' literal x-api-key HTTP header", async () => {
+    const { REDACT_PATHS } = await import("../../src/lib/server/logger.js");
+    for (const path of ["req.headers.x-api-key", "*.headers.x-api-key", "*.x-api-key"]) {
+      expect(REDACT_PATHS).toContain(path);
+    }
+  });
+
   it("process.env.* is not accessed outside src/lib/server/config/env.ts", async () => {
     // Static-grep tripwire. The ESLint contract is configured separately,
     // but a runtime guard catches the case where the lint config drifts or a

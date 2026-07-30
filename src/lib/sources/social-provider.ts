@@ -129,6 +129,9 @@ export interface NormalizedSinglePost {
    *  immediately, not only after the next source walk. Domain only, never the
    *  full URL. */
   linkDomain?: string | null;
+  /** Reddit's post-level removal signal from exact detail. Optional because other
+   * providers do not expose this field. */
+  removedByCategory?: string | null;
 }
 
 /**

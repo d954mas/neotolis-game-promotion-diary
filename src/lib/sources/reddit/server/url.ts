@@ -58,8 +58,22 @@ const SHORT_LINK_RE = /^\/([a-z0-9]+)$/i;
 // out of a deleted post's URL — deletion-propagation-cron.ts), and users pasting the
 // share-menu link. It MUST parse: `validateEventInput` rejects any reddit_post whose
 // url does not parse, so an un-parsed form would 422 every later PATCH of that event.
-// Recognition-only, like redd.it — the subreddit is absent, so no feed can be searched.
+// Exact-detail accepts this form even though no source-walk identity is present.
 const BARE_COMMENTS_RE = /^\/comments\/([a-z0-9]+)(?:\/.*)?$/i;
+
+/** `redd.it/<id>` is recognition-only until its redirect behavior is verified.
+ * Reddit's own `/comments/<id>` canonical URL is not a short link: the exact-detail
+ * endpoint accepts it directly, including after the GDPR purge removes a profile
+ * username from the original permalink. */
+export function redditIsShortPostUrl(input: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    return false;
+  }
+  return url.hostname.toLowerCase() === SHORT_LINK_HOST && SHORT_LINK_RE.test(url.pathname);
+}
 // `/r|u|user/<name>/s/<token>` — the mobile-app SHARE link. The token is an
 // OPAQUE case-sensitive redirect key, NOT the post id, so this form cannot
 // yield a ParsedUrl (no externalId exists until the redirect resolves) — it
@@ -82,18 +96,16 @@ const RAW_USER_RE = /^u\/([A-Za-z0-9_-]+)\/?$/i;
  * Recognized shapes:
  *   - https://{reddit.com|www|old|m}/r/<sub>/comments/<id>/<slug?>
  *   - https://{...}/user/<u>/comments/<id>/<slug?>   (profile self-post → `u_<u>`)
- *   - https://{...}/comments/<id>                    (RECOGNITION-ONLY, see below)
+ *   - https://{...}/comments/<id>                    (exact-detail capable)
  *   - https://redd.it/<id>                           (RECOGNITION-ONLY, see below)
  *
  * Foreign hosts (e.g. `example.com/r/IndieDev/comments/abc`) return null —
  * host-check FIRST avoids leaking non-Reddit URLs into the events table.
  *
- * `metadata.subreddit` is the feed identity the provider needs. It is null for the two
- * SUBREDDIT-LESS forms (`redd.it/<id>` and `/comments/<id>`): ScrapeCreators exposes no
- * lookup-by-id and no redirect follower, so there is no feed to search. A null slug
- * means RECOGNITION-ONLY — the event saves fine as `kind=reddit_post`, but the preview
- * says so explicitly (index.ts `reddit_short_link_unsupported`) instead of burning a
- * cap slot on a request that can never succeed.
+ * `metadata.subreddit` is the feed identity used by source walks. It is null for the
+ * two SUBREDDIT-LESS forms (`redd.it/<id>` and `/comments/<id>`), but only `redd.it`
+ * remains recognition-only. The exact-detail endpoint accepts Reddit's canonical
+ * `/comments/<id>` URL directly.
  */
 export function redditParsePostUrl(input: string): ParsedUrl | null {
   let u: URL;

@@ -72,15 +72,13 @@ describe("parseAnyUrl — first-match-wins iterate-registry", () => {
     expect((r as { externalId: string }).externalId).toBe("123");
   });
 
-  // TODO(12-05): re-enable both once redditAdapter is re-wired into the registry
-  // (unwired in 12-02 → parseAnyUrl returns 'unsupported' for reddit URLs).
-  it.skip("reddit.com /r/X/comments/<id> POST URL → kind: 'reddit_post' via redditAdapter (Phase 03.1)", () => {
+  it("reddit.com /r/X/comments/<id> POST URL → kind: 'reddit_post' via redditAdapter (Phase 03.1)", () => {
     const r = parseAnyUrl("https://reddit.com/r/IndieDev/comments/abc123/foo-slug");
     expect(r.kind).toBe("reddit_post");
     expect((r as { externalId: string }).externalId).toBe("abc123");
   });
 
-  it.skip("redd.it short-link → kind: 'reddit_post' via redditAdapter (Phase 03.1)", () => {
+  it("redd.it short-link → kind: 'reddit_post' via redditAdapter (Phase 03.1)", () => {
     const r = parseAnyUrl("https://redd.it/abc123");
     expect(r.kind).toBe("reddit_post");
     expect((r as { externalId: string }).externalId).toBe("abc123");

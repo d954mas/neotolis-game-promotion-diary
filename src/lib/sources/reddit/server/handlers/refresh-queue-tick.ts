@@ -40,7 +40,7 @@ import {
 import type { AdapterLaneWorkerRow } from "$lib/server/services/adapter-lane-worker.js";
 import { getSocialProvider } from "../provider/registry.js";
 import { getSocialProviderSpendToday } from "../quota.js";
-import { writeSnapshot } from "../snapshots.js";
+import { REDDIT_POST_DETAIL_DELETION_DETECTOR, writeSnapshot } from "../snapshots.js";
 import { redditParsePostUrl } from "../url.js";
 
 export const REDDIT_REFRESH_SLOTS = REFRESH_SLOTS;
@@ -149,7 +149,18 @@ const redditRefreshLane = createSocialRefreshLane({
   writeSnapshot: ({ postId, permalink, post, status }) =>
     writeSnapshot(
       post === null
-        ? { postId, permalink, metrics: null, status }
+        ? {
+            postId,
+            permalink,
+            metrics: null,
+            status,
+            ...(status === "not_found"
+              ? {
+                  deletionDetector: REDDIT_POST_DETAIL_DELETION_DETECTOR,
+                  confirmedDeleted: true,
+                }
+              : {}),
+          }
         : {
             postId,
             permalink,
@@ -167,16 +178,17 @@ const redditRefreshLane = createSocialRefreshLane({
             authorFullname: post.ownerId,
             metrics: { likes: post.metrics.likes, comments: post.metrics.comments },
             raw:
-              post.ownerDeleted === true
+              post.ownerDeleted === true || post.removedByCategory != null
                 ? {
                     score: null,
                     upvoteRatio: null,
                     numComments: null,
                     numCrossposts: null,
-                    removedByCategory: null,
-                    authorDeleted: true,
+                    removedByCategory: post.removedByCategory ?? null,
+                    authorDeleted: post.ownerDeleted === true,
                   }
                 : null,
+            deletionDetector: REDDIT_POST_DETAIL_DELETION_DETECTOR,
             status,
           },
     ),

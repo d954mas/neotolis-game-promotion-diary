@@ -92,6 +92,9 @@ export const REDACT_PATHS = [
   "*.client_secret",
   "req.headers.authorization",
   "req.headers.cookie",
+  "req.headers.x-api-key",
+  "*.headers.x-api-key",
+  "*.x-api-key",
   // Phase 7 — Observability.
   "*.ALERT_WEBHOOK_URL",
   "*.alertWebhookUrl",

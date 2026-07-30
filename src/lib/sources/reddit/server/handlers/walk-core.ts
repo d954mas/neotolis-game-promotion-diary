@@ -674,7 +674,7 @@ export async function runRedditWalk(job: RedditWalkJob, config: RedditWalkConfig
     collected,
     subscribers,
     ownedUsernames,
-    coveredTarget: widenedSubscriber?.backfillTargetSince ?? target,
+    coveredTarget: target,
     startedFromTop,
     walkedComplete: state.complete,
     paused: pausedThisTick || notFound,

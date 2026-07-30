@@ -137,6 +137,7 @@ function singlePost(overrides: Partial<RedditSinglePost> = {}): RedditSinglePost
     ownerUsername: "d954mas",
     permalink: null,
     subredditSlug: "gamedev",
+    removedByCategory: null,
     ...overrides,
   };
 }
@@ -450,26 +451,35 @@ describe("reddit paste preview (single-post fetch, adapter seam)", () => {
     expect(await resolveCachedExternalId("https://example.com/not-a-reddit")).toBeNull();
   });
 
-  it("[review-P2] a subreddit-less link (redd.it / reddit.com/comments) is recognition-only: explicit cause, NO fetch, NO cap slot", async () => {
+  it("[review-P2] a redd.it short link is recognition-only: explicit cause, NO fetch, NO cap slot", async () => {
     const user = await seedUserDirectly({ email: `rdt-preview-short-${uniq()}@t.io` });
     single.next = singlePost();
 
-    for (const url of ["https://redd.it/short1", "https://www.reddit.com/comments/short2"]) {
-      const result = await fetchEventPreviewMetadata(url, {
-        userId: user.id,
-        ipAddress: "127.0.0.1",
-      });
-      expect(result.kind).toBe("unreachable");
-      if (result.kind !== "unreachable") throw new Error("unreachable");
-      // NOT the generic "unavailable" (indistinguishable from a deleted post): the
-      // provider has no lookup-by-id and no subreddit to search, so this can never
-      // resolve and the user needs to be told to paste the full permalink.
-      expect(result.cause).toBe("reddit_short_link_unsupported");
-    }
+    const result = await fetchEventPreviewMetadata("https://redd.it/short1", {
+      userId: user.id,
+      ipAddress: "127.0.0.1",
+    });
+    expect(result.kind).toBe("unreachable");
+    if (result.kind !== "unreachable") throw new Error("unreachable");
+    expect(result.cause).toBe("reddit_short_link_unsupported");
     // The early-out happens BEFORE both the provider call and the cap gate — pre-fix the
     // cap-counter row was written for a request that never left the process.
     expect(single.calls).toHaveLength(0);
     expect((await getUserQuotaUsedToday(user.id, PLATFORM)).requests).toBe(0);
+  });
+
+  it("[review-P2] a subreddit-less /comments/<id> URL resolves through exact detail", async () => {
+    const user = await seedUserDirectly({ email: `rdt-preview-bare-${uniq()}@t.io` });
+    single.next = singlePost({ id: "t3_bare2", shortcode: "bare2" });
+
+    const result = await fetchEventPreviewMetadata("https://www.reddit.com/comments/bare2", {
+      userId: user.id,
+      ipAddress: "127.0.0.1",
+    });
+
+    expect(result.kind).toBe("ok");
+    expect(single.calls).toHaveLength(1);
+    expect(single.calls[0]!.url).toBe("https://www.reddit.com/comments/bare2");
   });
 
   it("[review-P1] an ISSUED-but-failed preview fetch still counts against the per-user cap", async () => {

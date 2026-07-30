@@ -28,12 +28,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { seedUserDirectly } from "./helpers.js";
 import type { NormalizedSinglePost } from "../../src/lib/sources/social-provider.js";
+import { AdapterError } from "../../src/lib/sources/errors.js";
 
 interface ScriptedSinglePost {
   next: NormalizedSinglePost | null;
+  error: Error | null;
   calls: Array<{ url: string; origin?: string }>;
 }
-const single: ScriptedSinglePost = { next: null, calls: [] };
+const single: ScriptedSinglePost = { next: null, error: null, calls: [] };
 let spend = { creditsUsed: 0, dailyCap: 1000, prepaidBalance: 5000 };
 
 vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (importOriginal) => {
@@ -51,6 +53,7 @@ vi.mock("../../src/lib/sources/reddit/server/provider/registry.js", async (impor
           opts: { origin?: string },
         ): Promise<NormalizedSinglePost | null> {
           single.calls.push({ url, origin: opts.origin });
+          if (single.error !== null) throw single.error;
           return single.next;
         },
         async fetchPosts() {
@@ -84,6 +87,8 @@ const { createEvent } = await import("../../src/lib/server/services/events-mutat
 const { redditAdapter } = await import("../../src/lib/sources/reddit/server/index.js");
 const { redditRefreshQueueTick, __resetRedditRefreshQueueWorkerForTest } =
   await import("../../src/lib/sources/reddit/server/handlers/refresh-queue-tick.js");
+const { handleDeletionPropagationCron } =
+  await import("../../src/lib/sources/reddit/server/handlers/deletion-propagation-cron.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -171,6 +176,7 @@ async function snapshotCount(shortId: string): Promise<number> {
 
 beforeEach(() => {
   single.next = null;
+  single.error = null;
   single.calls = [];
   spend = { creditsUsed: 0, dailyCap: 1000, prepaidBalance: 5000 };
   __resetRedditRefreshQueueWorkerForTest();
@@ -253,6 +259,26 @@ describe("reddit per-post refresh lane", () => {
     expect(snapshot!.commentCount).toBe(12);
   });
 
+  it("[review-P2] exact detail preserves removed_by_category as deletion evidence", async () => {
+    const u = await seedUserDirectly({ email: `rdtrq-removed-${uniq()}@t.io` });
+    const s = uniq().slice(0, 6);
+    const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
+    await seedCachedPost(s, url);
+    const evId = await seedEvent(u.id, s, url);
+    single.next = singlePost({
+      id: `t3_${s}`,
+      shortcode: s,
+      removedByCategory: "moderator",
+    });
+    await enqueue(evId, u.id, `t3_${s}`);
+
+    await redditRefreshQueueTick();
+
+    const post = await readPost(s);
+    expect(post!.deletionDetectedAt).not.toBeNull();
+    expect(post!.deletionDetectedBy).toBe("reddit_post_detail");
+  });
+
   it("[12-06 UAT] a service_post enrichment row upgrades an unknown-form post via the cron pool", async () => {
     const s = uniq().slice(0, 6);
     const url = `https://www.reddit.com/r/Catmemes/comments/${s}/x/`;
@@ -315,7 +341,10 @@ describe("reddit per-post refresh lane", () => {
     const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
     const flaggedAt = new Date(Date.now() - 3_600_000); // flagged 1h ago, within 48h grace
     const seededPolledAt = new Date("2026-06-02T00:00:00Z"); // seedCachedPost default
-    await seedCachedPost(s, url, { deletionDetectedAt: flaggedAt });
+    await seedCachedPost(s, url, {
+      deletionDetectedAt: flaggedAt,
+      deletionDetectedBy: "reddit_post_detail",
+    });
     const evId = await seedEvent(u.id, s, url);
     single.next = null; // bounded subreddit page did not contain this older post
     await enqueue(evId, u.id, `t3_${s}`);
@@ -394,6 +423,40 @@ describe("reddit per-post refresh lane", () => {
     expect(await snapshotCount(s)).toBe(1);
     const post = await readPost(s);
     expect(post!.lastPollStatus).toBe("ok");
+  });
+
+  it("[review-P1] an exact 404 on a source-less event starts the deletion clock and the 48h purge scrubs identity", async () => {
+    const u = await seedUserDirectly({ email: `rdtrq-404-${uniq()}@t.io` });
+    const s = uniq().slice(0, 6);
+    const url = `https://www.reddit.com/r/gamedev/comments/${s}/x/`;
+    await seedCachedPost(s, url);
+    const evId = await seedEvent(u.id, s, url);
+    await db.update(events).set({ authorHandle: "d954mas" }).where(eq(events.id, evId));
+    single.error = new AdapterError("exact post missing", { category: "not-found" });
+    await enqueue(evId, u.id, `t3_${s}`);
+
+    await redditRefreshQueueTick();
+
+    const flagged = await readPost(s);
+    expect(flagged!.lastPollStatus).toBe("not_found");
+    expect(flagged!.deletionDetectedAt).not.toBeNull();
+    expect(flagged!.deletionDetectedBy).toBe("reddit_post_detail");
+
+    await db
+      .update(redditPosts)
+      .set({ deletionDetectedAt: new Date(Date.now() - 49 * 3_600_000) })
+      .where(eq(redditPosts.postId, `t3_${s}`));
+    await handleDeletionPropagationCron();
+
+    const purged = await readPost(s);
+    expect(purged!.author).toBeNull();
+    expect(purged!.authorFullname).toBeNull();
+    const [event] = await db
+      .select({ sourceId: events.sourceId, authorHandle: events.authorHandle })
+      .from(events)
+      .where(eq(events.id, evId));
+    expect(event!.sourceId, "the regression is the source-less paste path").toBeNull();
+    expect(event!.authorHandle).toBeNull();
   });
 
   it("[review-P0] a service row's cache miss NEVER falls back to tenant events (skip, no fetch)", async () => {

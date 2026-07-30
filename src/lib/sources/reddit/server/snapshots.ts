@@ -60,6 +60,10 @@ export type SnapshotStatus =
   | "rate_limited"
   | "inconclusive";
 
+/** Post-level deletion evidence from exact detail (or its forward-compatible
+ * `removed_by_category` field), independent of account/subreddit walk subjects. */
+export const REDDIT_POST_DETAIL_DELETION_DETECTOR = "reddit_post_detail";
+
 export interface WriteSnapshotArgs {
   /** reddit_posts.post_id — the t3_<base36> fullname. Keys the UPSERT + the snapshot
    *  INSERT. */
@@ -115,6 +119,10 @@ export interface WriteSnapshotArgs {
     removedByCategory: string | null;
     authorDeleted?: boolean;
   } | null;
+  /** Passing a detector on a healthy observation clears only that detector's flag. */
+  deletionDetector?: string;
+  /** Exact-detail 404 is terminal evidence, unlike a bounded feed miss. */
+  confirmedDeleted?: boolean;
   /** Outcome label written to reddit_posts.last_poll_status. */
   status: SnapshotStatus;
 }
@@ -124,7 +132,9 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
   //   marks the POST as removed. An author tombstone is separate: Reddit can keep the
   //   post public after its author deletes their account, so that signal only clears
   //   author identity below and must not start the post-deletion clock.
-  const detectDeletion = args.raw?.removedByCategory != null;
+  const detectDeletion = args.confirmedDeleted === true || args.raw?.removedByCategory != null;
+  const deletionDetector =
+    args.deletionDetector ?? (detectDeletion ? REDDIT_POST_DETAIL_DELETION_DETECTOR : null);
   const authorDeleted = args.raw?.authorDeleted === true;
   const now = new Date();
   await db.transaction(async (tx) => {
@@ -148,6 +158,7 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         authorFullname: args.authorFullname ?? null,
         // First-detect on INSERT: set now iff the belt fired this write.
         deletionDetectedAt: detectDeletion ? now : null,
+        deletionDetectedBy: detectDeletion ? deletionDetector : null,
         fetchedAt: now,
         lastPolledAt: now,
         lastPollStatus: args.status,
@@ -177,22 +188,45 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
           //   set, author still present) freezing is a no-op — the value is kept.
           author: authorDeleted
             ? null
-            : sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.author} ELSE COALESCE(${args.author ?? null}, ${redditPosts.author}) END`,
+            : deletionDetector === null
+              ? sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.author} ELSE COALESCE(${args.author ?? null}, ${redditPosts.author}) END`
+              : sql`CASE
+                  WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL
+                    AND ${redditPosts.deletionDetectedBy} IS DISTINCT FROM ${deletionDetector}
+                    THEN ${redditPosts.author}
+                  ELSE COALESCE(${args.author ?? null}, ${redditPosts.author})
+                END`,
           authorFullname: authorDeleted
             ? null
-            : sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.authorFullname} ELSE COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname}) END`,
-          // ★ The write path NEVER CLEARS deletion_detected_at (12-SPIKE + review fix).
-          //   reddit_posts is ONE shared row per post, but "deleted" is subject-relative
-          //   (an author-deleted post is still alive in its subreddit's feed). A blanket
-          //   ok-write clear here let a subreddit walk wipe the author walk's 48h GDPR
-          //   purge clock. Clearing now lives ONLY in the subject-scoped reconcile
-          //   (walk-core clearReappearedDeletions), which un-flags a post ONLY when the
-          //   SAME subject that set the flag re-sights it. The write path only SETS
-          //   (first-detect) via the removed_by_category belt: COALESCE keeps the
-          //   earliest timestamp (idempotent); every other write leaves it untouched.
+            : deletionDetector === null
+              ? sql`CASE WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL THEN ${redditPosts.authorFullname} ELSE COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname}) END`
+              : sql`CASE
+                  WHEN ${redditPosts.deletionDetectedAt} IS NOT NULL
+                    AND ${redditPosts.deletionDetectedBy} IS DISTINCT FROM ${deletionDetector}
+                    THEN ${redditPosts.authorFullname}
+                  ELSE COALESCE(${args.authorFullname ?? null}, ${redditPosts.authorFullname})
+                END`,
+          // A healthy observation may clear only a flag attributed to its own
+          // detector. Subject-less writes remain conservative and never clear.
           deletionDetectedAt: detectDeletion
             ? sql`COALESCE(${redditPosts.deletionDetectedAt}, ${now})`
-            : sql`${redditPosts.deletionDetectedAt}`,
+            : deletionDetector === null
+              ? sql`${redditPosts.deletionDetectedAt}`
+              : sql`CASE
+                  WHEN ${redditPosts.deletionDetectedBy} = ${deletionDetector} THEN NULL
+                  ELSE ${redditPosts.deletionDetectedAt}
+                END`,
+          deletionDetectedBy: detectDeletion
+            ? sql`CASE
+                WHEN ${redditPosts.deletionDetectedAt} IS NULL THEN ${deletionDetector}
+                ELSE ${redditPosts.deletionDetectedBy}
+              END`
+            : deletionDetector === null
+              ? sql`${redditPosts.deletionDetectedBy}`
+              : sql`CASE
+                  WHEN ${redditPosts.deletionDetectedBy} = ${deletionDetector} THEN NULL
+                  ELSE ${redditPosts.deletionDetectedBy}
+                END`,
           lastPolledAt: now,
           lastPollStatus: args.status,
           pollFailureCount: args.status === "ok" ? 0 : sql`${redditPosts.pollFailureCount} + 1`,

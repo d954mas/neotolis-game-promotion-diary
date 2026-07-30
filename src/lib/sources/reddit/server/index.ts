@@ -62,12 +62,17 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { and, eq, desc, isNull, sql } from "drizzle-orm";
 import { redditPosts } from "$lib/server/db/schema/index.js";
 import { redditAccountAdapterCore } from "./adapter.js";
-import { redditParsePostUrl, redditParseShareUrl, redditParseSourceUrl } from "./url.js";
+import {
+  redditIsShortPostUrl,
+  redditParsePostUrl,
+  redditParseShareUrl,
+  redditParseSourceUrl,
+} from "./url.js";
 import { buildRedditTitle } from "./normalize.js";
 import { getSocialThrottleState } from "./quota.js";
 import { getSocialProvider } from "./provider/registry.js";
 import type { RedditSocialProvider } from "./provider/scrapecreators-reddit.js";
-import { writeSnapshot } from "./snapshots.js";
+import { REDDIT_POST_DETAIL_DELETION_DETECTOR, writeSnapshot } from "./snapshots.js";
 import {
   readRedditBackfillState,
   resetRedditBackfillState,
@@ -521,12 +526,11 @@ async function enqueueRefreshNow(input: {
     .limit(1);
   if (event === undefined) throw new NotFoundError();
   const parsed = event.url === null ? null : redditParsePostUrl(event.url);
-  const subreddit = (parsed?.metadata?.subreddit as string | null | undefined) ?? null;
   // An event still carrying a raw /s/ share URL (a manual save whose preview never
   // resolved) has no cached post identity to refresh — same dead-end as redd.it.
   const unresolvedShare =
     parsed === null && event.url !== null && redditParseShareUrl(event.url) !== null;
-  if ((parsed !== null && subreddit === null) || unresolvedShare) {
+  if ((event.url !== null && redditIsShortPostUrl(event.url)) || unresolvedShare) {
     throw new AppError(
       "Reddit URL has no subreddit feed to refresh",
       "reddit_short_link_unsupported",
@@ -583,8 +587,7 @@ async function fetchEventPreviewMetadata(
   // "unavailable" (indistinguishable from a deleted post). The URL still parses, so the
   // user can save the event as a stats-less manual card — or re-paste the full
   // /r/<sub>/comments/<id> permalink to get live data.
-  const parsedSubreddit = (parsed?.metadata?.subreddit as string | null | undefined) ?? null;
-  if (parsed !== null && parsedSubreddit === null) {
+  if (parsed !== null && redditIsShortPostUrl(canonicalUrl)) {
     return { kind: "unreachable", cause: "reddit_short_link_unsupported" };
   }
 
@@ -667,16 +670,17 @@ async function fetchEventPreviewMetadata(
     authorFullname: post.ownerId,
     metrics: { likes: post.metrics.likes, comments: post.metrics.comments },
     raw:
-      post.ownerDeleted === true
+      post.ownerDeleted === true || post.removedByCategory != null
         ? {
             score: null,
             upvoteRatio: null,
             numComments: null,
             numCrossposts: null,
-            removedByCategory: null,
-            authorDeleted: true,
+            removedByCategory: post.removedByCategory ?? null,
+            authorDeleted: post.ownerDeleted === true,
           }
         : null,
+    deletionDetector: REDDIT_POST_DETAIL_DELETION_DETECTOR,
     status: "ok",
   });
 

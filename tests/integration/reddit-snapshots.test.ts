@@ -312,6 +312,7 @@ describe("reddit snapshots write path (Phase 12)", () => {
     });
     const detected = (await readPost(postId))!.deletionDetectedAt;
     expect(detected).not.toBeNull();
+    expect((await readPost(postId))!.deletionDetectedBy).toBe("reddit_post_detail");
 
     // A THIRD write with the field still set must NOT move the timestamp
     // (idempotent first-detect — the grace clock never resets).

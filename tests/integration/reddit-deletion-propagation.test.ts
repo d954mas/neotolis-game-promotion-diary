@@ -55,7 +55,8 @@ const { dataSources } = await import("../../src/lib/server/db/schema/data-source
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { user } = await import("../../src/lib/server/db/schema/auth.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
-const { redditPosts } = await import("../../src/lib/server/db/schema/index.js");
+const { adapterRefreshQueue, redditPosts } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { normalizeRedditFeed } = await import("../../src/lib/sources/reddit/server/normalize.js");
 const { handleBackfillAccount } =
   await import("../../src/lib/sources/reddit/server/handlers/backfill-account.js");
@@ -64,6 +65,7 @@ const { handleDeletionPropagationCron } =
 const { resetSocialDailyCap } = await import("../../src/lib/sources/reddit/server/quota.js");
 const { writeRedditBackfillState } =
   await import("../../src/lib/sources/reddit/server/backfill-state.js");
+const { redditAdapter } = await import("../../src/lib/sources/reddit/server/index.js");
 
 const DAY = 86_400_000;
 const uniq = (): string => Math.random().toString(36).slice(2, 8);
@@ -378,6 +380,20 @@ describe("reddit deletion propagation (D-06 Variant A — Phase 12)", () => {
       redditParsePostUrl(scrubbedEvent!.url!),
       "the anonymized url still parses as a reddit_post (PATCH stays possible)",
     ).not.toBeNull();
+    await redditAdapter.refreshQueue!.enqueue({
+      eventId: profileEvent!.id,
+      userId: u.id,
+      externalId: `t3_${profileId}`,
+      eventKind: "reddit_post",
+    });
+    const [refresh] = await db
+      .select({ status: adapterRefreshQueue.status })
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.userId, u.id))
+      .limit(1);
+    expect(refresh?.status, "the purge-generated /comments/<id> URL remains refreshable").toBe(
+      "pending",
+    );
 
     // Nothing in a COMMUNITY post's url/slug identifies the author, so those stay as-is
     // — but the event's author_handle DOES, so it is scrubbed for every purged post.
