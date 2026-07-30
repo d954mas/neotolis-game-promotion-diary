@@ -172,7 +172,7 @@
   "sources_owned_by_me": "Mine",
   "sources_owned_by_other": "Tracking",
   "sources_kind_disabled_tooltip": "{kind} — {status}. Schema is ready; the polling adapter isn't.",
-  "sources_kind_disabled_tooltip_not_configured": "{kind} — not configured by operator. A self-host operator enables it by setting the required environment variables.",
+  "sources_kind_disabled_tooltip_not_configured": "{kind} — not configured by operator. A self-host operator enables it by setting {env}.",
   "steam_listing_open_link_label": "Open on Steam",
   "steam_listing_remove_aria": "Remove listing",
   "steam_listing_duplicate_active_prefix": "This Steam app is already attached to a game —",

@@ -76,6 +76,9 @@
     value: SourceKind;
     labelKey: KindLabelKey;
     statusKey: KindStatusKey | null;
+    /** Operator env var(s) for the not-configured tooltip — the chip status stays
+     *  the short "not configured" (12-06 UAT), so the tooltip carries the detail. */
+    envVar: string | null;
     disabled: boolean;
     disabledReason: DisabledReason | null;
   };
@@ -235,7 +238,10 @@
     // generic "schema ready, adapter isn't" tail would mislead a self-host
     // operator (issue #64) — use the configuration-focused copy instead.
     if (entry.disabledReason === "not-configured") {
-      return m.sources_kind_disabled_tooltip_not_configured({ kind: kindLabel });
+      return m.sources_kind_disabled_tooltip_not_configured({
+        kind: kindLabel,
+        env: entry.envVar ?? "the required environment variables",
+      });
     }
     const status = statusFor(entry.statusKey) ?? "";
     return m.sources_kind_disabled_tooltip({ kind: kindLabel, status });

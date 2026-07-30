@@ -66,6 +66,14 @@ export type KindMatrixEntry = {
   statusKey: KindStatusKey | null;
   disabled: boolean;
   disabledReason: DisabledReason | null;
+  /** The operator env var(s) that turn this kind ON, named in the not-configured
+   *  TOOLTIP. The chip itself only shows the short "not configured" status — a full
+   *  env-var sentence inside a compact legend chip blew the legend up (12-06 UAT),
+   *  doubly so for Reddit's u/ + r/ plate pair — but a self-host operator still has
+   *  to learn WHICH variable to set, and the tooltip is the place that costs no
+   *  layout. null for kinds with nothing to configure (always-on) or not built yet
+   *  (those render the "schema ready, adapter isn't" tooltip instead). */
+  envVar: string | null;
 };
 
 // Static per-UI-kind facts that are NOT derivable: the human label key, the
@@ -80,6 +88,9 @@ const UI_KINDS: ReadonlyArray<{
   // a real key only for kinds that can render disabled (not-built / not-configured).
   statusKey: KindStatusKey | null;
   probeKind: SourceKind;
+  /** Operator env var(s) named in the not-configured tooltip; null when there is
+   *  nothing to configure. Static per-kind fact — exactly what this table is for. */
+  envVar: string | null;
 }> = [
   {
     value: "youtube_channel",
@@ -88,42 +99,49 @@ const UI_KINDS: ReadonlyArray<{
     // disabled → no status string of its own (null, not a borrowed placeholder).
     statusKey: null,
     probeKind: "youtube_channel",
+    envVar: null,
   },
   {
     value: "reddit",
     labelKey: "common_kind_reddit",
     statusKey: "source_kind_status_reddit_account",
     probeKind: "reddit_account",
+    envVar: "REDDIT_IMPORT_ENABLED=true (plus REDDIT_PROVIDER)",
   },
   {
     value: "instagram_account",
     labelKey: "source_kind_label_instagram_account",
     statusKey: "source_kind_status_instagram_account",
     probeKind: "instagram_account",
+    envVar: "INSTAGRAM_PROVIDER",
   },
   {
     value: "tiktok_account",
     labelKey: "source_kind_label_tiktok_account",
     statusKey: "source_kind_status_tiktok_account",
     probeKind: "tiktok_account",
+    envVar: "TIKTOK_PROVIDER",
   },
   {
     value: "twitter_account",
     labelKey: "source_kind_label_twitter_account",
     statusKey: "source_kind_status_twitter_account",
     probeKind: "twitter_account",
+    envVar: "TWITTER_PROVIDER",
   },
   {
     value: "telegram_channel",
     labelKey: "source_kind_label_telegram_channel",
     statusKey: "source_kind_status_telegram_channel",
     probeKind: "telegram_channel",
+    envVar: null,
   },
   {
     value: "discord_server",
     labelKey: "source_kind_label_discord_server",
     statusKey: "source_kind_status_discord_server",
     probeKind: "discord_server",
+    envVar: null,
   },
 ];
 
@@ -151,6 +169,7 @@ export function buildKindMatrix(): KindMatrixEntry[] {
         value: ui.value,
         labelKey: ui.labelKey,
         statusKey: ui.statusKey,
+        envVar: ui.envVar,
         disabled: true,
         disabledReason: "not-built",
       };
@@ -166,6 +185,7 @@ export function buildKindMatrix(): KindMatrixEntry[] {
         value: ui.value,
         labelKey: ui.labelKey,
         statusKey: ui.statusKey,
+        envVar: ui.envVar,
         disabled: true,
         disabledReason: "not-configured",
       };
@@ -174,6 +194,7 @@ export function buildKindMatrix(): KindMatrixEntry[] {
       value: ui.value,
       labelKey: ui.labelKey,
       statusKey: null,
+      envVar: null,
       disabled: false,
       disabledReason: null,
     };

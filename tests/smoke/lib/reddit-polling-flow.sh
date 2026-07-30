@@ -24,11 +24,12 @@
 #          isRedditConfigured() false because REDDIT_IMPORT_ENABLED != "true").
 #          Never a 500, never a created row. createSource degrades BEFORE any
 #          provider call, so the 422 never touches the network.
-#   RDT.2  /sources/new HTML renders the Reddit chip disabled with the Reddit-
-#          specific "Set REDDIT_IMPORT_ENABLED to enable Reddit import" status
-#          (source_kind_status_reddit_account). That status only renders when the
-#          chip's kindMatrix entry is disabled+not-configured, so its presence is
-#          the user-facing proof Reddit is off + how to enable it.
+#   RDT.2  /sources/new HTML renders the Reddit chip disabled ("not configured")
+#          AND names REDDIT_IMPORT_ENABLED in that chip's title= tooltip. Both only
+#          render when the chip's kindMatrix entry is disabled+not-configured, so
+#          together they are the user-facing proof Reddit is off + how to enable it.
+#          (12-06 UAT split the two: the compact chip carries the state, the tooltip
+#          carries the variable name — a full env sentence in the chip ate the legend.)
 #
 # Helpers (log, fail) are inherited from the caller (tests/smoke/self-host.sh).
 
@@ -67,23 +68,35 @@ reddit_not_configured_smoke() {
   fi
   log "(RDT.1) PASS — reddit_account create degrades to 422 kind_not_configured (no 500, no provider call)"
 
-  # RDT.2: /sources/new HTML renders the Reddit chip visible-but-disabled with the
-  # Reddit-specific "Set REDDIT_IMPORT_ENABLED to enable Reddit import" status —
-  # the user-facing affordance that tells a self-host operator Reddit is off + how
-  # to enable it. /sources/new is the full-page add-source form, so the disabled
-  # Reddit chip + its status render inline at SSR (the /sources modal is closed by
-  # default, so its chip markup isn't in that page's initial HTML). The status
-  # small only renders when the chip's kindMatrix entry is disabled, and Reddit is
-  # in FUNCTIONAL_KINDS, so a disabled Reddit chip is definitionally not-configured.
+  # RDT.2: /sources/new HTML renders the Reddit chip visible-but-disabled AND names
+  # the env var that turns it on — the affordance that tells a self-host operator
+  # Reddit is off + how to enable it. /sources/new is the full-page add-source form,
+  # so the disabled Reddit chip renders inline at SSR (the /sources modal is closed
+  # by default, so its chip markup isn't in that page's initial HTML). Both halves
+  # only render when the chip's kindMatrix entry is disabled, and Reddit is in
+  # FUNCTIONAL_KINDS, so a disabled Reddit chip is definitionally not-configured.
+  #
+  # 12-06 UAT moved WHERE each half lives: the chip's status text is now the short
+  # "not configured" (a full env-var sentence inside a compact legend chip blew the
+  # legend up, doubly so across Reddit's u/ + r/ plate pair), and the variable name
+  # moved into the chip's title= tooltip. Both are still in the SSR HTML, so this
+  # gate asserts BOTH — the disabled state and the operator-actionable variable —
+  # instead of one sentence that happened to carry both.
   local rdt_sources_html
   rdt_sources_html=$(curl -sL -H "cookie: $session_cookie" "$app_url/sources/new" 2>/dev/null || true)
-  if ! echo "$rdt_sources_html" | grep -q 'Set REDDIT_IMPORT_ENABLED to enable Reddit import'; then
+  if ! echo "$rdt_sources_html" | grep -q 'REDDIT_IMPORT_ENABLED'; then
     log "----- /sources/new HTML (first 1500 chars) -----"
     echo "${rdt_sources_html:0:1500}"
     log "------------------------------------------------"
-    fail "(RDT.2) /sources/new HTML should render the Reddit 'Set REDDIT_IMPORT_ENABLED to enable Reddit import' disabled status with the Reddit provider unset"
+    fail "(RDT.2) /sources/new HTML should NAME REDDIT_IMPORT_ENABLED (disabled-chip tooltip) with the Reddit provider unset — a self-host operator has no other way to learn what to set"
   fi
-  log "(RDT.2) PASS — /sources/new renders Reddit disabled ('Set REDDIT_IMPORT_ENABLED to enable Reddit import')"
+  if ! echo "$rdt_sources_html" | grep -q 'not configured'; then
+    log "----- /sources/new HTML (first 1500 chars) -----"
+    echo "${rdt_sources_html:0:1500}"
+    log "------------------------------------------------"
+    fail "(RDT.2) /sources/new HTML should render the Reddit chip's 'not configured' disabled status with the Reddit provider unset"
+  fi
+  log "(RDT.2) PASS — /sources/new renders Reddit disabled ('not configured') + names REDDIT_IMPORT_ENABLED in the chip tooltip"
 
   log "=== Reddit not-configured parity PASSED ==="
 }

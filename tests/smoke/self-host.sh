@@ -489,8 +489,8 @@ log "=== YouTube polling smoke extension PASSED ==="
 # (sourced below):
 #   - RDT.1 POST /api/sources {kind:"reddit_account", …} → 422
 #     kind_not_configured (the createSource provider gate), never a 500.
-#   - RDT.2 /sources/new HTML renders the Reddit chip disabled with the
-#     "Set REDDIT_IMPORT_ENABLED to enable Reddit import" status.
+#   - RDT.2 /sources/new HTML renders the Reddit chip disabled ("not configured")
+#     and names REDDIT_IMPORT_ENABLED in that chip's tooltip.
 #
 # No live ScrapeCreators API is hit (mirrors the YouTube-mock / no-live-API
 # discipline): createSource degrades BEFORE any provider call, so the 422 never

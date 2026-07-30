@@ -176,7 +176,13 @@
     // generic "schema ready, adapter isn't" tail would mislead a self-host
     // operator (issue #64) — use the configuration-focused copy instead.
     if (entry.disabledReason === "not-configured") {
-      return m.sources_kind_disabled_tooltip_not_configured({ kind: kindLabel });
+      // Name the actual variable(s) when the matrix knows them — the chip's status is
+      // deliberately just "not configured", so this tooltip is the only place on the
+      // page that tells a self-host operator WHAT to set (smoke RDT.2 asserts it).
+      return m.sources_kind_disabled_tooltip_not_configured({
+        kind: kindLabel,
+        env: entry.envVar ?? "the required environment variables",
+      });
     }
     const status = statusFor(entry.statusKey) ?? "";
     return m.sources_kind_disabled_tooltip({ kind: kindLabel, status });
